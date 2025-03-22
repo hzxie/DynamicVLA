@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-20 14:41:09
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-03-21 19:31:23
+# @Last Modified at: 2025-03-22 12:19:10
 # @Email:  root@haozhexie.com
 #
 # References:
@@ -13,6 +13,7 @@
 import argparse
 import json
 import logging
+import math
 import numpy as np
 import os
 import sys
@@ -23,6 +24,15 @@ PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.p
 sys.path.append(PROJECT_HOME)
 
 import helpers.maya
+
+
+def _get_furniture_category(model):
+    super_category = model["super-category"]
+    category = model["category"]
+    if super_category.find("/") == -1:
+        return super_category
+    else:
+        return category.split("/")[0].strip()
 
 
 def _get_instances(definition):
@@ -138,7 +148,7 @@ def _get_materials(definition):
     return materials
 
 
-def _get_furnitures(definition):
+def _get_furnitures(definition, furniture_categories):
     furnitures = {}
     for furniture in definition["furniture"]:
         # Example: 32210/model
@@ -150,18 +160,18 @@ def _get_furnitures(definition):
         furnitures[furniture_id] = {
             # Example: "a3017175-01da-4bbb-a3f4-aa896e3fa604"
             "jid": furniture["jid"],
-            # Example: "window/floor-based window"
-            "title": furniture["title"] if "title" in furniture else "",
+            # Example: Chair
+            "category": furniture_categories.get(furniture["jid"], "unknown"),
         }
 
     return furnitures
 
 
-def get_house_layout(definition):
+def get_house_layout(definition, furniture_categories):
     instances = _get_instances(definition)
     meshes = _get_meshes(definition)
     materials = _get_materials(definition)
-    furnitures = _get_furnitures(definition)
+    furnitures = _get_furnitures(definition, furniture_categories)
     return {
         "instances": instances,
         "meshes": meshes,
@@ -195,8 +205,7 @@ def _get_shader(maya_ctl, material):
     # Set transparency (Alpha is 1 - given alpha value)
     maya_ctl.send_python_command(
         "cmds.setAttr(f'{shader}.transparency', %f, %f, %f, type='double3')"
-        % ((1 - color[3],)* 3)
-        
+        % ((1 - color[3],) * 3)
     )
     # Connect shader to shading group
     maya_ctl.send_python_command(
@@ -206,8 +215,61 @@ def _get_shader(maya_ctl, material):
     return shader_name
 
 
-def _add_furniture_to_scene(maya_ctl):
-    pass
+def _get_euler_from_quaternion(qx, qy, qz, qw):
+    t0 = +2.0 * (qw * qx + qy * qz)
+    t1 = +1.0 - 2.0 * (qx * qx + qy * qy)
+    roll = math.atan2(t0, t1)
+
+    t2 = +2.0 * (qw * qy - qz * qx)
+    t2 = +1.0 if t2 > +1.0 else t2
+    t2 = -1.0 if t2 < -1.0 else t2
+    pitch = math.asin(t2)
+
+    t3 = +2.0 * (qw * qz + qx * qy)
+    t4 = +1.0 - 2.0 * (qy * qy + qz * qz)
+    yaw = math.atan2(t3, t4)
+
+    return roll, pitch, yaw  # in radians
+
+
+def _add_furniture_to_scene(maya_ctl, object_id, furniture):
+    furniture_name = "%s_%05d" % (furniture["category"], object_id)
+
+    if furniture["position"][1] > 1:
+        maya_ctl.send_python_command(
+            "cmds.pointLight(position=[%f, %f, %f], name='%s', intensity=20)"
+            % (
+                furniture["position"][0],
+                furniture["position"][1],
+                furniture["position"][2],
+                furniture_name,
+            )
+        )
+        maya_ctl.send_python_command("cmds.parent('%s', 'lights')" % furniture_name)
+
+    maya_ctl.send_python_command(
+        "cmds.file('%s', i=True, gr=True, gn='furniture_group', mergeNamespacesOnClash=True, namespace='%s')"
+        % (furniture["model"].replace("\\", "/"), furniture_name)
+    )
+    # Set the position and rotation of the furniture
+    maya_ctl.set_object_world_transform("furniture_group", furniture["position"])
+    maya_ctl.set_object_local_rotation(
+        "furniture_group",
+        np.rad2deg(_get_euler_from_quaternion(*furniture["rotation"])),
+    )
+    # Scale the furniture
+    maya_ctl.set_object_attribute("furniture_group", "scaleX", furniture["scale"][0])
+    maya_ctl.set_object_attribute("furniture_group", "scaleY", furniture["scale"][1])
+    maya_ctl.set_object_attribute("furniture_group", "scaleZ", furniture["scale"][2])
+    # Triangulate the furniture
+    maya_ctl.send_command("polyTriangulate -ch 1 furniture_group")
+    maya_ctl.send_command("select -r furniture_group")
+    maya_ctl.send_command("DeleteHistory")
+    # Rename the furniture
+    maya_ctl.send_python_command("cmds.parent('furniture_group', 'furniture')")
+    maya_ctl.send_python_command(
+        "cmds.rename('furniture_group', '%s')" % furniture_name
+    )
 
 
 def _get_openmaya_mesh(vertices, faces):
@@ -273,7 +335,6 @@ def _add_mesh_to_scene(maya_ctl, object_id, mesh, shader_name):
     group_name = ""
     require_hide = False
     require_project_uv = False
-
     if "Ceiling" in mesh["type"]:
         group_name = "ceilings"
         require_project_uv = ("planar", "y")
@@ -307,39 +368,78 @@ def add_instance_meshes_to_scene(maya_ctl, layout, model_dir):
     n_objects = 0
     # Create shared shaders
     maya_ctl.send_python_command("shaders = {}")
-    for k, v in tqdm(layout["instances"].items(), desc="Parsing meshes"):
+    for k, v in tqdm(layout["instances"].items()):
+        n_objects += 1
         if k.startswith("furniture/"):
-            pass
+            if v["ref"] not in layout["furnitures"]:
+                # logging.warning("Furniture not found: %s", v["ref"])
+                continue
+
+            furniture = layout["furnitures"][v["ref"]]
+            furniture = {
+                "model": os.path.join(model_dir, furniture["jid"], "raw_model.obj"),
+                "texture": os.path.join(model_dir, furniture["jid"], "texture.png"),
+                "category": furniture["category"],
+            }
+            if not os.path.exists(furniture["model"]):
+                # logging.warning("Model not found: %s", furniture["model"])
+                continue
+            elif not os.path.exists(furniture["texture"]):
+                # logging.warning("Texture not found: %s", furniture["texture"])
+                continue
+            else:
+                _add_furniture_to_scene(
+                    maya_ctl, n_objects, dict(list(furniture.items()) + list(v.items()))
+                )
         elif k.startswith("mesh/"):
             mesh = layout["meshes"][v["ref"]]
-            shader_name = _get_shader(maya_ctl, layout["materials"][mesh["material_id"]])
+            shader_name = _get_shader(
+                maya_ctl, layout["materials"][mesh["material_id"]]
+            )
             _add_mesh_to_scene(maya_ctl, n_objects, mesh, shader_name)
         else:
             logging.warning("Unknown instance type: %s", k)
             continue
 
-        n_objects += 1
 
+def main(maya_ctl, layout_dir, model_dir, output_dir):
+    GROUPS = [
+        "structure",
+        "ceilings",
+        "floors",
+        "windows",
+        "doors",
+        "furniture",
+        "lights",
+    ]
 
-def main(maya_ctl, layout_dir, model_dir):
+    logging.info("Loading furniture categories ...")
+    with open(os.path.join(model_dir, "model_info.json"), "r") as f:
+        models = json.load(f)
+        furniture_categories = {
+            m["model_id"]: _get_furniture_category(m) for m in models
+        }
+
+    logging.info("Exporting Layouts to USD files ...")
     layouts = os.listdir(layout_dir)
-    for lf in tqdm(layouts, desc="Parsing layouts"):
-        if lf != "00ecd021-64bb-4bc4-b754-1796d2a12965.json":
-            continue
-
+    for lf in tqdm(layouts):
         with open(os.path.join(layout_dir, lf), "r") as f:
-            layout = get_house_layout(json.load(f))
+            layout = get_house_layout(json.load(f), furniture_categories)
 
+        # Initialize a new scene
         maya_ctl.set_new_scene()
-        maya_ctl.send_python_command("cmds.group(em=True, name='structure')")
-        maya_ctl.send_python_command("cmds.group(em=True, name='ceilings')")
-        maya_ctl.send_python_command("cmds.group(em=True, name='floors')")
-        maya_ctl.send_python_command("cmds.group(em=True, name='windows')")
-        maya_ctl.send_python_command("cmds.group(em=True, name='doors')")
-        maya_ctl.send_python_command("cmds.group(em=True, name='furniture')")
-        maya_ctl.send_python_command("cmds.group(em=True, name='lights')")
+        for g in GROUPS:
+            maya_ctl.send_python_command("cmds.group(em=True, name='%s')" % g)
+
         # Add meshes to scene
         add_instance_meshes_to_scene(maya_ctl, layout, model_dir)
+        # Scale 100x
+        maya_ctl.send_python_command("cmds.scale(100, 100, 100, %s)" % GROUPS)
+        # Output the scene to USD
+        maya_ctl.send_python_command(
+            "cmds.file('%s', force=True, options='exportUVs=1;', type='USD Export', exportAll=True)"
+            % os.path.join(output_dir, lf.replace(".json", ".usd")).replace("\\", "/")
+        )
 
 
 if __name__ == "__main__":
@@ -354,6 +454,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_dir", default=os.path.join(PROJECT_HOME, os.pardir, "3D-FUTURE")
     )
+    parser.add_argument(
+        "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "USD")
+    )
     args = parser.parse_args()
 
     logging.info(
@@ -365,7 +468,16 @@ if __name__ == "__main__":
         logging.error("Please start the Maya server first.")
         sys.exit(1)
 
+    # Connect to Maya server
     maya_ctl = helpers.maya.MayaController(port=12345)
     maya_ctl.send_python_command("from maya.api import OpenMaya")
     logging.info("Connected to Maya Server.")
-    main(maya_ctl, args.layout_dir, args.model_dir)
+    # Load the Maya USD plugin
+    maya_ctl.send_python_command("cmds.loadPlugin('mayaUsdPlugin')")
+    if not maya_ctl.send_python_command(
+        "cmds.pluginInfo('mayaUsdPlugin', query=True, loaded=True)"
+    ).startswith("1"):
+        logging.error("Failed to load the Maya USD plugin.")
+        sys.exit(1)
+
+    main(maya_ctl, args.layout_dir, args.model_dir, args.output_dir)
