@@ -4,12 +4,13 @@
 # @Author: Wensi Ai (@wensi-ai)
 # @Date:   2025-03-20 14:46:01
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-03-20 15:15:03
+# @Last Modified at: 2025-03-24 16:52:26
 # @Email:  root@haozhexie.com
 #
 # Ref: https://github.com/arnold-benchmark/Usdify/blob/main/controller.py
 
 import socket
+
 import numpy as np
 
 
@@ -81,7 +82,7 @@ class MayaController:
     def set_new_scene(self):
         """Set new Maya empty scene"""
         send_message = "file -f -new;"
-        recv_message = self.send_command(send_message)
+        return self.send_command(send_message)
 
     def Set_current_time_frame(self, time_frame: int):
         """Set timeline in the Maya scene
@@ -90,7 +91,7 @@ class MayaController:
         :type time_frame: int
         """
         send_message = "currentTime -edit" + " " + str(time_frame) + ";"
-        recv_message = self.send_command(send_message)
+        return self.send_command(send_message)
 
     def set_object_world_transform(self, object_name: str, location: list):
         """Set world absolute location for object with location [x, y, z]
@@ -110,7 +111,7 @@ class MayaController:
             + str(location[2])
             + ";"
         )
-        recv_message = self.send_command(send_message)
+        return self.send_command(send_message)
 
     def move_object_world_relative(self, object_name: str, location: list):
         """Move an object relatively with location [x, y, z]
@@ -130,7 +131,7 @@ class MayaController:
             + str(location[2])
             + ";"
         )
-        recv_message = self.send_command(send_message)
+        return self.send_command(send_message)
 
     def set_object_local_transform(self, object_name: str, location: list):
         """Set world absolute location for object with location [x,y] or [x, y, z]
@@ -145,7 +146,7 @@ class MayaController:
             send_message += str(value) + " "
 
         send_message += ";"
-        recv_message = self.send_command(send_message)
+        return self.send_command(send_message)
 
     def set_object_local_rotation(self, object_name: str, rotation: list):
         """Set world absolute location for object with rotation [x,y] or [x, y, z] in degree
@@ -160,7 +161,7 @@ class MayaController:
             send_message += str(value) + "deg "
 
         send_message += ";"
-        recv_message = self.send_command(send_message)
+        return self.send_command(send_message)
 
     def set_current_key_frame_for_attribute(self, object_name: str, attr_name: str):
         """Set keyframe for object attribute
@@ -172,7 +173,7 @@ class MayaController:
         """
         send_message = "select -r " + object_name + ";"
         send_message += "setKeyframe -at " + attr_name + ";"
-        recv_message = self.send_command(send_message)
+        return self.send_command(send_message)
 
     def set_current_key_frame_for_position_and_rotation(self, object_name: str):
         """Set keyframe for object position and rotation
@@ -183,7 +184,7 @@ class MayaController:
         send_message = "select -r " + object_name + ";"
         send_message += "setKeyframe -at translate;"
         send_message += "setKeyframe -at rotate;"
-        recv_message = self.send_command(send_message)
+        return self.send_command(send_message)
 
     def set_current_key_frame_for_objects(self, object_list):
         """Set keyframe for a list of objects
@@ -195,7 +196,7 @@ class MayaController:
         for obj in object_list:
             send_message += '"' + str(obj) + '", '
         send_message = send_message[:-2] + "};"
-        recv_message = self.send_command(send_message)
+        return self.send_command(send_message)
 
     def set_object_attribute(self, object_name: str, attr_name: str, value: float):
         """Set object attriture with value
@@ -211,7 +212,7 @@ class MayaController:
         send_message = (
             "setAttr " + object_name + "." + attr_name + " " + str(value) + ";"
         )
-        recv_message = self.send_command(send_message)
+        return self.send_command(send_message)
 
     # def set_multiple_attributes(self, attributes: dict):
     #     '''
@@ -228,7 +229,6 @@ class MayaController:
         """Send undo command to socket server (Maya)"""
         send_message = "undo;"
         rec_message = self.send_command(send_message)
-        # print(rec_message)
         return rec_message
 
     def undo_to_beginning(self, max_step=200):
@@ -268,6 +268,7 @@ class MayaController:
 
         recv_message = self.send_command(send_message)
         print("(ScreenShot)", recv_message)
+        return recv_message
 
     # ---------------------------GET-----------------------------------
     def get_all_objects(self):

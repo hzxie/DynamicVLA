@@ -14,10 +14,10 @@ import argparse
 import json
 import logging
 import math
-import numpy as np
 import os
 import sys
 
+import numpy as np
 from tqdm import tqdm
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))

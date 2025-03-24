@@ -8,20 +8,20 @@
 # @Email:  root@haozhexie.com
 
 import argparse
-import cv2
-import easydict
 import importlib
 import logging
-import torch
 import os
 import sys
-import yaml
+from datetime import datetime
+from pprint import pprint
 
 import core
-import utils.distributed
+import cv2
+import easydict
+import torch
+import yaml
 
-from pprint import pprint
-from datetime import datetime
+import utils.distributed
 
 # Fix deadlock in DataLoader
 cv2.setNumThreads(0)

@@ -11,10 +11,10 @@
 import ctypes
 import math
 import os
+
 import pynvml
 import torch
 import torch.distributed
-
 
 pynvml.nvmlInit()
 

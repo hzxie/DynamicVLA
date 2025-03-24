@@ -175,7 +175,6 @@ profile_default/
 ipython_config.py
 
 # User data
-configs/
 datasets/
 notebooks/
 runs/
