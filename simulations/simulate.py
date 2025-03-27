@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-03-24 20:34:17
+# @Last Modified at: 2025-03-27 15:47:45
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -34,7 +34,7 @@ PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.p
 sys.path.append(os.path.dirname(__file__))
 
 
-def get_env_cfg(scene_dir, robot="franka"):
+def get_env_cfg(scene_dir, robot):
     # The following packages MUST be imported after the simulation app is created
     import configs.env_cfg
     import configs.scene_cfg
@@ -55,27 +55,38 @@ def get_env_cfg(scene_dir, robot="franka"):
         use_fabric=not args.disable_fabric,
     )
     # Dynamically create basic scene from USD files
-    usd_file = random.choice(os.listdir(scene_dir))
+    # usd_file = random.choice(os.listdir(scene_dir))
+    usd_file = "D:/Projects/DynamicVLA/USD/00004f89-9aa5-43c2-ae3c-129586be8aaa.usd"
     env_cfg.scene = configs.scene_cfg.set_house_asset(
         env_cfg.scene, os.path.join(scene_dir, usd_file)
     )
+
+    # Determine the table asset to place the robot and objects
+    tables = configs.scene_cfg.get_table_assets(usd_file)
+
     # TODO: Dynamically add objects to scene
     # env_cfg.scene = configs.scene_cfg.add_object_to_scene(env_cfg.scene)
-    # TODO: Determine the end-effector position
-    ee_position = [0, 0, 0]
+    # TODO: Determine the robot and final end-effector position
+    robot_position = [4.110867986164093, -0.7093499898910524, 4.522520022888184]
+    final_ee_position = [0.0, 0.0, 0.0]
     # TODO: Set the robot and end-effector frame
-    configs.env_cfg.set_robot(robot, env_cfg, ee_position)
+    configs.env_cfg.set_robot(robot, env_cfg, robot_position, final_ee_position)
 
     return env_cfg
 
 
 def main(simulation_app, args):
     # Create environment
-    cfg = get_env_cfg(args.scene_dir)
+    cfg = get_env_cfg(args.scene_dir, args.robot)
     env = gym.make("Robot-Env-Cfg-v0", cfg=cfg)
     # Reset environment at start
     env.reset()
-    # import pdb; pdb.set_trace()
+
+    # Perform actions in the environment
+    while simulation_app.is_running():
+        actions = torch.from_numpy(env.action_space.sample())
+        env.step(actions)
+
     # close the environment
     env.close()
 

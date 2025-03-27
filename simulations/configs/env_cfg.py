@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 21:04:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-03-24 20:33:24
+# @Last Modified at: 2025-03-27 15:26:05
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
@@ -12,6 +12,7 @@ from dataclasses import MISSING
 import configs.robot_cfg
 from configs.scene_cfg import SceneCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.envs.mdp.actions.actions_cfg import DifferentialInverseKinematicsActionCfg
 from isaaclab.managers import (
     CurriculumTermCfg,
     EventTermCfg,
@@ -176,11 +177,15 @@ class EnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physx.friction_correlation_distance = 0.00625
 
 
-def set_robot(robot: str, env_cfg: EnvCfg, ee_position: list) -> EnvCfg:
+def set_robot(
+    robot: str, env_cfg: EnvCfg, robot_position: list, final_ee_position: list
+) -> EnvCfg:
     assert robot in ["franka"], "Unknown robot: %s" % robot
     env_cfg.commands.object_pose.body_name = configs.robot_cfg.get_body_name(robot)
-    env_cfg.scene.ee_frame = configs.robot_cfg.get_ee_frame_cfg(robot, ee_position)
+    env_cfg.scene.ee_frame = configs.robot_cfg.get_ee_frame_cfg(
+        robot, final_ee_position
+    )
     env_cfg.scene.robot = configs.robot_cfg.get_robot_cfg(robot)
+    env_cfg.scene.robot.init_state.pos = robot_position
     env_cfg.actions = configs.robot_cfg.get_robot_action_cfg(robot)
-
     return env_cfg

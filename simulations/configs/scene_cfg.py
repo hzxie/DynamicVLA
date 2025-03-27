@@ -4,12 +4,14 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-23 12:28:24
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-03-24 20:02:29
+# @Last Modified at: 2025-03-27 15:48:44
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
 
 import isaaclab.sim as sim_utils
+import omni.usd
+import pxr
 from isaaclab.assets import (
     ArticulationCfg,
     AssetBaseCfg,
@@ -19,7 +21,7 @@ from isaaclab.assets import (
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import CameraCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg
-from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdFileCfg
+from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 from isaaclab.utils import configclass
 
 
@@ -39,7 +41,7 @@ class SceneCfg(InteractiveSceneCfg):
     object: RigidObjectCfg | DeformableObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object",
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=[0, 0, 1], rot=[1, 0, 0, 0], lin_vel=[0, 0, 0], ang_vel=[0, 0, 0]
+            pos=[0, 0, 0], rot=[1, 0, 0, 0], lin_vel=[0.1, 0, 0], ang_vel=[0, 0, 0]
         ),
         spawn=sim_utils.SphereCfg(
             radius=0.03,
@@ -50,18 +52,8 @@ class SceneCfg(InteractiveSceneCfg):
         ),
     )
     # the unique house asset (as background): will be populated by agent env cfg
+    # The ground plane and lights are defined in this asset
     house: AssetBaseCfg = MISSING
-    # Ground plane
-    plane: AssetBaseCfg = AssetBaseCfg(
-        prim_path="/World/GroundPlane",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -1.05]),
-        spawn=GroundPlaneCfg(),
-    )
-    # Light
-    light: AssetBaseCfg = AssetBaseCfg(
-        prim_path="/World/light",
-        spawn=sim_utils.DomeLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0),
-    )
 
 
 def add_camera_to_scene(scene_cfg, camera_cfg: dict) -> SceneCfg:
@@ -103,14 +95,44 @@ def set_target_object(
     return scene_cfg
 
 
-def set_house_asset(scene_cfg: SceneCfg, scene_asset_usd_file: str) -> SceneCfg:
-    # from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+def set_house_asset(
+    scene_cfg: SceneCfg, scene_asset_usd_file: str, scene_offset: list = [0, 0, 0]
+) -> SceneCfg:
     scene_cfg.house = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/House",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, 0], rot=[1, 0, 0, 0]),
+        init_state=AssetBaseCfg.InitialStateCfg(
+            pos=scene_offset, rot=[0.707, 0.707, 0, 0]
+        ),
         spawn=UsdFileCfg(usd_path=scene_asset_usd_file),
-        # spawn=UsdFileCfg(
-        #     usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/SeattleLabTable/table_instanceable.usd"
-        # ),
     )
     return scene_cfg
+
+
+def get_table_assets(scene_asset_usd_file: str):
+    TABLE_ASSET_KEYWORD = "Table"
+    TABLE_ASSET_GRP_NAME = "/house/furniture"
+
+    usd_context = omni.usd.get_context()
+    # Make current stage as the temporary stage to get the table assets
+    usd_context.open_stage(scene_asset_usd_file)
+    stage = usd_context.get_stage()
+    default_prim = stage.GetDefaultPrim()
+    # Set z-axis as the up axis
+    xform = pxr.UsdGeom.Xformable(default_prim)
+    xform.AddOrientOp().Set(pxr.Gf.Quatf(0.707, 0.707, 0, 0))
+    # Get the table assets
+    tables = []
+    asset_prim = stage.GetPrimAtPath(TABLE_ASSET_GRP_NAME)
+    for prim in asset_prim.GetChildren():
+        if TABLE_ASSET_KEYWORD in prim.GetName():
+            xform = pxr.UsdGeom.Xformable(prim)
+            transform = xform.ComputeLocalToWorldTransform(pxr.Usd.TimeCode.Default())
+            translation = transform.ExtractTranslation()
+            bbox_cache = pxr.UsdGeom.BBoxCache(
+                pxr.Usd.TimeCode.Default(), [pxr.UsdGeom.Tokens.default_]
+            )
+            bbox = bbox_cache.ComputeWorldBound(prim).GetBox()
+
+    # Create a new stage for the subsequent simulations
+    usd_context.new_stage()
+    return tables

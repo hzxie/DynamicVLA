@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-20 14:41:09
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-03-22 12:19:10
+# @Last Modified at: 2025-03-27 10:52:33
 # @Email:  root@haozhexie.com
 #
 # References:
@@ -42,7 +42,7 @@ def _get_instances(definition):
             # Example: furniture/102
             inst_id = c["instanceid"]
             if inst_id in instances:
-                logging.warning("Duplicate instance ID: %s", inst_id)
+                # logging.warning("Duplicate instance ID: %s", inst_id)
                 continue
 
             instances[inst_id] = {
@@ -65,7 +65,7 @@ def _get_meshes(definition):
         # Example: 440721587242490579/0
         mesh_id = mesh["uid"]
         if mesh_id in meshes:
-            logging.warning("Duplicate mesh ID: %s", mesh_id)
+            # logging.warning("Duplicate mesh ID: %s", mesh_id)
             continue
 
         meshes[mesh_id] = {
@@ -84,7 +84,10 @@ def _get_meshes(definition):
 
 
 def _get_material_color_value(color):
-    r, g, b, a = color if len(color) == 4 else [*color, 255]
+    if not color:  # Fix color values equals to []
+        r, g, b, a = (255,) * 4
+    else:
+        r, g, b, a = color if len(color) == 4 else [*color, 255]
     return a << 24 | r << 16 | g << 8 | b
 
 
@@ -131,7 +134,7 @@ def _get_materials(definition):
         # Example: 440721587242490579/044072
         material_id = material["uid"]
         if material_id in materials:
-            logging.warning("Duplicate material ID: %s", material_id)
+            # logging.warning("Duplicate material ID: %s", material_id)
             continue
 
         materials[material_id] = {
@@ -154,7 +157,7 @@ def _get_furnitures(definition, furniture_categories):
         # Example: 32210/model
         furniture_id = furniture["uid"]
         if furniture_id in furnitures:
-            logging.warning("Duplicate furniture ID: %s", furniture_id)
+            # logging.warning("Duplicate furniture ID: %s", furniture_id)
             continue
 
         furnitures[furniture_id] = {
@@ -181,7 +184,10 @@ def get_house_layout(definition, furniture_categories):
 
 
 def _get_shader(maya_ctl, material):
-    assert material["color_mode"] == "color"
+    if material["color_mode"] != "color":
+        logging.warning("Fallback to color shader for unknown material: %s" % material)
+        material["color"] = 4294967295
+
     _get_shader.colors = _get_shader.colors if hasattr(_get_shader, "colors") else {}
 
     shader_name = "color_shader_%s" % material["color"]
@@ -403,6 +409,7 @@ def add_instance_meshes_to_scene(maya_ctl, layout, model_dir):
 
 
 def main(maya_ctl, layout_dir, model_dir, output_dir):
+    ROOT_GROUP = "house"
     GROUPS = [
         "structure",
         "ceilings",
@@ -423,22 +430,30 @@ def main(maya_ctl, layout_dir, model_dir, output_dir):
     logging.info("Exporting Layouts to USD files ...")
     layouts = os.listdir(layout_dir)
     for lf in tqdm(layouts):
+        output_file_path = os.path.join(
+            output_dir, lf.replace(".json", ".usd")
+        ).replace("\\", "/")
+        if os.path.exists(output_file_path):
+            continue
+
         with open(os.path.join(layout_dir, lf), "r") as f:
             layout = get_house_layout(json.load(f), furniture_categories)
 
         # Initialize a new scene
         maya_ctl.set_new_scene()
+        maya_ctl.send_python_command("cmds.group(em=True, name='%s')" % ROOT_GROUP)
         for g in GROUPS:
             maya_ctl.send_python_command("cmds.group(em=True, name='%s')" % g)
 
         # Add meshes to scene
         add_instance_meshes_to_scene(maya_ctl, layout, model_dir)
-        # Scale 100x
-        maya_ctl.send_python_command("cmds.scale(100, 100, 100, %s)" % GROUPS)
+        # Move all groups to the "house" group
+        for g in GROUPS:
+            maya_ctl.send_python_command("cmds.parent('%s', '%s')" % (g, ROOT_GROUP))
         # Output the scene to USD
         maya_ctl.send_python_command(
-            "cmds.file('%s', force=True, options='exportUVs=1;', type='USD Export', exportAll=True)"
-            % os.path.join(output_dir, lf.replace(".json", ".usd")).replace("\\", "/")
+            "cmds.file('%s', force=True, options='exportUVs=1;upAxis=z', type='USD Export', exportAll=True)"
+            % output_file_path
         )
 
 

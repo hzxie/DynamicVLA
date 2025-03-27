@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-24 16:59:09
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-03-24 20:28:26
+# @Last Modified at: 2025-03-27 15:26:16
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
@@ -21,7 +21,6 @@ from isaaclab_tasks.manager_based.manipulation.lift import mdp
 # Pre-defined configs
 ##
 from isaaclab.markers.config import FRAME_MARKER_CFG  # isort: skip
-
 from isaaclab_assets.robots.franka import FRANKA_PANDA_HIGH_PD_CFG  # isort: skip
 
 
@@ -38,18 +37,16 @@ class ActionCfg:
 
 @configclass
 class FrankaActionCfg(ActionCfg):
-    arm_action: DifferentialInverseKinematicsActionCfg = (
-        DifferentialInverseKinematicsActionCfg(
-            asset_name="robot",
-            joint_names=["panda_joint.*"],
-            body_name="panda_hand",
-            controller=DifferentialIKControllerCfg(
-                command_type="pose", use_relative_mode=False, ik_method="dls"
-            ),
-            body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(
-                pos=[0.0, 0.0, 0.107]
-            ),
-        )
+    arm_action = DifferentialInverseKinematicsActionCfg(
+        asset_name="robot",
+        joint_names=["panda_joint.*"],
+        body_name="panda_hand",
+        controller=DifferentialIKControllerCfg(
+            command_type="pose", use_relative_mode=False, ik_method="dls"
+        ),
+        body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(
+            pos=[0.0, 0.0, 0.0]
+        ),
     )
     gripper_action = mdp.BinaryJointPositionActionCfg(
         asset_name="robot",
