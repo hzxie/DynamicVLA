@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-23 12:28:24
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-03-27 15:48:44
+# @Last Modified at: 2025-03-28 10:21:46
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
@@ -111,6 +111,7 @@ def set_house_asset(
 def get_table_assets(scene_asset_usd_file: str):
     TABLE_ASSET_KEYWORD = "Table"
     TABLE_ASSET_GRP_NAME = "/house/furniture"
+    TABLE_WH_SUM_LIMIT = 1.5
 
     usd_context = omni.usd.get_context()
     # Make current stage as the temporary stage to get the table assets
@@ -125,13 +126,13 @@ def get_table_assets(scene_asset_usd_file: str):
     asset_prim = stage.GetPrimAtPath(TABLE_ASSET_GRP_NAME)
     for prim in asset_prim.GetChildren():
         if TABLE_ASSET_KEYWORD in prim.GetName():
-            xform = pxr.UsdGeom.Xformable(prim)
-            transform = xform.ComputeLocalToWorldTransform(pxr.Usd.TimeCode.Default())
-            translation = transform.ExtractTranslation()
             bbox_cache = pxr.UsdGeom.BBoxCache(
                 pxr.Usd.TimeCode.Default(), [pxr.UsdGeom.Tokens.default_]
             )
-            bbox = bbox_cache.ComputeWorldBound(prim).GetBox()
+            bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
+            size = bbox.max - bbox.min
+            if sum(size[:2]) >= TABLE_WH_SUM_LIMIT:
+                tables.append({"bbox": (bbox.min, bbox.max), "size": size})
 
     # Create a new stage for the subsequent simulations
     usd_context.new_stage()

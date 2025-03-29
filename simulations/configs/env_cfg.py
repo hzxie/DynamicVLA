@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 21:04:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-03-27 15:26:05
+# @Last Modified at: 2025-03-29 09:50:07
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
@@ -178,7 +178,7 @@ class EnvCfg(ManagerBasedRLEnvCfg):
 
 
 def set_robot(
-    robot: str, env_cfg: EnvCfg, robot_position: list, final_ee_position: list
+    robot: str, env_cfg: EnvCfg, robot_pose: list, final_ee_position: list
 ) -> EnvCfg:
     assert robot in ["franka"], "Unknown robot: %s" % robot
     env_cfg.commands.object_pose.body_name = configs.robot_cfg.get_body_name(robot)
@@ -186,6 +186,7 @@ def set_robot(
         robot, final_ee_position
     )
     env_cfg.scene.robot = configs.robot_cfg.get_robot_cfg(robot)
-    env_cfg.scene.robot.init_state.pos = robot_position
+    env_cfg.scene.robot.init_state.pos = robot_pose["pos"]
+    env_cfg.scene.robot.init_state.rot = robot_pose["quat"]
     env_cfg.actions = configs.robot_cfg.get_robot_action_cfg(robot)
     return env_cfg

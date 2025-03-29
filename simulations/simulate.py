@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-03-27 15:47:45
+# @Last Modified at: 2025-03-29 11:28:30
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -34,6 +34,23 @@ PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.p
 sys.path.append(os.path.dirname(__file__))
 
 
+def get_robot_pose(tables):
+    # Determine the table to place the robot
+    table = random.choice(tables)
+    rnd_idx = random.randint(0, 1)
+    if table["size"][0] > table["size"][1]:
+        x = (table["bbox"][0][0] + table["bbox"][1][0]) / 2
+        y = table["bbox"][rnd_idx][1]
+        quat = (0.707, 0, 0, 0.707) if rnd_idx == 0 else (-0.707, 0, 0, 0.707)
+    else:
+        x = table["bbox"][rnd_idx][0]
+        y = (table["bbox"][0][1] + table["bbox"][1][1]) / 2
+        quat = (1, 0, 0, 0) if rnd_idx == 0 else (0, 0, 0, 1)
+
+    z = max(table["bbox"][0][2], table["bbox"][1][2])
+    return {"pos": (x, y, z), "quat": quat}
+
+
 def get_env_cfg(scene_dir, robot):
     # The following packages MUST be imported after the simulation app is created
     import configs.env_cfg
@@ -55,22 +72,21 @@ def get_env_cfg(scene_dir, robot):
         use_fabric=not args.disable_fabric,
     )
     # Dynamically create basic scene from USD files
-    # usd_file = random.choice(os.listdir(scene_dir))
-    usd_file = "D:/Projects/DynamicVLA/USD/00004f89-9aa5-43c2-ae3c-129586be8aaa.usd"
+    usd_file = os.path.join(scene_dir, random.choice(os.listdir(scene_dir)))
     env_cfg.scene = configs.scene_cfg.set_house_asset(
         env_cfg.scene, os.path.join(scene_dir, usd_file)
     )
-
-    # Determine the table asset to place the robot and objects
+    # Determine the table asset to place the robot arm
     tables = configs.scene_cfg.get_table_assets(usd_file)
+    robot_pose = get_robot_pose(tables)
 
     # TODO: Dynamically add objects to scene
     # env_cfg.scene = configs.scene_cfg.add_object_to_scene(env_cfg.scene)
+
     # TODO: Determine the robot and final end-effector position
-    robot_position = [4.110867986164093, -0.7093499898910524, 4.522520022888184]
     final_ee_position = [0.0, 0.0, 0.0]
     # TODO: Set the robot and end-effector frame
-    configs.env_cfg.set_robot(robot, env_cfg, robot_position, final_ee_position)
+    configs.env_cfg.set_robot(robot, env_cfg, robot_pose, final_ee_position)
 
     return env_cfg
 
