@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-03-29 11:28:30
+# @Last Modified at: 2025-03-31 20:11:59
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -19,6 +19,7 @@ It uses the `warp` library to run the state machine in parallel on the GPU.
 """
 
 import argparse
+import logging
 import os
 import random
 import sys
@@ -34,7 +35,10 @@ PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.p
 sys.path.append(os.path.dirname(__file__))
 
 
-def get_robot_pose(tables):
+def get_robot_pose(table_anchors):
+    if len(table_anchors) == 0:
+        return None
+
     # Determine the table to place the robot
     table = random.choice(tables)
     rnd_idx = random.randint(0, 1)
@@ -71,19 +75,39 @@ def get_env_cfg(scene_dir, robot):
         num_envs=args.num_envs,
         use_fabric=not args.disable_fabric,
     )
-    # Dynamically create basic scene from USD files
+
+    # robot_pose = None
+    # while robot_pose is None:
+    #     # Dynamically create basic scene from USD files
     usd_file = os.path.join(scene_dir, random.choice(os.listdir(scene_dir)))
+    logging.info("Loading scene from %s", usd_file)
     env_cfg.scene = configs.scene_cfg.set_house_asset(
         env_cfg.scene, os.path.join(scene_dir, usd_file)
     )
-    # Determine the table asset to place the robot arm
-    tables = configs.scene_cfg.get_table_assets(usd_file)
-    robot_pose = get_robot_pose(tables)
+    #     table_anchors = configs.scene_cfg.get_table_anchors(usd_file)
+    #     # Determine the table asset to place the robot arm
+    #     robot_pose = get_robot_pose(table_anchors)
+
+    # Set the light intensity and color
+    light_position = [random.choice([-20, 20]) for i in range(2)] + [2]
+    light_temperature = random.randint(5000, 7500)
+    light_intensity = random.randint(350, 650)
+    logging.info(
+        "Setting light temperature to %d and intensity to %d"
+        % (light_temperature, light_intensity)
+    )
+    env_cfg.scene = configs.scene_cfg.set_light_asset(
+        env_cfg.scene,
+        position=light_position,
+        temperature=light_temperature,
+        intensity=light_intensity,
+    )
 
     # TODO: Dynamically add objects to scene
     # env_cfg.scene = configs.scene_cfg.add_object_to_scene(env_cfg.scene)
 
     # TODO: Determine the robot and final end-effector position
+    robot_pose = {"pos": [0.0, 0.0, 0.0], "quat": [1.0, 0.0, 0.0, 0.0]}
     final_ee_position = [0.0, 0.0, 0.0]
     # TODO: Set the robot and end-effector frame
     configs.env_cfg.set_robot(robot, env_cfg, robot_pose, final_ee_position)
@@ -108,6 +132,10 @@ def main(simulation_app, args):
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        format="[%(levelname)s] %(asctime)s %(message)s",
+        level=logging.INFO,
+    )
     parser = argparse.ArgumentParser(description="Isaac Simulation Runner")
     # Arguments for the IsaacLab
     parser.add_argument(

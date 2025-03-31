@@ -4,9 +4,10 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-23 12:28:24
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-03-28 10:21:46
+# @Last Modified at: 2025-03-31 20:02:20
 # @Email:  root@haozhexie.com
 
+import math
 from dataclasses import MISSING
 
 import isaaclab.sim as sim_utils
@@ -21,7 +22,7 @@ from isaaclab.assets import (
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import CameraCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg
-from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
+from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdFileCfg
 from isaaclab.utils import configclass
 
 
@@ -51,9 +52,27 @@ class SceneCfg(InteractiveSceneCfg):
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 1.0, 0.0)),
         ),
     )
-    # the unique house asset (as background): will be populated by agent env cfg
-    # The ground plane and lights are defined in this asset
+
+    # Default house asset (as background): will be populated by agent env cfg
     house: AssetBaseCfg = MISSING
+
+    # Default lightings
+    dome_light: AssetBaseCfg = AssetBaseCfg(
+        prim_path="/World/DomeLight",
+        spawn=sim_utils.DomeLightCfg(
+            enable_color_temperature=True,
+            color_temperature=6500,
+            intensity=350,
+        ),
+    )
+    distant_light: AssetBaseCfg = MISSING
+
+    # Default ground plane assets
+    ground: AssetBaseCfg = AssetBaseCfg(
+        prim_path="/World/GroundPlane",
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -0.05]),
+        spawn=GroundPlaneCfg(visible=False, color=(0.0, 0.0, 0.0)),
+    )
 
 
 def add_camera_to_scene(scene_cfg, camera_cfg: dict) -> SceneCfg:
@@ -77,6 +96,53 @@ def add_camera_to_scene(scene_cfg, camera_cfg: dict) -> SceneCfg:
         ),
     )
     return scene_cfg
+
+
+def set_light_asset(
+    scene_cfg: SceneCfg,
+    position: list = [0, 0, 0],
+    temperature: int = 6500,
+    intensity: float = 1000,
+) -> SceneCfg:
+    scene_cfg.distant_light = AssetBaseCfg(
+        prim_path="/World/DistantLight",
+        init_state=AssetBaseCfg.InitialStateCfg(pos=position),
+        spawn=sim_utils.DistantLightCfg(
+            enable_color_temperature=True,
+            color_temperature=temperature,
+            intensity=intensity,
+        ),
+    )
+    return scene_cfg
+
+
+def _color_temperature_to_rgb(temperature: int) -> tuple:
+    # Ref: https://gist.github.com/petrklus/b1f427accdf7438606a6
+    assert temperature >= 1000 and temperature <= 40000
+    tmp_internal = temperature / 100.0
+    # Red
+    if tmp_internal <= 66:
+        red = 255
+    else:
+        tmp_red = 329.698727446 * math.pow(tmp_internal - 60, -0.1332047592)
+        red = max(min(tmp_red, 255), 0)
+    # Green
+    if tmp_internal <= 66:
+        tmp_green = 99.4708025861 * math.log(tmp_internal) - 161.1195681661
+        green = max(min(tmp_green, 255), 0)
+    else:
+        tmp_green = 288.1221695283 * math.pow(tmp_internal - 60, -0.0755148492)
+        green = max(min(tmp_green, 255), 0)
+    # Blue
+    if tmp_internal >= 66:
+        blue = 255
+    elif tmp_internal <= 19:
+        blue = 0
+    else:
+        tmp_blue = 138.5177312231 * math.log(tmp_internal - 10) - 305.0447927307
+        blue = max(min(tmp_blue, 255), 0)
+
+    return (red / 255, green / 255, blue / 255)
 
 
 def add_object_to_scene(
@@ -108,7 +174,7 @@ def set_house_asset(
     return scene_cfg
 
 
-def get_table_assets(scene_asset_usd_file: str):
+def get_table_anchors(scene_asset_usd_file: str):
     TABLE_ASSET_KEYWORD = "Table"
     TABLE_ASSET_GRP_NAME = "/house/furniture"
     TABLE_WH_SUM_LIMIT = 1.5

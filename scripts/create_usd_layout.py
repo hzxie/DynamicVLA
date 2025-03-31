@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-20 14:41:09
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-03-27 10:52:33
+# @Last Modified at: 2025-03-31 14:31:09
 # @Email:  root@haozhexie.com
 #
 # References:
@@ -452,7 +452,7 @@ def main(maya_ctl, layout_dir, model_dir, output_dir):
             maya_ctl.send_python_command("cmds.parent('%s', '%s')" % (g, ROOT_GROUP))
         # Output the scene to USD
         maya_ctl.send_python_command(
-            "cmds.file('%s', force=True, options='exportUVs=1;upAxis=z', type='USD Export', exportAll=True)"
+            "cmds.file('%s', force=True, options='exportUVs=1', type='USD Export', exportAll=True)"
             % output_file_path
         )
 
@@ -472,19 +472,22 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "USD")
     )
+    parser.add_argument("--port", default=12345, type=int)
     args = parser.parse_args()
 
     logging.info(
         "Run the following command in Maya's Script Editor to start the server."
     )
-    logging.info("  import maya.cmds as cmds; cmds.commandPort(n='localhost:12345')")
+    logging.info(
+        "  import maya.cmds as cmds; cmds.commandPort(n='localhost:%d')" % args.port
+    )
     answer = input("Is your Maya server running? (Y/n) ").strip().lower()
     if answer not in ["y", "yes", ""]:
         logging.error("Please start the Maya server first.")
         sys.exit(1)
 
     # Connect to Maya server
-    maya_ctl = helpers.maya.MayaController(port=12345)
+    maya_ctl = helpers.maya.MayaController(port=args.port)
     maya_ctl.send_python_command("from maya.api import OpenMaya")
     logging.info("Connected to Maya Server.")
     # Load the Maya USD plugin
