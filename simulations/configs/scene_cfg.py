@@ -4,13 +4,15 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-23 12:28:24
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-03-31 20:02:20
+# @Last Modified at: 2025-04-01 14:01:16
 # @Email:  root@haozhexie.com
 
 import math
+import logging
 from dataclasses import MISSING
 
 import isaaclab.sim as sim_utils
+import numpy as np
 import omni.usd
 import pxr
 from isaaclab.assets import (
@@ -116,35 +118,6 @@ def set_light_asset(
     return scene_cfg
 
 
-def _color_temperature_to_rgb(temperature: int) -> tuple:
-    # Ref: https://gist.github.com/petrklus/b1f427accdf7438606a6
-    assert temperature >= 1000 and temperature <= 40000
-    tmp_internal = temperature / 100.0
-    # Red
-    if tmp_internal <= 66:
-        red = 255
-    else:
-        tmp_red = 329.698727446 * math.pow(tmp_internal - 60, -0.1332047592)
-        red = max(min(tmp_red, 255), 0)
-    # Green
-    if tmp_internal <= 66:
-        tmp_green = 99.4708025861 * math.log(tmp_internal) - 161.1195681661
-        green = max(min(tmp_green, 255), 0)
-    else:
-        tmp_green = 288.1221695283 * math.pow(tmp_internal - 60, -0.0755148492)
-        green = max(min(tmp_green, 255), 0)
-    # Blue
-    if tmp_internal >= 66:
-        blue = 255
-    elif tmp_internal <= 19:
-        blue = 0
-    else:
-        tmp_blue = 138.5177312231 * math.log(tmp_internal - 10) - 305.0447927307
-        blue = max(min(tmp_blue, 255), 0)
-
-    return (red / 255, green / 255, blue / 255)
-
-
 def add_object_to_scene(
     scene_cfg: SceneCfg,
     object_name: str,
@@ -174,10 +147,11 @@ def set_house_asset(
     return scene_cfg
 
 
-def get_table_anchors(scene_asset_usd_file: str):
+def get_table_assets(scene_asset_usd_file: str) -> list:
+    TABLE_WH_SUM_LIMIT = 1.5
     TABLE_ASSET_KEYWORD = "Table"
     TABLE_ASSET_GRP_NAME = "/house/furniture"
-    TABLE_WH_SUM_LIMIT = 1.5
+    WALL_ASSET_GRP_NAME = "/house/structure"
 
     usd_context = omni.usd.get_context()
     # Make current stage as the temporary stage to get the table assets
@@ -189,17 +163,115 @@ def get_table_anchors(scene_asset_usd_file: str):
     xform.AddOrientOp().Set(pxr.Gf.Quatf(0.707, 0.707, 0, 0))
     # Get the table assets
     tables = []
-    asset_prim = stage.GetPrimAtPath(TABLE_ASSET_GRP_NAME)
-    for prim in asset_prim.GetChildren():
+    structure_primtives = stage.GetPrimAtPath(WALL_ASSET_GRP_NAME).GetChildren()
+    furniture_primtives = stage.GetPrimAtPath(TABLE_ASSET_GRP_NAME).GetChildren()
+    for prim in furniture_primtives:
         if TABLE_ASSET_KEYWORD in prim.GetName():
             bbox_cache = pxr.UsdGeom.BBoxCache(
                 pxr.Usd.TimeCode.Default(), [pxr.UsdGeom.Tokens.default_]
             )
             bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
             size = bbox.max - bbox.min
-            if sum(size[:2]) >= TABLE_WH_SUM_LIMIT:
-                tables.append({"bbox": (bbox.min, bbox.max), "size": size})
+            if sum(size[:2]) >= TABLE_WH_SUM_LIMIT and (np.array(size) != 0).all():
+                anchors = _get_table_anchors(bbox, size)
+                anchors = _get_uncollided_anchors(
+                    anchors, furniture_primtives + structure_primtives, bbox_cache
+                )
+                # Check whether the table contains at least one anchor point for short 
+                # and long sides
+                long_side_anchors = [a for a in anchors if a["side"] == "long"]
+                short_side_anchors = [a for a in anchors if a["side"] == "short"]
+                if len(long_side_anchors) > 0 and len(short_side_anchors) > 0:
+                    tables.append(anchors)
 
     # Create a new stage for the subsequent simulations
     usd_context.new_stage()
     return tables
+
+
+def _get_table_anchors(bbox: pxr.Gf.BBox3d, size: pxr.Gf.Vec3d) -> dict:
+    # NOTE: The corner points (0-3) and anchor points (A-D) of the table are defined as:
+    #   0   A   1
+    #   +-------+
+    # D |       | B
+    #   +-------+
+    #   3   C   2
+    _get_mid_point = lambda pt1, pt2: [(pt1[0] + pt2[0]) / 2, (pt1[1] + pt2[1]) / 2]
+
+    z = max(bbox.min[2], bbox.max[2])
+    corners = [
+        (bbox.min[0], bbox.min[1]),
+        (bbox.max[0], bbox.min[1]),
+        (bbox.max[0], bbox.max[1]),
+        (bbox.min[0], bbox.max[1]),
+    ]
+    anchors = [
+        {
+            "pos": _get_mid_point(corners[0], corners[1]) + [z],
+            "quat": (0.707, 0, 0, 0.707),
+            "side": "long" if size[0] > size[1] else "short",
+            "collision": False,
+        },
+        {
+            "pos": _get_mid_point(corners[1], corners[2]) + [z],
+            "quat": (0, 0, 0, 1),
+            "side": "short" if size[0] > size[1] else "long",
+            "collision": False,
+        },
+        {
+            "pos": _get_mid_point(corners[2], corners[3]) + [z],
+            "quat": (-0.707, 0, 0, 0.707),
+            "side": "long" if size[0] > size[1] else "short",
+            "collision": False,
+        },
+        {
+            "pos": _get_mid_point(corners[3], corners[0]) + [z],
+            "quat": (1, 0, 0, 0),
+            "side": "short" if size[0] > size[1] else "long",
+            "collision": False,
+        },
+    ]
+    return anchors
+
+
+def _get_uncollided_anchors(
+    anchors: list, primtives: list, bbox_cache: pxr.UsdGeom.BBoxCache
+) -> list:
+    ANCHOR_SIZE = 0.25
+    for prim in primtives:
+        bbox_cache = pxr.UsdGeom.BBoxCache(
+            pxr.Usd.TimeCode.Default(), [pxr.UsdGeom.Tokens.default_]
+        )
+        bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
+        for anchor in anchors:
+            if anchor["collision"]:
+                continue
+
+            anchor_bbox = pxr.Gf.Range3d(
+                pxr.Gf.Vec3d(
+                    anchor["pos"][0] - ANCHOR_SIZE,
+                    anchor["pos"][1] - ANCHOR_SIZE,
+                    anchor["pos"][2],
+                ),
+                pxr.Gf.Vec3d(
+                    anchor["pos"][0] + ANCHOR_SIZE,
+                    anchor["pos"][1] + ANCHOR_SIZE,
+                    anchor["pos"][2] + ANCHOR_SIZE,
+                ),
+            )
+            if _is_bbox3d_intersects(bbox, anchor_bbox):
+                anchor["collision"] = True
+                logging.debug("Anchor %s collides with %s", anchor, prim.GetName())
+
+    return [a for a in anchors if not a["collision"]]
+
+
+def _is_bbox3d_intersects(bbox1: pxr.Gf.Range3d, bbox2: pxr.Gf.Range3d) -> bool:
+    return (
+        bbox1.min[0] < bbox2.max[0]
+        and bbox1.max[0] > bbox2.min[0]
+        and bbox1.min[1] < bbox2.max[1]
+        and bbox1.max[1] > bbox2.min[1]
+        and bbox1.min[2] < bbox2.max[2]
+        and bbox1.max[2] > bbox2.min[2]
+    )
