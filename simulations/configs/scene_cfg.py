@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-23 12:28:24
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-01 14:01:16
+# @Last Modified at: 2025-04-02 15:54:20
 # @Email:  root@haozhexie.com
 
 import math
@@ -15,6 +15,7 @@ import isaaclab.sim as sim_utils
 import numpy as np
 import omni.usd
 import pxr
+import scipy.spatial.transform
 from isaaclab.assets import (
     ArticulationCfg,
     AssetBaseCfg,
@@ -72,43 +73,54 @@ class SceneCfg(InteractiveSceneCfg):
     # Default ground plane assets
     ground: AssetBaseCfg = AssetBaseCfg(
         prim_path="/World/GroundPlane",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -0.05]),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -0.1]),
         spawn=GroundPlaneCfg(visible=False, color=(0.0, 0.0, 0.0)),
     )
 
 
-def add_camera_to_scene(scene_cfg, camera_cfg: dict) -> SceneCfg:
-    scene_cfg.__setattr__(
-        camera_cfg["name"],
-        CameraCfg(
-            prim_path="{ENV_REGEX_NS}/cameras/%s" % camera_cfg["name"],
-            update_period=camera_cfg["period"],
-            height=camera_cfg["height"],
-            width=camera_cfg["width"],
-            data_types=["rgb", "distance_to_image_plane"],
-            spawn=sim_utils.PinholeCameraCfg(
-                focal_length=camera_cfg["focal_length"],
-                focus_distance=400.0,
-                horizontal_aperture=20.955,
-                clipping_range=(0.1, 1e5),
-            ),
-            offset=CameraCfg.OffsetCfg(
-                pos=camera_cfg["position"], rot=camera_cfg["quat"], convention="ros"
-            ),
+def get_camera_cfg(cam_cfg: dict, cam_extra_cfg: dict) -> SceneCfg:
+    for k, v in cam_extra_cfg.items():
+        cam_cfg[k] = v
+
+    prim_path = cam_cfg["prim_path"] if "prim_path" in cam_cfg else "/Robot/SideCamera"
+    camera_cfg = CameraCfg(
+        prim_path="{ENV_REGEX_NS}" + prim_path,
+        update_period=1 / cam_cfg["fps"],
+        height=cam_cfg["height"],
+        width=cam_cfg["width"],
+        data_types=cam_cfg["data_types"],
+        spawn=sim_utils.PinholeCameraCfg(
+            focal_length=cam_cfg["focal_length"],
+            focus_distance=cam_cfg["focus_distance"],
+            horizontal_aperture=cam_cfg["horizontal_aperture"],
+            clipping_range=(cam_cfg["clip"]["near"], cam_cfg["clip"]["far"]),
         ),
     )
+    if "pos" in cam_cfg:
+        camera_cfg.offset = CameraCfg.OffsetCfg(
+            pos=cam_cfg["pos"], rot=cam_cfg["quat"], convention="world"
+        )
+    return camera_cfg
+
+
+def add_scene_camera(
+    scene_cfg: SceneCfg, cam_name: str, cam_cfg: CameraCfg
+) -> SceneCfg:
+    scene_cfg.__setattr__(cam_name, cam_cfg)
     return scene_cfg
 
 
 def set_light_asset(
     scene_cfg: SceneCfg,
-    position: list = [0, 0, 0],
+    position: list = [0.0, 0.0, 0.0],
     temperature: int = 6500,
     intensity: float = 1000,
 ) -> SceneCfg:
+    quat = get_quat_from_look_at(position, [0.0, 0.0, 0.0])
+
     scene_cfg.distant_light = AssetBaseCfg(
         prim_path="/World/DistantLight",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=position),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=position, rot=quat),
         spawn=sim_utils.DistantLightCfg(
             enable_color_temperature=True,
             color_temperature=temperature,
@@ -116,6 +128,24 @@ def set_light_asset(
         ),
     )
     return scene_cfg
+
+
+def get_quat_from_look_at(cam_pos, cam_look_at):
+    fwd_vec = np.array(
+        [
+            cam_look_at[0] - cam_pos[0],
+            cam_look_at[1] - cam_pos[1],
+            cam_look_at[2] - cam_pos[2],
+        ]
+    )
+    fwd_vec /= np.linalg.norm(fwd_vec)
+    up_vec = np.array([0, 0, 1])
+    right_vec = np.cross(up_vec, fwd_vec)
+    right_vec /= np.linalg.norm(right_vec)
+    up_vec = np.cross(fwd_vec, right_vec)
+    R = np.stack([fwd_vec, right_vec, up_vec], axis=1)
+    quat = scipy.spatial.transform.Rotation.from_matrix(R).as_quat()
+    return [quat[3], quat[0], quat[1], quat[2]]
 
 
 def add_object_to_scene(
@@ -148,6 +178,8 @@ def set_house_asset(
 
 
 def get_table_assets(scene_asset_usd_file: str) -> list:
+    TABLE_MAX_CHILDREN = 5
+    TABLE_MAX_HEIGHT = 1.25
     TABLE_WH_SUM_LIMIT = 1.5
     TABLE_ASSET_KEYWORD = "Table"
     TABLE_ASSET_GRP_NAME = "/house/furniture"
@@ -166,23 +198,30 @@ def get_table_assets(scene_asset_usd_file: str) -> list:
     structure_primtives = stage.GetPrimAtPath(WALL_ASSET_GRP_NAME).GetChildren()
     furniture_primtives = stage.GetPrimAtPath(TABLE_ASSET_GRP_NAME).GetChildren()
     for prim in furniture_primtives:
-        if TABLE_ASSET_KEYWORD in prim.GetName():
+        if (
+            TABLE_ASSET_KEYWORD in prim.GetName()
+            and len(prim.GetChildren()) < TABLE_MAX_CHILDREN
+        ):
             bbox_cache = pxr.UsdGeom.BBoxCache(
                 pxr.Usd.TimeCode.Default(), [pxr.UsdGeom.Tokens.default_]
             )
             bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
             size = bbox.max - bbox.min
-            if sum(size[:2]) >= TABLE_WH_SUM_LIMIT and (np.array(size) != 0).all():
+            if (
+                sum(size[:2]) >= TABLE_WH_SUM_LIMIT
+                and size[2] <= TABLE_MAX_HEIGHT
+                and (np.array(size) != 0).all()
+            ):
                 anchors = _get_table_anchors(bbox, size)
                 anchors = _get_uncollided_anchors(
                     anchors, furniture_primtives + structure_primtives, bbox_cache
                 )
-                # Check whether the table contains at least one anchor point for short 
+                # Check whether the table contains at least one anchor point for short
                 # and long sides
                 long_side_anchors = [a for a in anchors if a["side"] == "long"]
                 short_side_anchors = [a for a in anchors if a["side"] == "short"]
                 if len(long_side_anchors) > 0 and len(short_side_anchors) > 0:
-                    tables.append(anchors)
+                    tables.append({"anchors": anchors, "bbox": bbox})
 
     # Create a new stage for the subsequent simulations
     usd_context.new_stage()
@@ -207,26 +246,26 @@ def _get_table_anchors(bbox: pxr.Gf.BBox3d, size: pxr.Gf.Vec3d) -> dict:
     ]
     anchors = [
         {
-            "pos": _get_mid_point(corners[0], corners[1]) + [z],
-            "quat": (0.707, 0, 0, 0.707),
+            "pos": np.array(_get_mid_point(corners[0], corners[1]) + [z]),
+            "quat": np.array([0.707, 0, 0, 0.707]),
             "side": "long" if size[0] > size[1] else "short",
             "collision": False,
         },
         {
-            "pos": _get_mid_point(corners[1], corners[2]) + [z],
-            "quat": (0, 0, 0, 1),
+            "pos": np.array(_get_mid_point(corners[1], corners[2]) + [z]),
+            "quat": np.array([0, 0, 0, 1]),
             "side": "short" if size[0] > size[1] else "long",
             "collision": False,
         },
         {
-            "pos": _get_mid_point(corners[2], corners[3]) + [z],
-            "quat": (-0.707, 0, 0, 0.707),
+            "pos": np.array(_get_mid_point(corners[2], corners[3]) + [z]),
+            "quat": np.array([-0.707, 0, 0, 0.707]),
             "side": "long" if size[0] > size[1] else "short",
             "collision": False,
         },
         {
-            "pos": _get_mid_point(corners[3], corners[0]) + [z],
-            "quat": (1, 0, 0, 0),
+            "pos": np.array(_get_mid_point(corners[3], corners[0]) + [z]),
+            "quat": np.array([1, 0, 0, 0]),
             "side": "short" if size[0] > size[1] else "long",
             "collision": False,
         },

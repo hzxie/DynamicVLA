@@ -1,0 +1,31 @@
+camera:
+  width: 640
+  height: 480
+  fps: 30
+  focal_length: 24
+  focus_distance: 400
+  horizontal_aperture: 20.955
+  clip:
+    near: 0.1
+    far: 10000
+  data_types:
+    - rgb
+    - distance_to_image_plane
+
+lighting:
+  temperature:
+    - 5000
+    - 7500
+  intensity: 
+    - 350
+    - 650
+  position:
+    x:
+      - -20
+      - 20
+    y:
+      - -20
+      - 20
+    z:
+      - 10
+      - 20

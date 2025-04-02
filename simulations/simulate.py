@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-01 13:51:36
+# @Last Modified at: 2025-04-02 15:52:19
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -22,6 +22,7 @@ import argparse
 import logging
 import os
 import random
+import scipy.spatial.transform
 import sys
 
 import gymnasium as gym
@@ -30,12 +31,13 @@ import isaaclab.app
 # import omni.replicator.core
 import numpy as np
 import torch
+import yaml
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 sys.path.append(os.path.dirname(__file__))
 
 
-def get_env_cfg(scene_dir, robot):
+def get_env_cfg(scene_dir, sim_cfg, robot):
     # The following packages MUST be imported after the simulation app is created
     import configs.env_cfg
     import configs.scene_cfg
@@ -56,38 +58,40 @@ def get_env_cfg(scene_dir, robot):
         use_fabric=not args.disable_fabric,
     )
 
-    robot_pose = None
-    while robot_pose is None:
+    table = None
+    while table is None:
         # Dynamically create basic scene from USD files
         usd_file = os.path.join(scene_dir, random.choice(os.listdir(scene_dir)))
-        # usd_file = "D:/Projects/DynamicVLA/USD/10113b73-e4f8-46c6-b2a4-fa07d374114c.usd"
         logging.info("Loading scene from %s", usd_file)
         env_cfg.scene = configs.scene_cfg.set_house_asset(
             env_cfg.scene, os.path.join(scene_dir, usd_file)
         )
         tables = configs.scene_cfg.get_table_assets(usd_file)
-        if len(tables) == 0:
-            continue
+        if len(tables) != 0:
+            table = random.choice(tables)
 
-        table = random.choice(tables)
-        # Determine the table asset to place the robot arm and third-view camera
-        robot_pose = random.choice([a for a in table if a["side"] == "long"])
-        # TODO: cam_pose
+    # Determine the robot pose
+    robot_pose = random.choice([a for a in table["anchors"] if a["side"] == "long"])
+    # Set up the third-view camera
+    cam_pose = random.choice([a for a in table["anchors"] if a["side"] == "short"])
+    env_cfg.scene = configs.scene_cfg.add_scene_camera(
+        env_cfg.scene,
+        "side_camera",
+        configs.scene_cfg.get_camera_cfg(
+            sim_cfg["camera"].copy(),
+            _get_camera_relative_pose(
+                cam_pose, robot_pose, (table["bbox"].min + table["bbox"].max) / 2.0
+            ),
+        ),
+    )
 
     # Set the light intensity and color
-    light_position = [random.choice([-20, 20]) for i in range(2)] + [2]
-    light_temperature = random.randint(5000, 7500)
-    light_intensity = random.randint(350, 650)
+    light_cfg = _get_light_cfg(sim_cfg["lighting"])
     logging.info(
         "Setting light temperature to %d and intensity to %d"
-        % (light_temperature, light_intensity)
+        % (light_cfg["temperature"], light_cfg["intensity"])
     )
-    env_cfg.scene = configs.scene_cfg.set_light_asset(
-        env_cfg.scene,
-        position=light_position,
-        temperature=light_temperature,
-        intensity=light_intensity,
-    )
+    env_cfg.scene = configs.scene_cfg.set_light_asset(env_cfg.scene, **light_cfg)
 
     # TODO: Dynamically add objects to scene
     # env_cfg.scene = configs.scene_cfg.add_object_to_scene(env_cfg.scene)
@@ -95,17 +99,64 @@ def get_env_cfg(scene_dir, robot):
     # Dummy robot and end-effector position for debugging
     # robot_pose = {"pos": [0.0, 0.0, 0.0], "quat": [1.0, 0.0, 0.0, 0.0]}
 
-    # TODO: Determine the final end-effector position
-    final_ee_position = [0.0, 0.0, 0.0]
-    # TODO: Set the robot and end-effector frame
+    # Set up the robot arm
+    final_ee_position = [
+        0.0,
+        0.0,
+        0.0,
+    ]  # TODO: Determine the final end-effector position
     configs.env_cfg.set_robot(robot, env_cfg, robot_pose, final_ee_position)
+    # configs.robot_cfg.get_gripper_camera_prim_path(robot)
 
     return env_cfg
 
 
+def _get_camera_relative_pose(cam_pose, robot_pose, table_center):
+    import configs.scene_cfg
+
+    inv_r = scipy.spatial.transform.Rotation.from_quat(
+        [
+            robot_pose["quat"][1],
+            robot_pose["quat"][2],
+            robot_pose["quat"][3],
+            robot_pose["quat"][0],
+        ]
+    ).inv()
+
+    # Relative position of the camera to the robot
+    dx, dy, dz = inv_r.apply(cam_pose["pos"] - robot_pose["pos"])
+
+    # Relative rotation of the camera to the robot
+    cx, cy, cz = inv_r.apply(np.array(table_center) - robot_pose["pos"])
+    cam_quat = configs.scene_cfg.get_quat_from_look_at([dx, dy, dz], [cx, cy, cz])
+
+    return {
+        "pos": [dx, dy, dz + 0.75],  # Move the camera above the table top
+        "quat": cam_quat,
+    }
+
+
+def _get_light_cfg(light_cfg):
+    light_position = [
+        random.randint(*light_cfg["position"]["x"]),
+        random.randint(*light_cfg["position"]["y"]),
+        random.randint(*light_cfg["position"]["z"]),
+    ]
+    light_temperature = random.randint(*light_cfg["temperature"])
+    light_intensity = random.randint(*light_cfg["intensity"])
+    return {
+        "position": light_position,
+        "temperature": light_temperature,
+        "intensity": light_intensity,
+    }
+
+
 def main(simulation_app, args):
+    with open(args.sim_cfg_file) as fp:
+        sim_cfg = yaml.load(fp, Loader=yaml.FullLoader)
+
     # Create environment
-    cfg = get_env_cfg(args.scene_dir, args.robot)
+    cfg = get_env_cfg(args.scene_dir, sim_cfg, args.robot)
     env = gym.make("Robot-Env-Cfg-v0", cfg=cfg)
     # Reset environment at start
     env.reset()
@@ -153,6 +204,10 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "datasets")
+    )
+    parser.add_argument(
+        "--sim_cfg_file",
+        default=os.path.join(PROJECT_HOME, "simulations", "configs", "sim_cfg.yaml"),
     )
     args = parser.parse_args(script_args)
 
