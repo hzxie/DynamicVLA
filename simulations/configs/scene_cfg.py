@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-23 12:28:24
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-02 15:54:20
+# @Last Modified at: 2025-04-03 15:30:41
 # @Email:  root@haozhexie.com
 
 import math
@@ -82,6 +82,14 @@ def get_camera_cfg(cam_cfg: dict, cam_extra_cfg: dict) -> SceneCfg:
     for k, v in cam_extra_cfg.items():
         cam_cfg[k] = v
 
+    # Set default values
+    if "pos" not in cam_cfg:
+        cam_cfg["pos"] = [0, 0, 0]
+    if "quat" not in cam_cfg:
+        cam_cfg["quat"] = [1, 0, 0, 0]
+    if "convention" not in cam_cfg:
+        cam_cfg["convention"] = "ros"
+
     prim_path = cam_cfg["prim_path"] if "prim_path" in cam_cfg else "/Robot/SideCamera"
     camera_cfg = CameraCfg(
         prim_path="{ENV_REGEX_NS}" + prim_path,
@@ -95,11 +103,10 @@ def get_camera_cfg(cam_cfg: dict, cam_extra_cfg: dict) -> SceneCfg:
             horizontal_aperture=cam_cfg["horizontal_aperture"],
             clipping_range=(cam_cfg["clip"]["near"], cam_cfg["clip"]["far"]),
         ),
-    )
-    if "pos" in cam_cfg:
-        camera_cfg.offset = CameraCfg.OffsetCfg(
-            pos=cam_cfg["pos"], rot=cam_cfg["quat"], convention="world"
+        offset=CameraCfg.OffsetCfg(
+            pos=cam_cfg["pos"], rot=cam_cfg["quat"], convention=cam_cfg["convention"]
         )
+    )
     return camera_cfg
 
 
@@ -170,7 +177,7 @@ def set_house_asset(
     scene_cfg.house = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/House",
         init_state=AssetBaseCfg.InitialStateCfg(
-            pos=scene_offset, rot=[0.707, 0.707, 0, 0]
+            pos=scene_offset, rot=[0.7071068, 0.7071068, 0, 0]
         ),
         spawn=UsdFileCfg(usd_path=scene_asset_usd_file),
     )
@@ -192,7 +199,7 @@ def get_table_assets(scene_asset_usd_file: str) -> list:
     default_prim = stage.GetDefaultPrim()
     # Set z-axis as the up axis
     xform = pxr.UsdGeom.Xformable(default_prim)
-    xform.AddOrientOp().Set(pxr.Gf.Quatf(0.707, 0.707, 0, 0))
+    xform.AddOrientOp().Set(pxr.Gf.Quatf(0.7071068, 0.7071068, 0, 0))
     # Get the table assets
     tables = []
     structure_primtives = stage.GetPrimAtPath(WALL_ASSET_GRP_NAME).GetChildren()
@@ -247,7 +254,7 @@ def _get_table_anchors(bbox: pxr.Gf.BBox3d, size: pxr.Gf.Vec3d) -> dict:
     anchors = [
         {
             "pos": np.array(_get_mid_point(corners[0], corners[1]) + [z]),
-            "quat": np.array([0.707, 0, 0, 0.707]),
+            "quat": np.array([0.7071068, 0, 0, 0.7071068]),
             "side": "long" if size[0] > size[1] else "short",
             "collision": False,
         },
@@ -259,7 +266,7 @@ def _get_table_anchors(bbox: pxr.Gf.BBox3d, size: pxr.Gf.Vec3d) -> dict:
         },
         {
             "pos": np.array(_get_mid_point(corners[2], corners[3]) + [z]),
-            "quat": np.array([-0.707, 0, 0, 0.707]),
+            "quat": np.array([-0.7071068, 0, 0, 0.7071068]),
             "side": "long" if size[0] > size[1] else "short",
             "collision": False,
         },

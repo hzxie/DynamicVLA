@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-02 15:52:19
+# @Last Modified at: 2025-04-03 15:36:03
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -62,6 +62,7 @@ def get_env_cfg(scene_dir, sim_cfg, robot):
     while table is None:
         # Dynamically create basic scene from USD files
         usd_file = os.path.join(scene_dir, random.choice(os.listdir(scene_dir)))
+        usd_file = "D:/Projects/DynamicVLA/USD/256d7c62-a550-4dd1-a57b-541a2260bff2.usd"
         logging.info("Loading scene from %s", usd_file)
         env_cfg.scene = configs.scene_cfg.set_house_asset(
             env_cfg.scene, os.path.join(scene_dir, usd_file)
@@ -79,9 +80,20 @@ def get_env_cfg(scene_dir, sim_cfg, robot):
         "side_camera",
         configs.scene_cfg.get_camera_cfg(
             sim_cfg["camera"].copy(),
-            _get_camera_relative_pose(
-                cam_pose, robot_pose, (table["bbox"].min + table["bbox"].max) / 2.0
-            ),
+            _get_camera_relative_pose(cam_pose, robot_pose, table["bbox"]),
+        ),
+    )
+    # Set up the gripper camera on the robot arm
+    env_cfg.scene = configs.scene_cfg.add_scene_camera(
+        env_cfg.scene,
+        "gripper_camera",
+        configs.scene_cfg.get_camera_cfg(
+            sim_cfg["camera"].copy(),
+            {
+                "prim_path": configs.robot_cfg.get_gripper_camera_prim_path(robot),
+                "quat": [0, 0.7071068, 0.7071068, 0],
+                "convention": "opengl",
+            },
         ),
     )
 
@@ -96,43 +108,38 @@ def get_env_cfg(scene_dir, sim_cfg, robot):
     # TODO: Dynamically add objects to scene
     # env_cfg.scene = configs.scene_cfg.add_object_to_scene(env_cfg.scene)
 
-    # Dummy robot and end-effector position for debugging
-    # robot_pose = {"pos": [0.0, 0.0, 0.0], "quat": [1.0, 0.0, 0.0, 0.0]}
-
     # Set up the robot arm
-    final_ee_position = [
-        0.0,
-        0.0,
-        0.0,
-    ]  # TODO: Determine the final end-effector position
+    final_ee_position = [0.0, 0.0, 0.0]
     configs.env_cfg.set_robot(robot, env_cfg, robot_pose, final_ee_position)
-    # configs.robot_cfg.get_gripper_camera_prim_path(robot)
 
     return env_cfg
 
 
-def _get_camera_relative_pose(cam_pose, robot_pose, table_center):
+
+def _get_camera_relative_pose(cam_pose, robot_pose, table_bbox):
     import configs.scene_cfg
 
+    rbt_quat = robot_pose["quat"]
     inv_r = scipy.spatial.transform.Rotation.from_quat(
-        [
-            robot_pose["quat"][1],
-            robot_pose["quat"][2],
-            robot_pose["quat"][3],
-            robot_pose["quat"][0],
-        ]
+        [rbt_quat[1], rbt_quat[2], rbt_quat[3], rbt_quat[0]]
     ).inv()
-
     # Relative position of the camera to the robot
     dx, dy, dz = inv_r.apply(cam_pose["pos"] - robot_pose["pos"])
 
     # Relative rotation of the camera to the robot
-    cx, cy, cz = inv_r.apply(np.array(table_center) - robot_pose["pos"])
+    tbl_center = (table_bbox.min + table_bbox.max) / 2.0
+    cx, cy, cz = inv_r.apply(np.array(tbl_center) - robot_pose["pos"])
+    # cz = -robot_pose["pos"][2]
     cam_quat = configs.scene_cfg.get_quat_from_look_at([dx, dy, dz], [cx, cy, cz])
 
+    # Determine the height of the camera (1/5 of the longer side of the table)
+    tbl_size = table_bbox.max - table_bbox.min
+    dz += max(tbl_size[:2]) / 5
+
     return {
-        "pos": [dx, dy, dz + 0.75],  # Move the camera above the table top
+        "pos": [dx, dy, dz],  # Move the camera above the table top
         "quat": cam_quat,
+        "convention": "world",
     }
 
 

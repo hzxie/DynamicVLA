@@ -1,10 +1,10 @@
 camera:
   width: 640
   height: 480
-  fps: 30
-  focal_length: 24
+  fps: 15
+  focal_length: 2.3
   focus_distance: 400
-  horizontal_aperture: 20.955
+  horizontal_aperture: 4.6
   clip:
     near: 0.1
     far: 10000
