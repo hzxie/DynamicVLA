@@ -4,11 +4,11 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-23 12:28:24
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-03 15:30:41
+# @Last Modified at: 2025-04-04 13:31:04
 # @Email:  root@haozhexie.com
 
-import math
 import logging
+import math
 from dataclasses import MISSING
 
 import isaaclab.sim as sim_utils
@@ -42,19 +42,7 @@ class SceneCfg(InteractiveSceneCfg):
     ee_frame: FrameTransformerCfg = MISSING
     # target object: placeholder. Can be replaced by calling `set_target_object`
     # more objects can be added to the scene by calling `add_object_to_scene`
-    object: RigidObjectCfg | DeformableObjectCfg = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Object",
-        init_state=RigidObjectCfg.InitialStateCfg(
-            pos=[0, 0, 0], rot=[1, 0, 0, 0], lin_vel=[0.1, 0, 0], ang_vel=[0, 0, 0]
-        ),
-        spawn=sim_utils.SphereCfg(
-            radius=0.03,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.5),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 1.0, 0.0)),
-        ),
-    )
+    object: RigidObjectCfg | DeformableObjectCfg = MISSING
 
     # Default house asset (as background): will be populated by agent env cfg
     house: AssetBaseCfg = MISSING
@@ -105,7 +93,7 @@ def get_camera_cfg(cam_cfg: dict, cam_extra_cfg: dict) -> SceneCfg:
         ),
         offset=CameraCfg.OffsetCfg(
             pos=cam_cfg["pos"], rot=cam_cfg["quat"], convention=cam_cfg["convention"]
-        )
+        ),
     )
     return camera_cfg
 
@@ -156,19 +144,35 @@ def get_quat_from_look_at(cam_pos, cam_look_at):
 
 
 def add_object_to_scene(
-    scene_cfg: SceneCfg,
-    object_name: str,
-    object_cfg: RigidObjectCfg | DeformableObjectCfg,
+    scene_cfg: SceneCfg, object_name: str, object_cfg: dict
 ) -> SceneCfg:
-    scene_cfg.__setattr__(object_name, object_cfg)
+    scene_cfg.__setattr__(object_name, _get_object_cfg(object_cfg))
     return scene_cfg
 
 
-def set_target_object(
-    scene_cfg: SceneCfg, target_object_cfg: RigidObjectCfg
-) -> SceneCfg:
-    scene_cfg.object = target_object_cfg
+def set_target_object(scene_cfg: SceneCfg, object_cfg: dict) -> SceneCfg:
+    scene_cfg.object = _get_object_cfg(object_cfg)
     return scene_cfg
+
+
+def _get_object_cfg(obj_cfg: dict) -> RigidObjectCfg | DeformableObjectCfg:
+    init_state = RigidObjectCfg.InitialStateCfg(pos=obj_cfg["pos"], rot=[1, 0, 0, 0])
+    if "lin_vel" in obj_cfg:
+        init_state.lin_vel = obj_cfg["lin_vel"]
+    if "ang_vel" in obj_cfg:
+        init_state.ang_vel = obj_cfg["ang_vel"]
+
+    return RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Object",
+        init_state=init_state,
+        spawn=sim_utils.SphereCfg(
+            radius=0.03,
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.5),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 1.0, 0.0)),
+        ),
+    )
 
 
 def set_house_asset(
@@ -184,10 +188,7 @@ def set_house_asset(
     return scene_cfg
 
 
-def get_table_assets(scene_asset_usd_file: str) -> list:
-    TABLE_MAX_CHILDREN = 5
-    TABLE_MAX_HEIGHT = 1.25
-    TABLE_WH_SUM_LIMIT = 1.5
+def get_table_assets(scene_asset_usd_file: str, table_limits: dict) -> list:
     TABLE_ASSET_KEYWORD = "Table"
     TABLE_ASSET_GRP_NAME = "/house/furniture"
     WALL_ASSET_GRP_NAME = "/house/structure"
@@ -202,21 +203,21 @@ def get_table_assets(scene_asset_usd_file: str) -> list:
     xform.AddOrientOp().Set(pxr.Gf.Quatf(0.7071068, 0.7071068, 0, 0))
     # Get the table assets
     tables = []
+    bbox_cache = pxr.UsdGeom.BBoxCache(
+        pxr.Usd.TimeCode.Default(), [pxr.UsdGeom.Tokens.default_]
+    )
     structure_primtives = stage.GetPrimAtPath(WALL_ASSET_GRP_NAME).GetChildren()
     furniture_primtives = stage.GetPrimAtPath(TABLE_ASSET_GRP_NAME).GetChildren()
     for prim in furniture_primtives:
+        # There may be some assets on the table top
         if (
             TABLE_ASSET_KEYWORD in prim.GetName()
-            and len(prim.GetChildren()) < TABLE_MAX_CHILDREN
+            and len(prim.GetChildren()) <= table_limits["max_children"]
         ):
-            bbox_cache = pxr.UsdGeom.BBoxCache(
-                pxr.Usd.TimeCode.Default(), [pxr.UsdGeom.Tokens.default_]
-            )
             bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
             size = bbox.max - bbox.min
             if (
-                sum(size[:2]) >= TABLE_WH_SUM_LIMIT
-                and size[2] <= TABLE_MAX_HEIGHT
+                sum(size[:2]) >= table_limits["min_wh_sum"]
                 and (np.array(size) != 0).all()
             ):
                 anchors = _get_table_anchors(bbox, size)

@@ -1,3 +1,8 @@
+scene:
+  table:
+    max_children: 3
+    min_wh_sum: 2
+
 camera:
   width: 640
   height: 480
@@ -6,7 +11,7 @@ camera:
   focus_distance: 400
   horizontal_aperture: 4.6
   clip:
-    near: 0.1
+    near: 0.01
     far: 10000
   data_types:
     - rgb

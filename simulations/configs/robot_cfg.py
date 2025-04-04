@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-24 16:59:09
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-01 15:29:30
+# @Last Modified at: 2025-04-04 16:03:49
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
@@ -101,8 +101,13 @@ def get_ee_frame_cfg(robot, position):
         raise ValueError("Unknown robot: %s" % robot)
 
 
-def get_gripper_camera_prim_path(robot):
+def get_gripper_camera_cfg(robot):
     if robot == "franka":
-        return "/Robot/panda_hand/GripperCamera"
+        return {
+            "prim_path": "/Robot/panda_hand/GripperCamera",
+            "pos": [0.053, 0.0, 0.0],
+            "quat": [0, 0.7071068, 0.7071068, 0],
+            "convention": "opengl",
+        }
     else:
         raise ValueError("Unknown robot: %s" % robot)

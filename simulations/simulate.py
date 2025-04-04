@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-03 15:36:03
+# @Last Modified at: 2025-04-04 15:51:35
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -22,7 +22,6 @@ import argparse
 import logging
 import os
 import random
-import scipy.spatial.transform
 import sys
 
 import gymnasium as gym
@@ -30,6 +29,7 @@ import isaaclab.app
 
 # import omni.replicator.core
 import numpy as np
+import scipy.spatial.transform
 import torch
 import yaml
 
@@ -37,7 +37,7 @@ PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.p
 sys.path.append(os.path.dirname(__file__))
 
 
-def get_env_cfg(scene_dir, sim_cfg, robot):
+def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
     # The following packages MUST be imported after the simulation app is created
     import configs.env_cfg
     import configs.scene_cfg
@@ -62,12 +62,11 @@ def get_env_cfg(scene_dir, sim_cfg, robot):
     while table is None:
         # Dynamically create basic scene from USD files
         usd_file = os.path.join(scene_dir, random.choice(os.listdir(scene_dir)))
-        usd_file = "D:/Projects/DynamicVLA/USD/256d7c62-a550-4dd1-a57b-541a2260bff2.usd"
         logging.info("Loading scene from %s", usd_file)
         env_cfg.scene = configs.scene_cfg.set_house_asset(
             env_cfg.scene, os.path.join(scene_dir, usd_file)
         )
-        tables = configs.scene_cfg.get_table_assets(usd_file)
+        tables = configs.scene_cfg.get_table_assets(usd_file, sim_cfg["scene"]["table"])
         if len(tables) != 0:
             table = random.choice(tables)
 
@@ -88,12 +87,7 @@ def get_env_cfg(scene_dir, sim_cfg, robot):
         env_cfg.scene,
         "gripper_camera",
         configs.scene_cfg.get_camera_cfg(
-            sim_cfg["camera"].copy(),
-            {
-                "prim_path": configs.robot_cfg.get_gripper_camera_prim_path(robot),
-                "quat": [0, 0.7071068, 0.7071068, 0],
-                "convention": "opengl",
-            },
+            sim_cfg["camera"].copy(), configs.robot_cfg.get_gripper_camera_cfg(robot)
         ),
     )
 
@@ -105,7 +99,10 @@ def get_env_cfg(scene_dir, sim_cfg, robot):
     )
     env_cfg.scene = configs.scene_cfg.set_light_asset(env_cfg.scene, **light_cfg)
 
-    # TODO: Dynamically add objects to scene
+    # Dynamically add objects to scene
+    env_cfg.scene = configs.scene_cfg.set_target_object(
+        env_cfg.scene, _get_object_cfg(table["bbox"], robot_pose["pos"])
+    )
     # env_cfg.scene = configs.scene_cfg.add_object_to_scene(env_cfg.scene)
 
     # Set up the robot arm
@@ -113,7 +110,6 @@ def get_env_cfg(scene_dir, sim_cfg, robot):
     configs.env_cfg.set_robot(robot, env_cfg, robot_pose, final_ee_position)
 
     return env_cfg
-
 
 
 def _get_camera_relative_pose(cam_pose, robot_pose, table_bbox):
@@ -158,12 +154,40 @@ def _get_light_cfg(light_cfg):
     }
 
 
+def _get_object_cfg(table_bbox, rbt_pos=None, static=False):
+    PADDING = 0.02
+
+    object_cfg = {}
+    tbl_z = table_bbox.max[2] + PADDING
+    object_cfg["pos"] = np.array(
+        [
+            random.uniform(table_bbox.min[0] + PADDING, table_bbox.max[0] - PADDING),
+            random.uniform(table_bbox.min[1] + PADDING, table_bbox.max[1] - PADDING),
+            tbl_z,
+        ]
+    )
+    if not static:
+        assert (
+            rbt_pos is not None
+        ), "Robot position must be provided for dynamic objects."
+        # Generate a random position between the table center and the robot arm
+        tbl_ctr = (table_bbox.min + table_bbox.max) / 2.0
+        rnd_rto = random.uniform(0, 1)
+        rnd_pos = tbl_ctr + rnd_rto * (rbt_pos - tbl_ctr)
+        rnd_pos[2] = tbl_z
+        # Determine the linear velocity of the object
+        rnd_tme = random.uniform(0.5, 5)
+        object_cfg["lin_vel"] = (rnd_pos - object_cfg["pos"]) / rnd_tme
+
+    return object_cfg
+
+
 def main(simulation_app, args):
     with open(args.sim_cfg_file) as fp:
         sim_cfg = yaml.load(fp, Loader=yaml.FullLoader)
 
     # Create environment
-    cfg = get_env_cfg(args.scene_dir, sim_cfg, args.robot)
+    cfg = get_env_cfg(args.scene_dir, args.object_dir, sim_cfg, args.robot)
     env = gym.make("Robot-Env-Cfg-v0", cfg=cfg)
     # Reset environment at start
     env.reset()
@@ -207,7 +231,10 @@ if __name__ == "__main__":
     # Arguments for the script
     parser.add_argument("--robot", default="franka")
     parser.add_argument(
-        "--scene_dir", default=os.path.join(PROJECT_HOME, os.pardir, "USD")
+        "--scene_dir", default=os.path.join(PROJECT_HOME, os.pardir, "scenes")
+    )
+    parser.add_argument(
+        "--object_dir", default=os.path.join(PROJECT_HOME, os.pardir, "objects")
     )
     parser.add_argument(
         "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "datasets")
