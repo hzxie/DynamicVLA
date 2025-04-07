@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-04 15:51:35
+# @Last Modified at: 2025-04-07 15:36:21
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -101,13 +101,18 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
 
     # Dynamically add objects to scene
     env_cfg.scene = configs.scene_cfg.set_target_object(
-        env_cfg.scene, _get_object_cfg(table["bbox"], robot_pose["pos"])
+        env_cfg.scene,
+        _get_object_cfg(
+            table["bbox"],
+            robot_pose["pos"],
+            moving_time=sim_cfg["scene"]["object"]["moving_time"],
+        ),
     )
+    # TODO: Add more objects to the scene
     # env_cfg.scene = configs.scene_cfg.add_object_to_scene(env_cfg.scene)
 
     # Set up the robot arm
-    final_ee_position = [0.0, 0.0, 0.0]
-    configs.env_cfg.set_robot(robot, env_cfg, robot_pose, final_ee_position)
+    configs.env_cfg.set_robot(robot, env_cfg, robot_pose)
 
     return env_cfg
 
@@ -154,7 +159,7 @@ def _get_light_cfg(light_cfg):
     }
 
 
-def _get_object_cfg(table_bbox, rbt_pos=None, static=False):
+def _get_object_cfg(table_bbox, rbt_pos=None, static=False, moving_time=[1, 5]):
     PADDING = 0.02
 
     object_cfg = {}
@@ -176,26 +181,81 @@ def _get_object_cfg(table_bbox, rbt_pos=None, static=False):
         rnd_pos = tbl_ctr + rnd_rto * (rbt_pos - tbl_ctr)
         rnd_pos[2] = tbl_z
         # Determine the linear velocity of the object
-        rnd_tme = random.uniform(0.5, 5)
+        rnd_tme = random.uniform(*moving_time)
         object_cfg["lin_vel"] = (rnd_pos - object_cfg["pos"]) / rnd_tme
 
     return object_cfg
+
+
+def get_state_machine(task, sm_args={}):
+    import state_machines.pick_sm
+
+    STATE_MACHINES = {
+        "pick": state_machines.pick_sm.PickStateMachine,
+    }
+    if task not in STATE_MACHINES:
+        raise ValueError(f"Unknown task: %s." % task)
+
+    return STATE_MACHINES[task](**sm_args)
+
+
+def get_curr_state(ee_state, object_state, env_origins):
+    return {
+        "end_effector": {
+            "pos": ee_state.target_pos_w[..., 0, :] - env_origins,
+            "quat": ee_state.target_quat_w[..., 0, :],
+        },
+        "object": {
+            "pos": object_state.root_pos_w - env_origins,
+            "quat": object_state.root_quat_w,
+            "velocity": object_state.root_lin_vel_w,
+            "acceleration": object_state.body_lin_acc_w,
+        },
+    }
 
 
 def main(simulation_app, args):
     with open(args.sim_cfg_file) as fp:
         sim_cfg = yaml.load(fp, Loader=yaml.FullLoader)
 
-    # Create environment
-    cfg = get_env_cfg(args.scene_dir, args.object_dir, sim_cfg, args.robot)
-    env = gym.make("Robot-Env-Cfg-v0", cfg=cfg)
+    # Create a new environment
+    env_cfg = get_env_cfg(args.scene_dir, args.object_dir, sim_cfg, args.robot)
+    env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg)
     # Reset environment at start
     env.reset()
 
+    # Initialize the state machine
+    state_machine = get_state_machine(
+        args.task,
+        {
+            "dt": env_cfg.sim.dt * env_cfg.decimation,
+            "num_envs": env.unwrapped.num_envs,
+            "device": env.unwrapped.device,
+        },
+    )
+
     # Perform actions in the environment
     while simulation_app.is_running():
-        actions = torch.from_numpy(env.action_space.sample())
-        env.step(actions)
+        robot_origin = (
+            torch.from_numpy(env_cfg.scene.robot.init_state.pos[None, :])
+            .float()
+            .to(env.unwrapped.device)
+        )
+        robot_quat = (
+            torch.from_numpy(env_cfg.scene.robot.init_state.rot[None, :])
+            .float()
+            .to(env.unwrapped.device)
+        )
+        curr_state = get_curr_state(
+            env.unwrapped.scene["ee_frame"].data,
+            env.unwrapped.scene["object"].data,
+            env.unwrapped.scene.env_origins + robot_origin,
+        )
+        action = state_machine.compute(curr_state, robot_quat)
+
+        is_finished = env.step(action)[-2]
+        if is_finished.any():
+            state_machine.reset_idx(is_finished.nonzero(as_tuple=False).squeeze(-1))
 
     # close the environment
     env.close()
@@ -239,6 +299,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "datasets")
     )
+    parser.add_argument("--task", default="pick")
     parser.add_argument(
         "--sim_cfg_file",
         default=os.path.join(PROJECT_HOME, "simulations", "configs", "sim_cfg.yaml"),

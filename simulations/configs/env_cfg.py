@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 21:04:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-03-29 09:50:07
+# @Last Modified at: 2025-04-05 14:49:40
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
@@ -177,14 +177,10 @@ class EnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physx.friction_correlation_distance = 0.00625
 
 
-def set_robot(
-    robot: str, env_cfg: EnvCfg, robot_pose: list, final_ee_position: list
-) -> EnvCfg:
+def set_robot(robot: str, env_cfg: EnvCfg, robot_pose: list) -> EnvCfg:
     assert robot in ["franka"], "Unknown robot: %s" % robot
     env_cfg.commands.object_pose.body_name = configs.robot_cfg.get_body_name(robot)
-    env_cfg.scene.ee_frame = configs.robot_cfg.get_ee_frame_cfg(
-        robot, final_ee_position
-    )
+    env_cfg.scene.ee_frame = configs.robot_cfg.get_ee_frame_cfg(robot)
     env_cfg.scene.robot = configs.robot_cfg.get_robot_cfg(robot)
     env_cfg.scene.robot.init_state.pos = robot_pose["pos"]
     env_cfg.scene.robot.init_state.rot = robot_pose["quat"]

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-04 10:36:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-04 13:15:26
+# @Last Modified at: 2025-04-04 21:02:42
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -32,6 +32,12 @@ def main(input_dir, output_dir):
             shutil.copyfile(input_file, output_file)
 
         stage = Usd.Stage.Open(output_file)
+        # Guarantee that the Default Prim is /house
+        default_prim = stage.GetDefaultPrim()
+        if default_prim.GetPath() != "/house":
+            stage.SetDefaultPrim(stage.GetPrimAtPath("/house"))
+
+        # Create collision for all meshes in the stage
         for prim in tqdm(stage.Traverse(), leave=False):
             if prim.GetTypeName() == "Mesh":
                 #  UsdPhysics.RigidBodyAPI.Apply(prim)

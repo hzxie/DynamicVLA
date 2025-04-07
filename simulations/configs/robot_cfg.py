@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-24 16:59:09
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-04 16:03:49
+# @Last Modified at: 2025-04-05 14:54:38
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
@@ -70,14 +70,14 @@ def get_robot_cfg(robot: str) -> ArticulationCfg:
         raise ValueError("Unknown robot: %s" % robot)
 
 
-def get_robot_action_cfg(robot):
+def get_robot_action_cfg(robot: str) -> ActionCfg:
     if robot == "franka":
         return FrankaActionCfg()
     else:
         raise ValueError("Unknown robot: %s" % robot)
 
 
-def get_ee_frame_cfg(robot, position):
+def get_ee_frame_cfg(robot: str) -> FrameTransformerCfg:
     marker_cfg = FRAME_MARKER_CFG.copy()
     marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
     marker_cfg.prim_path = "/Visuals/FrameTransformer"
@@ -91,9 +91,7 @@ def get_ee_frame_cfg(robot, position):
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Robot/panda_hand",
                     name="end_effector",
-                    offset=OffsetCfg(
-                        pos=position,
-                    ),
+                    offset=OffsetCfg(pos=[0.0, 0.0, 0.1034]),
                 ),
             ],
         )
@@ -101,7 +99,7 @@ def get_ee_frame_cfg(robot, position):
         raise ValueError("Unknown robot: %s" % robot)
 
 
-def get_gripper_camera_cfg(robot):
+def get_gripper_camera_cfg(robot: str) -> dict:
     if robot == "franka":
         return {
             "prim_path": "/Robot/panda_hand/GripperCamera",

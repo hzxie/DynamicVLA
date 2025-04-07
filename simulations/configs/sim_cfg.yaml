@@ -1,7 +1,12 @@
 scene:
   table:
     max_children: 3
+    max_height: 1.5
     min_wh_sum: 2
+  object:
+    moving_time:
+      - 0.5
+      - 5
 
 camera:
   width: 640

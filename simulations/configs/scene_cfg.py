@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-23 12:28:24
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-04 13:31:04
+# @Last Modified at: 2025-04-05 14:45:45
 # @Email:  root@haozhexie.com
 
 import logging
@@ -218,6 +218,7 @@ def get_table_assets(scene_asset_usd_file: str, table_limits: dict) -> list:
             size = bbox.max - bbox.min
             if (
                 sum(size[:2]) >= table_limits["min_wh_sum"]
+                and size[2] <= table_limits["max_height"]
                 and (np.array(size) != 0).all()
             ):
                 anchors = _get_table_anchors(bbox, size)
