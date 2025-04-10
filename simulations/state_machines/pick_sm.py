@@ -230,8 +230,6 @@ class PickStateMachine:
         )
         ee_quat = curr_state["end_effector"]["quat"][:, [1, 2, 3, 0]]  # xyzw
         ee_pose = torch.cat([ee_pos, ee_quat], dim=-1)
-        # NOTE: FrameTransformerCfg.FrameCfg.offset
-        # ee_pose[:, 2] += 0.1034
 
         # Determine the object position before lifting
         self.grasp_position, self.grasp_wait_time, self.grasp_pose_changed = (
