@@ -45,7 +45,7 @@ class FrankaActionCfg(ActionCfg):
             command_type="pose", use_relative_mode=False, ik_method="dls"
         ),
         body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(
-            pos=[0.0, 0.0, 0.0]
+            pos=[0.0, 0.0, 0.107]
         ),
     )
     gripper_action = mdp.BinaryJointPositionActionCfg(
@@ -91,7 +91,7 @@ def get_ee_frame_cfg(robot: str) -> FrameTransformerCfg:
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Robot/panda_hand",
                     name="end_effector",
-                    # offset=OffsetCfg(pos=[0.0, 0.0, 0.1034]),
+                    offset=OffsetCfg(pos=[0.0, 0.0, 0.1034]),
                 ),
             ],
         )
