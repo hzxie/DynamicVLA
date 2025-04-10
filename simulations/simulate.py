@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-07 15:36:21
+# @Last Modified at: 2025-04-08 15:55:06
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -62,6 +62,9 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
     while table is None:
         # Dynamically create basic scene from USD files
         usd_file = os.path.join(scene_dir, random.choice(os.listdir(scene_dir)))
+        usd_file = (
+            "D:/Projects/DynamicVLA/scenes/058205e1-6ec4-4342-a609-1ecce3551c3b.usd"
+        )
         logging.info("Loading scene from %s", usd_file)
         env_cfg.scene = configs.scene_cfg.set_house_asset(
             env_cfg.scene, os.path.join(scene_dir, usd_file)
