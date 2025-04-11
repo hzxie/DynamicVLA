@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-11 15:26:20
+# @Last Modified at: 2025-04-11 19:23:15
 # @Email:  root@haozhexie.com
 
 import collections
@@ -251,18 +251,15 @@ class PickStateMachine:
         # Convert transformations back to (w, x, y, z)
         des_ee_pose = self.des_ee_pose[:, [0, 1, 2, 6, 3, 4, 5]]
 
-        print(
-            "ee_pos: %s, obj_pos: %s, grasp_pos: %s, wait time: %s, vel: %s\n"
-            % (
-                ee_pose[:, :3],
-                curr_state["object"]["pos"],
-                self.grasp_position,
-                self.grasp_wait_time,
-                curr_state["object"]["velocity"],
-            )
-        )
         # Convert to torch (xyz, quat, grabber_state)
-        return torch.cat([des_ee_pose, self.des_gripper_state.unsqueeze(-1)], dim=-1)
+        action = torch.cat([des_ee_pose, self.des_gripper_state.unsqueeze(-1)], dim=-1)
+        return {
+            "action": action,
+            "sm_state": self.sm_state,
+            "grasp_postion": self.grasp_position,
+            "grasp_quat": grasp_quat,
+            "grasp_wait_time": self.grasp_wait_time,
+        }
 
 
 @wp.func

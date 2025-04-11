@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-24 16:59:09
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-09 19:22:56
+# @Last Modified at: 2025-04-11 20:11:06
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
@@ -103,7 +103,7 @@ def get_gripper_camera_cfg(robot: str) -> dict:
     if robot == "franka":
         return {
             "prim_path": "/Robot/panda_hand/GripperCamera",
-            "pos": [0.053, 0.0, 0.0],
+            "pos": [0.065, 0.0, 0.0],
             "quat": [0, 0.7071068, 0.7071068, 0],
             "convention": "opengl",
         }

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-11 17:07:19
+# @Last Modified at: 2025-04-11 19:55:50
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -275,6 +275,72 @@ def get_stitched_frames(cameras, env_id=0):
     return np.concatenate(stitched_frames, axis=0)
 
 
+def print_state_on_frame(frame, curr_state, next_state, env_id=0):
+    TEXT_MARGIN = 10
+    TEXT_SCALE = 0.5
+    TEXT_THICKNESS = 1
+    TEXT_COLOR = (255, 255, 255)
+    TEXT_FONT = cv2.FONT_HERSHEY_SIMPLEX
+
+    lines = _get_state_text(curr_state, next_state, env_id).split("\n")
+    img_height, img_width = frame.shape[:2]
+    # Print the text on the image
+    y = TEXT_MARGIN
+    for line in lines:
+        (text_width, text_height), _ = cv2.getTextSize(
+            line, TEXT_FONT, TEXT_SCALE, TEXT_THICKNESS
+        )
+        x = img_width - text_width - TEXT_MARGIN
+        frame = cv2.putText(
+            np.ascontiguousarray(frame),
+            line,
+            (x, y + text_height),
+            TEXT_FONT,
+            TEXT_SCALE,
+            TEXT_COLOR,
+            TEXT_THICKNESS,
+            cv2.LINE_AA,
+        )
+        y += text_height + TEXT_MARGIN
+
+    return frame
+
+
+def _get_state_text(curr_state, next_state, env_id=0):
+    grasp_rot = scipy.spatial.transform.Rotation.from_quat(
+        next_state["grasp_quat"][env_id].cpu().numpy()
+    ).as_euler("xyz", degrees=True)
+
+    text = "SM. State: %d\n" % next_state["sm_state"][env_id].item()
+    text += "EE. Pos: %.3f %.3f %.3f\n" % (
+        curr_state["end_effector"]["pos"][env_id, 0].item(),
+        curr_state["end_effector"]["pos"][env_id, 1].item(),
+        curr_state["end_effector"]["pos"][env_id, 2].item(),
+    )
+    text += "Obj. Pos: %.3f %.3f %.3f\n" % (
+        curr_state["object"]["pos"][env_id, 0].item(),
+        curr_state["object"]["pos"][env_id, 1].item(),
+        curr_state["object"]["pos"][env_id, 2].item(),
+    )
+    text += "Obj. Vel: %.3f %.3f %.3f\n" % (
+        curr_state["object"]["velocity"][env_id, 0].item(),
+        curr_state["object"]["velocity"][env_id, 1].item(),
+        curr_state["object"]["velocity"][env_id, 2].item(),
+    )
+    text += "Gsp. Pos: %.3f %.3f %.3f\n" % (
+        next_state["grasp_postion"][env_id, 0].item(),
+        next_state["grasp_postion"][env_id, 1].item(),
+        next_state["grasp_postion"][env_id, 2].item(),
+    )
+    text += "Gsp. Rot: %.3f %.3f %.3f\n" % (
+        grasp_rot[0],
+        grasp_rot[1],
+        grasp_rot[2],
+    )
+    text += "Gsp. Wait Time: %.3f\n" % next_state["grasp_wait_time"][env_id].item()
+    return text
+
+
 def main(simulation_app, args):
     with open(args.sim_cfg_file) as fp:
         sim_cfg = yaml.load(fp, Loader=yaml.FullLoader)
@@ -314,16 +380,18 @@ def main(simulation_app, args):
             env.unwrapped.scene.env_origins + robot_origin,
             robot_quat,
         )
-        action = state_machine.compute(curr_state)  # xyz, quat (wxyz), gripper
+        next_state = state_machine.compute(curr_state)  # xyz, quat (wxyz), gripper
         frames = get_camera_frames(env.unwrapped.scene.sensors)
         if args.debug:
+            frame = get_stitched_frames(frames)[..., ::-1]
+            frame = print_state_on_frame(frame, curr_state, next_state)
             cv2.imwrite(
                 os.path.join(args.output_dir, "%06d.jpg" % frame_count),
-                get_stitched_frames(frames)[..., ::-1],
+                frame,
             )
 
         frame_count += 1
-        is_finished = env.step(action)[-2]
+        is_finished = env.step(next_state["action"])[-2]
         if is_finished.any():
             state_machine.reset_idx(is_finished.nonzero(as_tuple=False).squeeze(-1))
 
