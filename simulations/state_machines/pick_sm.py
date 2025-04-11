@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-11 14:12:16
+# @Last Modified at: 2025-04-11 15:26:20
 # @Email:  root@haozhexie.com
 
 import collections
@@ -123,21 +123,6 @@ class PickStateMachine:
         self.sm_wait_time[env_ids] = 0.0
         self.grasp_wait_time[env_ids] = -1.0
 
-    def _get_robot_relative_position(
-        self, point: torch.Tensor, rbt_quat: torch.Tensor
-    ) -> torch.Tensor:
-        # inv_quat = scipy.spatial.transform.Rotation.from_quat(rbt_quat).inv()
-        # inv_offset = inv_quat.apply(point)
-
-        # pytorch3d/transforms/rotation_conversions.html#quaternion_invert
-        inv_quat = rbt_quat * torch.tensor([[-1, -1, -1, 1]], device=rbt_quat.device)
-        # pytorch3d/transforms/rotation_conversions.html#quaternion_apply
-        t = 2.0 * torch.cross(inv_quat[..., :3], point, dim=-1)
-        inv_offset = (
-            point + inv_quat[..., 3:] * t + torch.cross(inv_quat[..., :3], t, dim=-1)
-        )
-        return inv_offset
-
     def _get_grasp_position(
         self,
         object_position: torch.Tensor,
@@ -215,32 +200,25 @@ class PickStateMachine:
             dim=1,
         )
 
-    def compute(self, curr_state: dict, robot_quat: torch.Tensor) -> torch.Tensor:
-        robot_quat = robot_quat[:, [1, 2, 3, 0]]  # xyzw
-        # Object state
-        object_position = self._get_robot_relative_position(
-            curr_state["object"]["pos"], robot_quat
+    def compute(self, curr_state: dict) -> torch.Tensor:
+        ee_pose = torch.cat(
+            [
+                curr_state["end_effector"]["pos"],
+                curr_state["end_effector"]["quat"][:, [1, 2, 3, 0]],  # xyzw
+            ],
+            dim=-1,
         )
-        object_linear_velocity = self._get_robot_relative_position(
-            curr_state["object"]["velocity"], robot_quat
-        )
-        # Gripper state
-        ee_pos = self._get_robot_relative_position(
-            curr_state["end_effector"]["pos"], robot_quat
-        )
-        ee_quat = curr_state["end_effector"]["quat"][:, [1, 2, 3, 0]]  # xyzw
-        ee_pose = torch.cat([ee_pos, ee_quat], dim=-1)
 
         # Determine the object position before lifting
         self.grasp_position, self.grasp_wait_time, self.grasp_pose_changed = (
             self._get_grasp_position(
-                object_position,
-                object_linear_velocity,
+                curr_state["object"]["pos"],
+                curr_state["object"]["velocity"],
                 self.grasp_position,
                 self.grasp_wait_time,
             )
         )
-        grasp_quat = self._get_grasp_quat(object_linear_velocity)
+        grasp_quat = self._get_grasp_quat(curr_state["object"]["velocity"])
         grasp_pose = torch.cat([self.grasp_position, grasp_quat], dim=-1)
 
         # Convert to warp
@@ -272,19 +250,15 @@ class PickStateMachine:
         )
         # Convert transformations back to (w, x, y, z)
         des_ee_pose = self.des_ee_pose[:, [0, 1, 2, 6, 3, 4, 5]]
-        # des_ee_pose[:, 2] = 0.15
-        # des_ee_pose[:, :2] = self.grasp_position[:, :2]
-        # des_ee_pose[:, 3:7] = grasp_quat[:, [3, 0, 1, 2]]
 
         print(
-            "ee_pos: %s, obj_pos: %s, grasp_pos: %s, wait time: %s, vel: %s, quat: %s\n"
+            "ee_pos: %s, obj_pos: %s, grasp_pos: %s, wait time: %s, vel: %s\n"
             % (
                 ee_pose[:, :3],
-                object_position,
+                curr_state["object"]["pos"],
                 self.grasp_position,
                 self.grasp_wait_time,
-                object_linear_velocity,
-                robot_quat,
+                curr_state["object"]["velocity"],
             )
         )
         # Convert to torch (xyz, quat, grabber_state)

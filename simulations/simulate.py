@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-11 13:26:02
+# @Last Modified at: 2025-04-11 15:27:58
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -123,9 +123,9 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
 def _get_camera_relative_pose(cam_pose, robot_pose, table_bbox):
     import configs.scene_cfg
 
-    rbt_quat = robot_pose["quat"]
+    robot_quat = robot_pose["quat"]
     inv_r = scipy.spatial.transform.Rotation.from_quat(
-        [rbt_quat[1], rbt_quat[2], rbt_quat[3], rbt_quat[0]]
+        [robot_quat[1], robot_quat[2], robot_quat[3], robot_quat[0]]
     ).inv()
     # Relative position of the camera to the robot
     dx, dy, dz = inv_r.apply(cam_pose["pos"] - robot_pose["pos"])
@@ -180,7 +180,7 @@ def _get_object_cfg(table_bbox, rbt_pos=None, static=False, moving_time=[1, 5]):
         ), "Robot position must be provided for dynamic objects."
         # Generate a random position between the table center and the robot arm
         tbl_ctr = (table_bbox.min + table_bbox.max) / 2.0
-        rnd_rto = random.uniform(0, 1)
+        rnd_rto = random.uniform(-0.5, 0.5)
         rnd_pos = tbl_ctr + rnd_rto * (rbt_pos - tbl_ctr)
         rnd_pos[2] = tbl_z
         # Determine the linear velocity of the object
@@ -202,19 +202,39 @@ def get_state_machine(task, sm_args={}):
     return STATE_MACHINES[task](**sm_args)
 
 
-def get_curr_state(ee_state, object_state, env_origins):
+def get_curr_state(ee_state, object_state, env_origins, robot_quat):
+    quat_opengl = robot_quat[:, [1, 2, 3, 0]]  # xyzw
     return {
         "end_effector": {
-            "pos": ee_state.target_pos_w[..., 0, :] - env_origins,
+            "pos": _get_robot_relative_position(
+                ee_state.target_pos_w[..., 0, :] - env_origins, quat_opengl
+            ),
             "quat": ee_state.target_quat_w[..., 0, :],
         },
         "object": {
-            "pos": object_state.root_pos_w - env_origins,
-            "quat": object_state.root_quat_w,
-            "velocity": object_state.root_lin_vel_w,
-            "acceleration": object_state.body_lin_acc_w,
+            "pos": _get_robot_relative_position(
+                object_state.root_pos_w - env_origins, quat_opengl
+            ),
+            "quat": object_state.root_quat_w,  # TODO
+            "velocity": _get_robot_relative_position(
+                object_state.root_lin_vel_w, quat_opengl
+            ),
         },
     }
+
+
+def _get_robot_relative_position(point, robot_quat):
+    # inv_quat = scipy.spatial.transform.Rotation.from_quat(robot_quat).inv()
+    # inv_offset = inv_quat.apply(point)
+
+    # pytorch3d/transforms/rotation_conversions.html#quaternion_invert
+    inv_quat = robot_quat * torch.tensor([[-1, -1, -1, 1]], device=robot_quat.device)
+    # pytorch3d/transforms/rotation_conversions.html#quaternion_apply
+    t = 2.0 * torch.cross(inv_quat[..., :3], point, dim=-1)
+    inv_offset = (
+        point + inv_quat[..., 3:] * t + torch.cross(inv_quat[..., :3], t, dim=-1)
+    )
+    return inv_offset
 
 
 def main(simulation_app, args):
@@ -237,6 +257,11 @@ def main(simulation_app, args):
         },
     )
 
+    # Initialize sensor writers
+    # writers = get_sensor_writers(
+    #     env.unwrapped.scene.sensors, args.output_dir, args.save
+    # )
+
     # Perform actions in the environment
     while simulation_app.is_running():
         robot_origin = (
@@ -253,8 +278,9 @@ def main(simulation_app, args):
             env.unwrapped.scene["ee_frame"].data,
             env.unwrapped.scene["object"].data,
             env.unwrapped.scene.env_origins + robot_origin,
+            robot_quat,
         )
-        action = state_machine.compute(curr_state, robot_quat)
+        action = state_machine.compute(curr_state)
 
         is_finished = env.step(action)[-2]
         if is_finished.any():
@@ -269,6 +295,8 @@ if __name__ == "__main__":
         format="[%(levelname)s] %(asctime)s %(message)s",
         level=logging.INFO,
     )
+    SHARED_PARAMETERS = ["num_envs", "save"]
+
     parser = argparse.ArgumentParser(description="Isaac Simulation Runner")
     # Arguments for the IsaacLab
     parser.add_argument(
@@ -308,7 +336,10 @@ if __name__ == "__main__":
         default=os.path.join(PROJECT_HOME, "simulations", "configs", "sim_cfg.yaml"),
     )
     args = parser.parse_args(script_args)
-    args.num_envs = isaaclab_args.num_envs
+    # Copy the shared parameters from isaaclab_args to args
+    for sp in SHARED_PARAMETERS:
+        if sp in isaaclab_args:
+            setattr(args, sp, getattr(isaaclab_args, sp))
 
     main(app_launcher.app, args)
     app_launcher.app.close()
