@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 21:04:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-05 14:49:40
+# @Last Modified at: 2025-04-11 14:17:58
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
@@ -150,7 +150,7 @@ class EnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the environment."""
 
     # Scene settings
-    scene: SceneCfg = SceneCfg(num_envs=1, env_spacing=2.5)
+    scene: SceneCfg = SceneCfg(num_envs=1, env_spacing=25)
     # Robot settings
     actions: configs.robot_cfg.ActionCfg = MISSING
     # Basic settings

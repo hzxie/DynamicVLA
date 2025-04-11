@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-10 10:56:18
+# @Last Modified at: 2025-04-11 14:12:16
 # @Email:  root@haozhexie.com
 
 import collections
@@ -150,7 +150,7 @@ class PickStateMachine:
         # Initialization: Random waiting time
         curr_waiting_time = torch.rand(object_velocity.size(0), device=self.device) + 1
         # Initialization: Estimate grasp position according to the velocity
-        grasp_position = object_position + object_velocity * curr_waiting_time
+        grasp_position = object_position + object_velocity * curr_waiting_time[:, None]
         curr_grasp_position = grasp_position.clone()
         curr_grasp_position[is_initial] = grasp_position[is_initial]
 
@@ -159,7 +159,7 @@ class PickStateMachine:
         time_to_reach = torch.sum(dist_to_reach * object_velocity, dim=1) / torch.sum(
             object_velocity**2, dim=1
         )
-        future_position = object_position + object_velocity * time_to_reach
+        future_position = object_position + object_velocity * time_to_reach[:, None]
         displacement = future_position - prev_grasp_position
         is_reachable = (torch.norm(displacement, dim=-1) < 0.05) & (time_to_reach > 0)
 
@@ -282,7 +282,7 @@ class PickStateMachine:
                 ee_pose[:, :3],
                 object_position,
                 self.grasp_position,
-                self.grasp_wait_time.item(),
+                self.grasp_wait_time,
                 object_linear_velocity,
                 robot_quat,
             )

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-08 15:55:06
+# @Last Modified at: 2025-04-11 13:26:02
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -308,6 +308,7 @@ if __name__ == "__main__":
         default=os.path.join(PROJECT_HOME, "simulations", "configs", "sim_cfg.yaml"),
     )
     args = parser.parse_args(script_args)
+    args.num_envs = isaaclab_args.num_envs
 
     main(app_launcher.app, args)
     app_launcher.app.close()
