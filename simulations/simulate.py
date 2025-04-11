@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-11 15:27:58
+# @Last Modified at: 2025-04-11 17:07:19
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -24,10 +24,9 @@ import os
 import random
 import sys
 
+import cv2
 import gymnasium as gym
 import isaaclab.app
-
-# import omni.replicator.core
 import numpy as np
 import scipy.spatial.transform
 import torch
@@ -237,6 +236,45 @@ def _get_robot_relative_position(point, robot_quat):
     return inv_offset
 
 
+def get_camera_frames(sensors):
+    # NOTE: import isaaclab.utils does not work
+    from isaaclab.utils import convert_dict_to_backend
+
+    values = {}
+    for name, sensor in sensors.items():
+        if type(sensor).__name__ == "Camera":
+            values[name] = convert_dict_to_backend(
+                {k: v for k, v in sensor.data.output.items()}, backend="numpy"
+            )
+
+    return values
+
+
+def get_stitched_frames(cameras, env_id=0):
+    stitched_frames = []
+    for name, camera in cameras.items():
+        frames = []
+        for k, v in camera.items():
+            if v.ndim == 2:
+                frame = np.repeat(v[env_id, :, :, None], 3, axis=-1)
+            elif v.shape[-1] == 1:
+                frame = np.repeat(v[env_id, :, :, :], 3, axis=-1)
+            elif v.shape[-1] >= 3:
+                frame = np.repeat(v[env_id, :, :, :3], 1, axis=-1)
+            else:
+                raise ValueError(f"Unknown camera data shape: {v.shape}")
+
+            # Normalize the depth image to 0-255
+            if k == "distance_to_image_plane":
+                frame = (frame / np.max(frame[~np.isinf(frame)]) * 255).astype(np.uint8)
+
+            frames.append(frame)
+
+        stitched_frames.append(np.concatenate(frames, axis=1))
+
+    return np.concatenate(stitched_frames, axis=0)
+
+
 def main(simulation_app, args):
     with open(args.sim_cfg_file) as fp:
         sim_cfg = yaml.load(fp, Loader=yaml.FullLoader)
@@ -257,12 +295,8 @@ def main(simulation_app, args):
         },
     )
 
-    # Initialize sensor writers
-    # writers = get_sensor_writers(
-    #     env.unwrapped.scene.sensors, args.output_dir, args.save
-    # )
-
     # Perform actions in the environment
+    frame_count = 0
     while simulation_app.is_running():
         robot_origin = (
             torch.from_numpy(env_cfg.scene.robot.init_state.pos[None, :])
@@ -280,8 +314,15 @@ def main(simulation_app, args):
             env.unwrapped.scene.env_origins + robot_origin,
             robot_quat,
         )
-        action = state_machine.compute(curr_state)
+        action = state_machine.compute(curr_state)  # xyz, quat (wxyz), gripper
+        frames = get_camera_frames(env.unwrapped.scene.sensors)
+        if args.debug:
+            cv2.imwrite(
+                os.path.join(args.output_dir, "%06d.jpg" % frame_count),
+                get_stitched_frames(frames)[..., ::-1],
+            )
 
+        frame_count += 1
         is_finished = env.step(action)[-2]
         if is_finished.any():
             state_machine.reset_idx(is_finished.nonzero(as_tuple=False).squeeze(-1))
@@ -335,6 +376,7 @@ if __name__ == "__main__":
         "--sim_cfg_file",
         default=os.path.join(PROJECT_HOME, "simulations", "configs", "sim_cfg.yaml"),
     )
+    parser.add_argument("--debug", action="store_true", default=False)
     args = parser.parse_args(script_args)
     # Copy the shared parameters from isaaclab_args to args
     for sp in SHARED_PARAMETERS:

@@ -10,9 +10,9 @@
 import collections
 import os
 import sys
+
 import numpy as np
 import torch
-
 import warp as wp
 
 # initialize warp
