@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-04 10:36:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-04 21:02:42
+# @Last Modified at: 2025-04-12 16:58:26
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -32,10 +32,16 @@ def main(input_dir, output_dir):
             shutil.copyfile(input_file, output_file)
 
         stage = Usd.Stage.Open(output_file)
-        # Guarantee that the Default Prim is /house
         default_prim = stage.GetDefaultPrim()
-        if default_prim.GetPath() != "/house":
+        prim_names = [str(p.GetPath()) for p in stage.GetPseudoRoot().GetChildren()]
+
+        if "/house" in prim_names:
+            # If the USD is a scene, set the default prim to the house
             stage.SetDefaultPrim(stage.GetPrimAtPath("/house"))
+        else:
+            # single object, keep the current default prim
+            assert len(prim_names) == 1
+            stage.SetDefaultPrim(default_prim)
 
         # Create collision for all meshes in the stage
         for prim in tqdm(stage.Traverse(), leave=False):

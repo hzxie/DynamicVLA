@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# @File:   create_usd_layout.py
+# @File:   create_usd_scenes.py
 # @Author: Haozhe Xie
 # @Date:   2025-03-20 14:41:09
 # @Last Modified by: Haozhe Xie
