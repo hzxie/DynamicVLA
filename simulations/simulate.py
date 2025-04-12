@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-11 19:55:50
+# @Last Modified at: 2025-04-12 12:48:59
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -61,9 +61,6 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
     while table is None:
         # Dynamically create basic scene from USD files
         usd_file = os.path.join(scene_dir, random.choice(os.listdir(scene_dir)))
-        usd_file = (
-            "D:/Projects/DynamicVLA/scenes/058205e1-6ec4-4342-a609-1ecce3551c3b.usd"
-        )
         logging.info("Loading scene from %s", usd_file)
         env_cfg.scene = configs.scene_cfg.set_house_asset(
             env_cfg.scene, os.path.join(scene_dir, usd_file)
@@ -251,6 +248,8 @@ def get_camera_frames(sensors):
 
 
 def get_stitched_frames(cameras, env_id=0):
+    MAX_DEPTH = 25
+
     stitched_frames = []
     for name, camera in cameras.items():
         frames = []
@@ -266,7 +265,8 @@ def get_stitched_frames(cameras, env_id=0):
 
             # Normalize the depth image to 0-255
             if k == "distance_to_image_plane":
-                frame = (frame / np.max(frame[~np.isinf(frame)]) * 255).astype(np.uint8)
+                frame = np.clip(frame, 0, MAX_DEPTH)
+                frame = (frame / np.max(frame) * 255).astype(np.uint8)
 
             frames.append(frame)
 
@@ -275,14 +275,14 @@ def get_stitched_frames(cameras, env_id=0):
     return np.concatenate(stitched_frames, axis=0)
 
 
-def print_state_on_frame(frame, curr_state, next_state, env_id=0):
+def print_state_on_frame(frame, curr_state, next_state, robot_quat, env_id=0):
     TEXT_MARGIN = 10
     TEXT_SCALE = 0.5
     TEXT_THICKNESS = 1
     TEXT_COLOR = (255, 255, 255)
     TEXT_FONT = cv2.FONT_HERSHEY_SIMPLEX
 
-    lines = _get_state_text(curr_state, next_state, env_id).split("\n")
+    lines = _get_state_text(curr_state, next_state, robot_quat, env_id).split("\n")
     img_height, img_width = frame.shape[:2]
     # Print the text on the image
     y = TEXT_MARGIN
@@ -306,12 +306,20 @@ def print_state_on_frame(frame, curr_state, next_state, env_id=0):
     return frame
 
 
-def _get_state_text(curr_state, next_state, env_id=0):
+def _get_state_text(curr_state, next_state, robot_quat, env_id=0):
     grasp_rot = scipy.spatial.transform.Rotation.from_quat(
         next_state["grasp_quat"][env_id].cpu().numpy()
     ).as_euler("xyz", degrees=True)
+    robot_rot = scipy.spatial.transform.Rotation.from_quat(
+        robot_quat[env_id, [1, 2, 3, 0]].cpu().numpy()
+    ).as_euler("xyz", degrees=True)
 
     text = "SM. State: %d\n" % next_state["sm_state"][env_id].item()
+    text += "Rbt. Rot: %.3f %.3f %.3f\n" % (
+        robot_rot[0],
+        robot_rot[1],
+        robot_rot[2],
+    )
     text += "EE. Pos: %.3f %.3f %.3f\n" % (
         curr_state["end_effector"]["pos"][env_id, 0].item(),
         curr_state["end_effector"]["pos"][env_id, 1].item(),
@@ -384,7 +392,7 @@ def main(simulation_app, args):
         frames = get_camera_frames(env.unwrapped.scene.sensors)
         if args.debug:
             frame = get_stitched_frames(frames)[..., ::-1]
-            frame = print_state_on_frame(frame, curr_state, next_state)
+            frame = print_state_on_frame(frame, curr_state, next_state, robot_quat)
             cv2.imwrite(
                 os.path.join(args.output_dir, "%06d.jpg" % frame_count),
                 frame,
