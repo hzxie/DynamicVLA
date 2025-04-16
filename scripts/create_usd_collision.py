@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-04 10:36:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-12 16:58:26
+# @Last Modified at: 2025-04-15 14:19:04
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -21,8 +21,38 @@ PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.p
 sys.path.append(os.path.dirname(__file__))
 
 
+def set_object_scale(xform, category):
+    from pxr import UsdGeom
+
+    # TODO: Assign different scales to different categories
+    OBJECT_SCALES = {
+        "apple": 0.075,
+        "can": 0.13,
+    }
+
+    scale_op = None
+    for op in xform.GetOrderedXformOps():
+        if op.GetOpType() == UsdGeom.XformOp.TypeScale:
+            scale_op = op
+            break
+    else:
+        scale_op = xform.AddScaleOp()
+
+    scale_op.Set((OBJECT_SCALES[category],) * 3)
+
+
+def reset_object_material(prim):
+    from pxr import UsdShade
+
+    mtl = UsdShade.Material(prim)
+    surface = mtl.GetSurfaceOutput().GetConnectedSource()[0]
+    shader = UsdShade.Shader(surface)
+    shader.GetInput("roughness").Set(0.5)
+    shader.GetInput("useSpecularWorkflow").Set(0)
+
+
 def main(input_dir, output_dir):
-    from pxr import Sdf, Usd, UsdPhysics
+    from pxr import PhysxSchema, Sdf, Usd, UsdGeom, UsdPhysics
 
     usd_files = os.listdir(input_dir)
     for uf in tqdm(usd_files):
@@ -32,22 +62,34 @@ def main(input_dir, output_dir):
             shutil.copyfile(input_file, output_file)
 
         stage = Usd.Stage.Open(output_file)
-        default_prim = stage.GetDefaultPrim()
         prim_names = [str(p.GetPath()) for p in stage.GetPseudoRoot().GetChildren()]
+        is_house = "/house" in prim_names
+        assert len(prim_names) == 1 or is_house
 
-        if "/house" in prim_names:
-            # If the USD is a scene, set the default prim to the house
+        if is_house:
+            # Set the default prim to the house
             stage.SetDefaultPrim(stage.GetPrimAtPath("/house"))
         else:
-            # single object, keep the current default prim
-            assert len(prim_names) == 1
+            default_prim = stage.GetPrimAtPath("/object")
             stage.SetDefaultPrim(default_prim)
+            xform = UsdGeom.Xform(default_prim)
+            set_object_scale(xform, os.path.basename(uf).split("_")[0])
+            reset_object_material(stage.GetPrimAtPath("/object/mtl/material_0"))
+
 
         # Create collision for all meshes in the stage
         for prim in tqdm(stage.Traverse(), leave=False):
             if prim.GetTypeName() == "Mesh":
-                #  UsdPhysics.RigidBodyAPI.Apply(prim)
-                UsdPhysics.CollisionAPI.Apply(prim)
+                collider = UsdPhysics.CollisionAPI.Apply(prim)
+                if not is_house:
+                    # Create SDF collision for the object
+                    mesh_collider = UsdPhysics.MeshCollisionAPI.Apply(prim)
+                    mesh_collider.CreateApproximationAttr().Set("sdf")
+                    collider.GetCollisionEnabledAttr().Set(True)
+                    collision_api = PhysxSchema.PhysxSDFMeshCollisionAPI.Apply(prim)
+                    collision_api.CreateSdfResolutionAttr().Set(1024)
+                    # Enable rigid body API for the object
+                    UsdPhysics.RigidBodyAPI.Apply(prim)
 
         stage.GetRootLayer().Save()
 

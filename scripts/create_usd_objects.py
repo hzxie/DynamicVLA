@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-12 13:42:34
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-12 16:58:36
+# @Last Modified at: 2025-04-15 19:24:18
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -39,17 +39,21 @@ def main(maya_ctl, input_dir, output_dir, categories):
 
     for od in tqdm(object_dirs):
         output_file_path = os.path.join(output_dir, "%s.usd" % os.path.basename(od))
-        if os.path.exists(output_file_path):
-            continue
+        # if os.path.exists(output_file_path):
+        #     continue
 
         # Initialize a new scene
         maya_ctl.set_new_scene()
         # Load the object
         input_file_path = os.path.join(od, "visual", "model_normalized_0.obj")
         maya_ctl.send_python_command(
-            "cmds.file('%s', i=True, type='OBJ', options='mo=1;')"
-            % input_file_path.replace("\\", "/")
+            "cmds.file('%s', i=True, type='OBJ')" % input_file_path.replace("\\", "/")
         )
+        maya_ctl.send_python_command("cmds.rename('Mesh', 'Object')")
+        maya_ctl.send_python_command("cmds.group(em=True, name='object')")
+        maya_ctl.send_python_command("cmds.parent('Object', 'object')")
+        # Smooth the object
+        maya_ctl.send_python_command("cmds.polySmooth('Object', mth=0, dv=2)")
         # Output the object to USD
         maya_ctl.send_python_command(
             "cmds.file('%s', force=True, options='exportUVs=1', type='USD Export', exportAll=True)"
