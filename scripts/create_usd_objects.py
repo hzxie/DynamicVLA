@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-12 13:42:34
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-15 19:24:18
+# @Last Modified at: 2025-04-17 16:22:59
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -49,11 +49,11 @@ def main(maya_ctl, input_dir, output_dir, categories):
         maya_ctl.send_python_command(
             "cmds.file('%s', i=True, type='OBJ')" % input_file_path.replace("\\", "/")
         )
-        maya_ctl.send_python_command("cmds.rename('Mesh', 'Object')")
+        maya_ctl.send_python_command("cmds.rename('Mesh', 'mesh')")
         maya_ctl.send_python_command("cmds.group(em=True, name='object')")
-        maya_ctl.send_python_command("cmds.parent('Object', 'object')")
+        maya_ctl.send_python_command("cmds.parent('mesh', 'object')")
         # Smooth the object
-        maya_ctl.send_python_command("cmds.polySmooth('Object', mth=0, dv=2)")
+        # maya_ctl.send_python_command("cmds.polySmooth('geometry', mth=0, dv=2)")
         # Output the object to USD
         maya_ctl.send_python_command(
             "cmds.file('%s', force=True, options='exportUVs=1', type='USD Export', exportAll=True)"
