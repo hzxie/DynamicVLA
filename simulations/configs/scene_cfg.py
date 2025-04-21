@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-23 12:28:24
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-05 14:45:45
+# @Last Modified at: 2025-04-16 14:56:02
 # @Email:  root@haozhexie.com
 
 import logging
@@ -144,35 +144,19 @@ def get_quat_from_look_at(cam_pos, cam_look_at):
 
 
 def add_object_to_scene(
-    scene_cfg: SceneCfg, object_name: str, object_cfg: dict
+    scene_cfg: SceneCfg,
+    object_name: str,
+    object_cfg: RigidObjectCfg | DeformableObjectCfg,
 ) -> SceneCfg:
-    scene_cfg.__setattr__(object_name, _get_object_cfg(object_cfg))
+    scene_cfg.__setattr__(object_name, object_cfg)
     return scene_cfg
 
 
-def set_target_object(scene_cfg: SceneCfg, object_cfg: dict) -> SceneCfg:
-    scene_cfg.object = _get_object_cfg(object_cfg)
+def set_target_object(
+    scene_cfg: SceneCfg, object_cfg: RigidObjectCfg | DeformableObjectCfg
+) -> SceneCfg:
+    scene_cfg.object = object_cfg
     return scene_cfg
-
-
-def _get_object_cfg(obj_cfg: dict) -> RigidObjectCfg | DeformableObjectCfg:
-    init_state = RigidObjectCfg.InitialStateCfg(pos=obj_cfg["pos"], rot=[1, 0, 0, 0])
-    if "lin_vel" in obj_cfg:
-        init_state.lin_vel = obj_cfg["lin_vel"]
-    if "ang_vel" in obj_cfg:
-        init_state.ang_vel = obj_cfg["ang_vel"]
-
-    return RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Object",
-        init_state=init_state,
-        spawn=sim_utils.SphereCfg(
-            radius=0.03,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.5),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 1.0, 0.0)),
-        ),
-    )
 
 
 def set_house_asset(

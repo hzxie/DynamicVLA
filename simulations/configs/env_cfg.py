@@ -128,7 +128,7 @@ class TerminationsCfg:
             "minimum_height": 0.05,
             "asset_cfg": SceneEntityCfg("object"),
         },
-        time_out=True
+        time_out=True,
     )
 
 

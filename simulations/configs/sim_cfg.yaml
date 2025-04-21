@@ -6,7 +6,7 @@ scene:
   object:
     moving_time:
       - 0.5
-      - 5
+      - 2
 
 camera:
   width: 640

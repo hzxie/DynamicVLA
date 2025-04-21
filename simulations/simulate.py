@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-12 12:48:59
+# @Last Modified at: 2025-04-21 10:21:21
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -61,6 +61,7 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
     while table is None:
         # Dynamically create basic scene from USD files
         usd_file = os.path.join(scene_dir, random.choice(os.listdir(scene_dir)))
+        # usd_file = "D:/Projects/DynamicVLA/scenes/058205e1-6ec4-4342-a609-1ecce3551c3b.usd"
         logging.info("Loading scene from %s", usd_file)
         env_cfg.scene = configs.scene_cfg.set_house_asset(
             env_cfg.scene, os.path.join(scene_dir, usd_file)
@@ -158,9 +159,10 @@ def _get_light_cfg(light_cfg):
     }
 
 
-def _get_object_cfg(table_bbox, rbt_pos=None, static=False, moving_time=[1, 5]):
-    PADDING = 0.02
+def _get_object_cfg(table_bbox, rbt_pos=None, static=False, moving_time=[1, 2]):
+    import configs.object_cfg
 
+    PADDING = 0.02
     object_cfg = {}
     tbl_z = table_bbox.max[2] + PADDING
     object_cfg["pos"] = np.array(
@@ -182,8 +184,13 @@ def _get_object_cfg(table_bbox, rbt_pos=None, static=False, moving_time=[1, 5]):
         # Determine the linear velocity of the object
         rnd_tme = random.uniform(*moving_time)
         object_cfg["lin_vel"] = (rnd_pos - object_cfg["pos"]) / rnd_tme
+        object_cfg["quat"] = configs.object_cfg.get_object_init_quat(
+            object_cfg["lin_vel"]
+        )
 
-    return object_cfg
+    return configs.object_cfg.get_object_cfg(
+        object_cfg, configs.object_cfg.get_spawner_cfg()
+    )
 
 
 def get_state_machine(task, sm_args={}):
@@ -372,6 +379,11 @@ def main(simulation_app, args):
     # Perform actions in the environment
     frame_count = 0
     while simulation_app.is_running():
+        # Add an option to disable the state machine to accelerate the simulation
+        if args.disable_sm:
+            is_finished = env.step(torch.from_numpy(env.action_space.sample()))
+            continue
+
         robot_origin = (
             torch.from_numpy(env_cfg.scene.robot.init_state.pos[None, :])
             .float()
@@ -453,6 +465,7 @@ if __name__ == "__main__":
         default=os.path.join(PROJECT_HOME, "simulations", "configs", "sim_cfg.yaml"),
     )
     parser.add_argument("--debug", action="store_true", default=False)
+    parser.add_argument("--disable_sm", action="store_true", default=False)
     args = parser.parse_args(script_args)
     # Copy the shared parameters from isaaclab_args to args
     for sp in SHARED_PARAMETERS:
