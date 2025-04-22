@@ -352,7 +352,6 @@ def _get_state_text(curr_state, next_state, robot_quat, env_id=0):
         grasp_rot[1],
         grasp_rot[2],
     )
-    text += "Gsp. Wait Time: %.3f\n" % next_state["grasp_wait_time"][env_id].item()
     return text
 
 

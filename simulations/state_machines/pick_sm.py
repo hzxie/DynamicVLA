@@ -34,6 +34,7 @@ class PickSmState:
     APPROACH_OBJECT = wp.constant(2)
     GRASP_OBJECT = wp.constant(3)
     LIFT_OBJECT = wp.constant(4)
+    TO_TARGET = wp.constant(5)
 
 
 class PickSmWaitTime:
@@ -43,7 +44,8 @@ class PickSmWaitTime:
     APPROACH_ABOVE_OBJECT = wp.constant(0.2)
     APPROACH_OBJECT = wp.constant(0.5)
     GRASP_OBJECT = wp.constant(0.2)
-    LIFT_OBJECT = wp.constant(0.6)
+    LIFT_OBJECT = wp.constant(0.3)
+    TO_TARGET = wp.constant(0.6)
 
 
 class PickStateMachine:
@@ -58,7 +60,8 @@ class PickStateMachine:
     2. APPROACH_ABOVE_OBJECT: The robot moves above the position.
     3. APPROACH_OBJECT: The robot moves to the position.
     4. GRASP_OBJECT: The robot grasps the object.
-    5. LIFT_OBJECT: The robot lifts the object to the desired pose. This is the final state.
+    5. LIFT_OBJECT: The robot lifts the object to a height.
+    6. TO_TARGET: The robot moves the object to the desired pose. This is the final state.
     """
 
     def __init__(
@@ -66,7 +69,7 @@ class PickStateMachine:
         dt: float,
         num_envs: int,
         device: torch.device | str = "cpu",
-        dist_threshold=0.005,
+        dist_threshold=0.01,
     ):
         """Initialize the state machine.
 
@@ -89,10 +92,7 @@ class PickStateMachine:
 
         # desired grasp state
         self.grasp_position = torch.zeros((num_envs, 3), device=device)
-        self.grasp_wait_time = torch.ones((num_envs,), device=device) * -1
-        self.grasp_pose_changed = torch.zeros(
-            (num_envs,), dtype=torch.bool, device=device
-        )
+        
         # next gripper state
         self.des_ee_pose = torch.zeros((num_envs, POSE_DIM), device=device)
         self.des_gripper_state = torch.full((num_envs,), 0.0, device=device)
@@ -121,14 +121,11 @@ class PickStateMachine:
 
         self.sm_state[env_ids] = 0
         self.sm_wait_time[env_ids] = 0.0
-        self.grasp_wait_time[env_ids] = -1.0
 
     def _get_grasp_position(
         self,
         object_position: torch.Tensor,
         object_velocity: torch.Tensor,
-        prev_grasp_position: torch.Tensor,
-        prev_waiting_time: torch.Tensor,
     ) -> torch.Tensor:
         
         # Initialization: Constant waiting time
@@ -190,8 +187,6 @@ class PickStateMachine:
         self.grasp_position = self._get_grasp_position(
             curr_state["object"]["pos"],
             curr_state["object"]["velocity"],
-            self.grasp_position,
-            self.grasp_wait_time,
         )
         
         grasp_quat = self._get_grasp_quat(curr_state["object"]["velocity"])
@@ -233,7 +228,6 @@ class PickStateMachine:
             "sm_state": self.sm_state,
             "grasp_postion": self.grasp_position,
             "grasp_quat": grasp_quat,
-            "grasp_wait_time": self.grasp_wait_time,
         }
 
 
@@ -304,7 +298,6 @@ def infer_state_machine(
                 sm_state[tid] = PickSmState.GRASP_OBJECT
                 sm_wait_time[tid] = 0.0
     elif state == PickSmState.GRASP_OBJECT:
-        des_ee_pose[tid] = ee_pose[tid]
         gripper_state[tid] = GripperState.CLOSE
         print("GRASP_OBJECT")
         # wait for a while
@@ -313,20 +306,19 @@ def infer_state_machine(
             sm_state[tid] = PickSmState.LIFT_OBJECT
             sm_wait_time[tid] = 0.0
     elif state == PickSmState.LIFT_OBJECT:
+        if sm_wait_time[tid] < 0.03:
+            des_ee_pose[tid] = wp.transform_multiply(offset[tid], grasp_pose[tid])
+        gripper_state[tid] = GripperState.CLOSE
+        print("LIFT_OBJECT")
+        # wait for a while
+        if sm_wait_time[tid] >= PickSmWaitTime.LIFT_OBJECT:
+            # move to next state and reset wait time
+            sm_state[tid] = PickSmState.TO_TARGET
+            sm_wait_time[tid] = 0.0
+    elif state == PickSmState.TO_TARGET:
         des_ee_pose[tid] = final_object_pose[tid]
         gripper_state[tid] = GripperState.CLOSE
-        dist = get_distance(
-            wp.transform_get_translation(ee_pose[tid]),
-            wp.transform_get_translation(des_ee_pose[tid]),
-        )
-
-        print("LIFT_OBJECT")
-        if dist < dist_threshold:
-            # wait for a while
-            if sm_wait_time[tid] >= PickSmWaitTime.LIFT_OBJECT:
-                # move to next state and reset wait time
-                sm_state[tid] = PickSmState.LIFT_OBJECT
-                sm_wait_time[tid] = 0.0
+        print("TO_TARGET")
 
     # increment wait time
     sm_wait_time[tid] = sm_wait_time[tid] + dt[tid]
