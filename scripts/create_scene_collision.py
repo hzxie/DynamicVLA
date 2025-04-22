@@ -4,13 +4,12 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-04 10:36:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-17 16:00:29
+# @Last Modified at: 2025-04-22 10:37:53
 # @Email:  root@haozhexie.com
 
 import argparse
 import logging
 import os
-import shutil
 import sys
 
 import isaaclab.app
@@ -23,26 +22,23 @@ sys.path.append(os.path.dirname(__file__))
 def main(input_dir, output_dir):
     from pxr import Usd, UsdPhysics
 
-    usd_files = os.listdir(input_dir)
+    usd_files = [f for f in os.listdir(input_dir) if f.endswith(".usd")]
     for uf in tqdm(usd_files):
         input_file = os.path.join(input_dir, uf)
         output_file = os.path.join(output_dir, uf)
-        if output_file != input_file:
-            shutil.copyfile(input_file, output_file)
 
-        stage = Usd.Stage.Open(output_file)
+        stage = Usd.Stage.Open(input_file)
         prim_names = [str(p.GetPath()) for p in stage.GetPseudoRoot().GetChildren()]
         assert "/house" in prim_names
 
         # Set the default prim to the house
         stage.SetDefaultPrim(stage.GetPrimAtPath("/house"))
         # Create collision for all meshes in the stage
-        for prim in tqdm(curr_stage.Traverse(), leave=False):
-            if is_house and prim.GetTypeName() == "Mesh":
+        for prim in tqdm(stage.Traverse(), leave=False):
+            if prim.GetTypeName() == "Mesh":
                 collider = UsdPhysics.CollisionAPI.Apply(prim)
 
-        stage.GetRootLayer().Save()
-
+        stage.GetRootLayer().Export(output_file)
 
 if __name__ == "__main__":
     logging.basicConfig(
@@ -76,7 +72,7 @@ if __name__ == "__main__":
         "--input_dir", default=os.path.join(PROJECT_HOME, os.pardir, "USD")
     )
     parser.add_argument(
-        "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "scenes")
+        "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "objects")
     )
     args = parser.parse_args(script_args)
 

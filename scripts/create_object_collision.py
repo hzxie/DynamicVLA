@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-04 10:36:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-17 16:51:31
+# @Last Modified at: 2025-04-22 10:36:08
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -33,8 +33,9 @@ def create_object_usd(curr_stage, root_prim_path):
     UsdPhysics.RigidBodyAPI.Apply(curr_stage.GetPrimAtPath(root_prim_path))
 
 
-def create_asset_prim(prim_path, usd_path, scale=(1.0, 1.0, 1.0)):
+def create_asset_prim(_, prim_path, usd_path, scale=(1.0, 1.0, 1.0)):
     import isaacsim.core.utils.prims as prim_utils
+    from pxr import Usd
 
     prim_utils.create_prim(prim_path, prim_type="Mesh", usd_path=usd_path, scale=scale)
 
@@ -61,9 +62,6 @@ def reset_object_material(prim):
     from pxr import UsdShade
 
     mtl = UsdShade.Material(prim)
-    import pdb
-
-    pdb.set_trace()
     surface = mtl.GetSurfaceOutput().GetConnectedSource()[0]
     shader = UsdShade.Shader(surface)
     shader.GetInput("roughness").Set(0.5)
@@ -73,7 +71,7 @@ def reset_object_material(prim):
 def main(input_dir, output_dir):
     import isaacsim.core.utils.stage as stage_utils
 
-    usd_files = os.listdir(input_dir)
+    usd_files = [f for f in os.listdir(input_dir) if f.endswith(".usd")]
     for uf in tqdm(usd_files):
         input_file = os.path.join(input_dir, uf)
         output_file = os.path.join(output_dir, uf)
@@ -82,12 +80,12 @@ def main(input_dir, output_dir):
         stage_utils.create_new_stage()
         stage = stage_utils.get_current_stage()
         create_object_usd(stage, "/Object")
-        create_asset_prim("/Object/geometry", input_file)
+        create_asset_prim(stage, "/Object/geometry", input_file)
         create_dummy_collider(stage, "/Object/collider", category)
-
         reset_object_material(stage.GetPrimAtPath("/Object/geometry/mtl/material_0"))
 
-        stage.GetRootLayer().Export(output_file)
+        # Remove external references
+        stage.Flatten().Export(output_file)
 
 
 if __name__ == "__main__":
