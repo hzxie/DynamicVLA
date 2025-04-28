@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-21 10:21:21
+# @Last Modified at: 2025-04-28 19:24:26
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -189,7 +189,10 @@ def _get_object_cfg(table_bbox, rbt_pos=None, static=False, moving_time=[1, 2]):
         )
 
     return configs.object_cfg.get_object_cfg(
-        object_cfg, configs.object_cfg.get_spawner_cfg()
+        object_cfg,
+        configs.object_cfg.get_spawner_cfg(
+            # "D:/Projects/DynamicVLA/objects/apple/apple_10.usd"
+        ),
     )
 
 
@@ -355,6 +358,14 @@ def _get_state_text(curr_state, next_state, robot_quat, env_id=0):
     return text
 
 
+def is_final_position_reached(object_pos, ee_pos, final_pos):
+    DIST_THRESHOLD = 0.02
+
+    ee_offset = (ee_pos - final_pos).abs().sum(dim=1)
+    obj_offset = (object_pos - final_pos).abs().sum(dim=1)
+    return torch.bitwise_and(ee_offset < DIST_THRESHOLD, obj_offset < DIST_THRESHOLD)
+
+
 def main(simulation_app, args):
     with open(args.sim_cfg_file) as fp:
         sim_cfg = yaml.load(fp, Loader=yaml.FullLoader)
@@ -380,7 +391,7 @@ def main(simulation_app, args):
     while simulation_app.is_running():
         # Add an option to disable the state machine to accelerate the simulation
         if args.disable_sm:
-            is_finished = env.step(torch.from_numpy(env.action_space.sample()))
+            env.step(torch.from_numpy(env.action_space.sample()))
             continue
 
         robot_origin = (
@@ -410,8 +421,18 @@ def main(simulation_app, args):
             )
 
         frame_count += 1
-        is_finished = env.step(next_state["action"])[-2]
+        # Check whether the simulation is finished
+        _ = env.step(next_state["action"])
+        # Ideally, _[-2] indicates the simulation is finished, which does not work.
+        is_finished = is_final_position_reached(
+            curr_state["object"]["pos"],
+            curr_state["end_effector"]["pos"],
+            state_machine.final_object_pose[:, :3],
+        )
         if is_finished.any():
+            import pdb
+
+            pdb.set_trace()
             state_machine.reset_idx(is_finished.nonzero(as_tuple=False).squeeze(-1))
 
     # close the environment

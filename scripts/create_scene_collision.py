@@ -40,6 +40,7 @@ def main(input_dir, output_dir):
 
         stage.GetRootLayer().Export(output_file)
 
+
 if __name__ == "__main__":
     logging.basicConfig(
         format="[%(levelname)s] %(asctime)s %(message)s",

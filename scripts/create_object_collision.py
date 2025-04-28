@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-04 10:36:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-22 10:36:08
+# @Last Modified at: 2025-04-23 09:28:16
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -42,7 +42,7 @@ def create_asset_prim(_, prim_path, usd_path, scale=(1.0, 1.0, 1.0)):
 
 def _get_collider_type(category):
     COLLIDERS = {
-        "apple": "Sphere",
+        "apple": "Cylinder",
         "can": "Cylinder",
     }
     assert category in COLLIDERS

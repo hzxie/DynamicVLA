@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-16 14:38:58
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-21 11:24:40
+# @Last Modified at: 2025-04-23 18:46:45
 # @Email:  root@haozhexie.com
 
 import isaaclab.sim as sim_utils
@@ -58,7 +58,7 @@ def get_object_init_quat(init_lin_vel: list[float]) -> list[float]:
     quat = scipy.spatial.transform.Rotation.from_euler(
         "xyz",
         [
-            np.pi / 2,
+            np.pi / 2 * np.random.choice([-1, 1]),
             0,
             -np.arctan2(init_lin_vel[1], init_lin_vel[0]),
         ],
