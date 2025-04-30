@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-28 19:24:26
+# @Last Modified at: 2025-04-30 15:31:05
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -72,6 +72,7 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
 
     # Determine the robot pose
     robot_pose = random.choice([a for a in table["anchors"] if a["side"] == "long"])
+    # TODO: Set up the top-view camera
     # Set up the third-view camera
     cam_pose = random.choice([a for a in table["anchors"] if a["side"] == "short"])
     env_cfg.scene = configs.scene_cfg.add_scene_camera(
@@ -79,7 +80,7 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
         "side_camera",
         configs.scene_cfg.get_camera_cfg(
             sim_cfg["camera"].copy(),
-            _get_camera_relative_pose(cam_pose, robot_pose, table["bbox"]),
+            _get_side_camera_relative_pose(cam_pose, robot_pose, table["bbox"]),
         ),
     )
     # Set up the gripper camera on the robot arm
@@ -117,7 +118,7 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
     return env_cfg
 
 
-def _get_camera_relative_pose(cam_pose, robot_pose, table_bbox):
+def _get_side_camera_relative_pose(cam_pose, robot_pose, table_bbox):
     import configs.scene_cfg
 
     robot_quat = robot_pose["quat"]
@@ -191,7 +192,7 @@ def _get_object_cfg(table_bbox, rbt_pos=None, static=False, moving_time=[1, 2]):
     return configs.object_cfg.get_object_cfg(
         object_cfg,
         configs.object_cfg.get_spawner_cfg(
-            # "D:/Projects/DynamicVLA/objects/apple/apple_10.usd"
+            # "D:/Projects/DynamicVLA/objects/apple/apple_01.usd"
         ),
     )
 
@@ -243,7 +244,7 @@ def _get_robot_relative_position(point, robot_quat):
     return inv_offset
 
 
-def get_camera_frames(sensors):
+def get_camera_views(sensors):
     # NOTE: import isaaclab.utils does not work
     from isaaclab.utils import convert_dict_to_backend
 
@@ -274,7 +275,7 @@ def get_stitched_frames(cameras, env_id=0):
                 raise ValueError(f"Unknown camera data shape: {v.shape}")
 
             # Normalize the depth image to 0-255
-            if k == "distance_to_image_plane":
+            if k in ["depth", "distance_to_image_plane", "distance_to_camera"]:
                 frame = np.clip(frame, 0, MAX_DEPTH)
                 frame = (frame / np.max(frame) * 255).astype(np.uint8)
 
@@ -358,7 +359,7 @@ def _get_state_text(curr_state, next_state, robot_quat, env_id=0):
     return text
 
 
-def is_final_position_reached(object_pos, ee_pos, final_pos):
+def _is_final_position_reached(object_pos, ee_pos, final_pos):
     DIST_THRESHOLD = 0.02
 
     ee_offset = (ee_pos - final_pos).abs().sum(dim=1)
@@ -366,19 +367,22 @@ def is_final_position_reached(object_pos, ee_pos, final_pos):
     return torch.bitwise_and(ee_offset < DIST_THRESHOLD, obj_offset < DIST_THRESHOLD)
 
 
-def main(simulation_app, args):
-    with open(args.sim_cfg_file) as fp:
-        sim_cfg = yaml.load(fp, Loader=yaml.FullLoader)
+def _get_current_frame(env_cfg, cam_views, curr_state, next_state, is_finished):
+    return cam_views
 
+
+def simulate(simulation_app, sim_cfg, task_cfg, dir_cfg, debug_cfg):
     # Create a new environment
-    env_cfg = get_env_cfg(args.scene_dir, args.object_dir, sim_cfg, args.robot)
+    env_cfg = get_env_cfg(
+        dir_cfg["scene_dir"], dir_cfg["object_dir"], sim_cfg, task_cfg["robot"]
+    )
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg)
     # Reset environment at start
     env.reset()
 
     # Initialize the state machine
     state_machine = get_state_machine(
-        args.task,
+        task_cfg["task_name"],
         {
             "dt": env_cfg.sim.dt * env_cfg.decimation,
             "num_envs": env.unwrapped.num_envs,
@@ -386,11 +390,14 @@ def main(simulation_app, args):
         },
     )
 
-    # Perform actions in the environment
-    frame_count = 0
-    while simulation_app.is_running():
+    # Simulation loop
+    states = []
+    is_done = torch.zeros(
+        env.unwrapped.num_envs, dtype=torch.bool, device=env.unwrapped.device
+    )
+    while not is_done.all():
         # Add an option to disable the state machine to accelerate the simulation
-        if args.disable_sm:
+        if debug_cfg["disable_sm"]:
             env.step(torch.from_numpy(env.action_space.sample()))
             continue
 
@@ -411,32 +418,68 @@ def main(simulation_app, args):
             robot_quat,
         )
         next_state = state_machine.compute(curr_state)  # xyz, quat (wxyz), gripper
-        frames = get_camera_frames(env.unwrapped.scene.sensors)
-        if args.debug:
-            frame = get_stitched_frames(frames)[..., ::-1]
-            frame = print_state_on_frame(frame, curr_state, next_state, robot_quat)
+        cam_views = get_camera_views(env.unwrapped.scene.sensors)
+        if debug_cfg["debug"]:
+            cam_view = get_stitched_frames(cam_views)[..., ::-1]
+            cam_view = print_state_on_frame(
+                cam_view, curr_state, next_state, robot_quat
+            )
             cv2.imwrite(
-                os.path.join(args.output_dir, "%06d.jpg" % frame_count),
-                frame,
+                os.path.join(
+                    dir_cfg["output_dir"],
+                    "%06d.jpg" % env.unwrapped.common_step_counter,
+                ),
+                cam_view,
             )
 
-        frame_count += 1
         # Check whether the simulation is finished
-        _ = env.step(next_state["action"])
+        response = env.step(next_state["action"])
         # Ideally, _[-2] indicates the simulation is finished, which does not work.
-        is_finished = is_final_position_reached(
+        is_done = _is_final_position_reached(
             curr_state["object"]["pos"],
             curr_state["end_effector"]["pos"],
             state_machine.final_object_pose[:, :3],
         )
-        if is_finished.any():
-            import pdb
+        # Omit the sequence if the object is dropped or timeout
+        if (
+            response[-1]["log"]["Episode_Termination/time_out"]
+            or response[-1]["log"]["Episode_Termination/object_dropping"]
+        ):
+            break
 
-            pdb.set_trace()
-            state_machine.reset_idx(is_finished.nonzero(as_tuple=False).squeeze(-1))
+        # Save current states (camera views, robot states, and object states)
+        states.append(
+            _get_current_frame(env_cfg, cam_views, curr_state, next_state, is_done)
+        )
 
-    # close the environment
     env.close()
+    return states
+
+
+def main(simulation_app, args):
+    with open(args.sim_cfg_file) as fp:
+        sim_cfg = yaml.load(fp, Loader=yaml.FullLoader)
+
+    # Perform simulations in the environment
+    while simulation_app.is_running():
+        states = simulate(
+            simulation_app,
+            sim_cfg,
+            {
+                "task_name": args.task,
+                "robot": args.robot,
+            },
+            {
+                "scene_dir": args.scene_dir,
+                "object_dir": args.object_dir,
+                "output_dir": args.output_dir,
+            },
+            {
+                "disable_sm": args.disable_sm,
+                "debug": args.debug,
+            },
+        )
+
 
 
 if __name__ == "__main__":

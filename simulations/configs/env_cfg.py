@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 21:04:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-28 19:03:41
+# @Last Modified at: 2025-04-29 18:31:16
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
@@ -165,9 +165,10 @@ class EnvCfg(ManagerBasedRLEnvCfg):
 
     def __post_init__(self):
         """Post initialization."""
-        # general settings
+        # number of simulation steps per environment step
         self.decimation = 2
-        self.episode_length_s = 3.0
+        # the length of the episode in seconds
+        self.episode_length_s = 5.0
         # simulation settings
         self.sim.dt = 0.01  # 100Hz
         self.sim.render_interval = self.decimation

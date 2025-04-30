@@ -20,7 +20,7 @@ camera:
     far: 10000
   data_types:
     - rgb
-    - distance_to_image_plane
+    - depth
 
 lighting:
   temperature:
