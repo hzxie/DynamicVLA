@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-30 15:31:05
+# @Last Modified at: 2025-04-30 20:10:48
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -72,24 +72,12 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
 
     # Determine the robot pose
     robot_pose = random.choice([a for a in table["anchors"] if a["side"] == "long"])
-    # TODO: Set up the top-view camera
-    # Set up the third-view camera
-    cam_pose = random.choice([a for a in table["anchors"] if a["side"] == "short"])
-    env_cfg.scene = configs.scene_cfg.add_scene_camera(
-        env_cfg.scene,
-        "side_camera",
-        configs.scene_cfg.get_camera_cfg(
-            sim_cfg["camera"].copy(),
-            _get_side_camera_relative_pose(cam_pose, robot_pose, table["bbox"]),
-        ),
-    )
-    # Set up the gripper camera on the robot arm
-    env_cfg.scene = configs.scene_cfg.add_scene_camera(
-        env_cfg.scene,
-        "gripper_camera",
-        configs.scene_cfg.get_camera_cfg(
-            sim_cfg["camera"].copy(), configs.robot_cfg.get_gripper_camera_cfg(robot)
-        ),
+    side_cam_pose = random.choice([a for a in table["anchors"] if a["side"] == "short"])
+    # Set up the robot arm
+    configs.env_cfg.set_robot(robot, env_cfg, robot_pose)
+    # Set up cameras in the scene
+    env_cfg.scene = _set_up_scene_cameras(
+        env_cfg.scene, sim_cfg, robot, robot_pose, side_cam_pose, table["bbox"]
     )
 
     # Set the light intensity and color
@@ -101,21 +89,66 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
     env_cfg.scene = configs.scene_cfg.set_light_asset(env_cfg.scene, **light_cfg)
 
     # Dynamically add objects to scene
-    env_cfg.scene = configs.scene_cfg.set_target_object(
-        env_cfg.scene,
-        _get_object_cfg(
-            table["bbox"],
-            robot_pose["pos"],
-            moving_time=sim_cfg["scene"]["object"]["moving_time"],
-        ),
+    env_cfg.scene = _set_up_scene_objects(
+        env_cfg.scene, sim_cfg, robot_pose, table["bbox"]
     )
-    # TODO: Add more objects to the scene
-    # env_cfg.scene = configs.scene_cfg.add_object_to_scene(env_cfg.scene)
-
-    # Set up the robot arm
-    configs.env_cfg.set_robot(robot, env_cfg, robot_pose)
 
     return env_cfg
+
+
+def _set_up_scene_cameras(
+    scene_cfg, sim_cfg, robot, robot_pose, side_cam_pose, table_bbox
+):
+    import configs.scene_cfg
+    import configs.robot_cfg
+
+    # Set up the top-view camera
+    scene_cfg = configs.scene_cfg.add_scene_camera(
+        scene_cfg,
+        "top_camera",
+        configs.scene_cfg.get_camera_cfg(
+            sim_cfg["camera"].copy(),
+            _get_top_camera_relative_pose(robot_pose, table_bbox),
+        ),
+    )
+    # Set up the third-view camera
+    scene_cfg = configs.scene_cfg.add_scene_camera(
+        scene_cfg,
+        "side_camera",
+        configs.scene_cfg.get_camera_cfg(
+            sim_cfg["camera"].copy(),
+            _get_side_camera_relative_pose(side_cam_pose, robot_pose, table_bbox),
+        ),
+    )
+    # Set up the gripper camera on the robot arm
+    scene_cfg = configs.scene_cfg.add_scene_camera(
+        scene_cfg,
+        "gripper_camera",
+        configs.scene_cfg.get_camera_cfg(
+            sim_cfg["camera"].copy(), configs.robot_cfg.get_gripper_camera_cfg(robot)
+        ),
+    )
+    return scene_cfg
+
+
+def _get_top_camera_relative_pose(robot_pose, table_bbox):
+    import configs.scene_cfg
+
+    robot_quat = robot_pose["quat"]
+    inv_r = scipy.spatial.transform.Rotation.from_quat(
+        [robot_quat[1], robot_quat[2], robot_quat[3], robot_quat[0]]
+    ).inv()
+    # Relative position of the camera to the robot
+    tbl_center = (table_bbox.min + table_bbox.max) / 2.0
+    tbl_center[2] = table_bbox.max[2] + 1
+    cx, cy, cz = inv_r.apply(np.array(tbl_center) - robot_pose["pos"])
+
+    return {
+        "prim_path": "/Robot/TopCamera",
+        "pos": [cx, cy, cz],
+        "quat": [0.7071068, 0, 0, -0.7071068],
+        "convention": "opengl",
+    }
 
 
 def _get_side_camera_relative_pose(cam_pose, robot_pose, table_bbox):
@@ -139,6 +172,7 @@ def _get_side_camera_relative_pose(cam_pose, robot_pose, table_bbox):
     dz += max(tbl_size[:2]) / 5
 
     return {
+        "prim_path": "/Robot/SideCamera",
         "pos": [dx, dy, dz],  # Move the camera above the table top
         "quat": cam_quat,
         "convention": "world",
@@ -160,7 +194,32 @@ def _get_light_cfg(light_cfg):
     }
 
 
-def _get_object_cfg(table_bbox, rbt_pos=None, static=False, moving_time=[1, 2]):
+def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox):
+    import configs.scene_cfg
+
+    scene_cfg = configs.scene_cfg.set_target_object(
+        scene_cfg,
+        _get_object_cfg(
+            table_bbox,
+            # file_path="D:/Projects/DynamicVLA/objects/apple/apple_01.usd",
+            robot_pos=robot_pose["pos"],
+            moving_time=sim_cfg["scene"]["object"]["moving_time"],
+            semantic_tags=[("class", "target_object")],
+        ),
+    )
+    # TODO: Add more objects to the scene
+    # scene_cfg = configs.scene_cfg.add_object_to_scene(scene_cfg)
+    return scene_cfg
+
+
+def _get_object_cfg(
+    table_bbox,
+    file_path=None,
+    robot_pos=None,
+    static=False,
+    moving_time=[1, 2],
+    semantic_tags=None,
+):
     import configs.object_cfg
 
     PADDING = 0.02
@@ -175,12 +234,12 @@ def _get_object_cfg(table_bbox, rbt_pos=None, static=False, moving_time=[1, 2]):
     )
     if not static:
         assert (
-            rbt_pos is not None
+            robot_pos is not None
         ), "Robot position must be provided for dynamic objects."
         # Generate a random position between the table center and the robot arm
         tbl_ctr = (table_bbox.min + table_bbox.max) / 2.0
         rnd_rto = random.uniform(-0.5, 0.5)
-        rnd_pos = tbl_ctr + rnd_rto * (rbt_pos - tbl_ctr)
+        rnd_pos = tbl_ctr + rnd_rto * (robot_pos - tbl_ctr)
         rnd_pos[2] = tbl_z
         # Determine the linear velocity of the object
         rnd_tme = random.uniform(*moving_time)
@@ -192,7 +251,7 @@ def _get_object_cfg(table_bbox, rbt_pos=None, static=False, moving_time=[1, 2]):
     return configs.object_cfg.get_object_cfg(
         object_cfg,
         configs.object_cfg.get_spawner_cfg(
-            # "D:/Projects/DynamicVLA/objects/apple/apple_01.usd"
+            file_path=file_path, semantic_tags=semantic_tags
         ),
     )
 
@@ -479,7 +538,6 @@ def main(simulation_app, args):
                 "debug": args.debug,
             },
         )
-
 
 
 if __name__ == "__main__":

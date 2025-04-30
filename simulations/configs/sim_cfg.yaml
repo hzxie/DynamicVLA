@@ -21,6 +21,7 @@ camera:
   data_types:
     - rgb
     - depth
+    - semantic_segmentation
 
 lighting:
   temperature:

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-23 12:28:24
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-16 14:56:02
+# @Last Modified at: 2025-04-30 20:10:11
 # @Email:  root@haozhexie.com
 
 import logging
@@ -78,9 +78,8 @@ def get_camera_cfg(cam_cfg: dict, cam_extra_cfg: dict) -> SceneCfg:
     if "convention" not in cam_cfg:
         cam_cfg["convention"] = "ros"
 
-    prim_path = cam_cfg["prim_path"] if "prim_path" in cam_cfg else "/Robot/SideCamera"
     camera_cfg = CameraCfg(
-        prim_path="{ENV_REGEX_NS}" + prim_path,
+        prim_path="{ENV_REGEX_NS}" + cam_cfg["prim_path"],
         update_period=1 / cam_cfg["fps"],
         height=cam_cfg["height"],
         width=cam_cfg["width"],

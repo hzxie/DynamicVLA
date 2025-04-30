@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-16 14:38:58
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-23 18:46:45
+# @Last Modified at: 2025-04-30 16:31:32
 # @Email:  root@haozhexie.com
 
 import isaaclab.sim as sim_utils
@@ -33,7 +33,9 @@ def get_object_cfg(
     )
 
 
-def get_spawner_cfg(file_path: str = None, mass: int = 0.5) -> SpawnerCfg:
+def get_spawner_cfg(
+    file_path: str = None, mass: int = 0.5, semantic_tags=None
+) -> SpawnerCfg:
     if file_path is not None:
         spawner_cfg = UsdFileCfg(
             usd_path=file_path,
@@ -51,6 +53,9 @@ def get_spawner_cfg(file_path: str = None, mass: int = 0.5) -> SpawnerCfg:
             collision_props=sim_utils.CollisionPropertiesCfg(),
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 1.0, 0.0)),
         )
+    if semantic_tags is not None:
+        spawner_cfg.semantic_tags = semantic_tags
+
     return spawner_cfg
 
 
