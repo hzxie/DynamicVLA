@@ -9,8 +9,8 @@ scene:
       - 2
 
 camera:
-  width: 640
-  height: 480
+  width: 320
+  height: 240
   fps: 100
   focal_length: 2.3
   focus_distance: 400

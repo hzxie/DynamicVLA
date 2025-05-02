@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-30 20:10:48
+# @Last Modified at: 2025-05-02 21:03:46
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -19,12 +19,15 @@ It uses the `warp` library to run the state machine in parallel on the GPU.
 """
 
 import argparse
+import ast
 import logging
 import os
 import random
 import sys
 
 import cv2
+import h5py
+import helpers
 import gymnasium as gym
 import isaaclab.app
 import numpy as np
@@ -99,13 +102,13 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
 def _set_up_scene_cameras(
     scene_cfg, sim_cfg, robot, robot_pose, side_cam_pose, table_bbox
 ):
-    import configs.scene_cfg
     import configs.robot_cfg
+    import configs.scene_cfg
 
     # Set up the top-view camera
     scene_cfg = configs.scene_cfg.add_scene_camera(
         scene_cfg,
-        "top_camera",
+        "top_cam",
         configs.scene_cfg.get_camera_cfg(
             sim_cfg["camera"].copy(),
             _get_top_camera_relative_pose(robot_pose, table_bbox),
@@ -114,7 +117,7 @@ def _set_up_scene_cameras(
     # Set up the third-view camera
     scene_cfg = configs.scene_cfg.add_scene_camera(
         scene_cfg,
-        "side_camera",
+        "side_cam",
         configs.scene_cfg.get_camera_cfg(
             sim_cfg["camera"].copy(),
             _get_side_camera_relative_pose(side_cam_pose, robot_pose, table_bbox),
@@ -123,7 +126,7 @@ def _set_up_scene_cameras(
     # Set up the gripper camera on the robot arm
     scene_cfg = configs.scene_cfg.add_scene_camera(
         scene_cfg,
-        "gripper_camera",
+        "gripper_cam",
         configs.scene_cfg.get_camera_cfg(
             sim_cfg["camera"].copy(), configs.robot_cfg.get_gripper_camera_cfg(robot)
         ),
@@ -204,7 +207,7 @@ def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox):
             # file_path="D:/Projects/DynamicVLA/objects/apple/apple_01.usd",
             robot_pos=robot_pose["pos"],
             moving_time=sim_cfg["scene"]["object"]["moving_time"],
-            semantic_tags=[("class", "target_object")],
+            semantic_tags=[("class", "OBJECT_MAIN")],
         ),
     )
     # TODO: Add more objects to the scene
@@ -307,115 +310,44 @@ def get_camera_views(sensors):
     # NOTE: import isaaclab.utils does not work
     from isaaclab.utils import convert_dict_to_backend
 
-    values = {}
+    cam_views = {}
     for name, sensor in sensors.items():
         if type(sensor).__name__ == "Camera":
-            values[name] = convert_dict_to_backend(
+            cam_views[name] = convert_dict_to_backend(
                 {k: v for k, v in sensor.data.output.items()}, backend="numpy"
             )
+            # Make semantic segmentation consistent in all views
+            if "semantic_segmentation" in cam_views[name]:
+                cam_views[name]["seg"] = _get_semantic_segmentation(
+                    cam_views[name]["semantic_segmentation"],
+                    [
+                        i["semantic_segmentation"]["idToLabels"]
+                        for i in sensor.data.info
+                    ],
+                )
+                # Remove the original semantic segmentation (with New Key: "seg")
+                del cam_views[name]["semantic_segmentation"]
 
-    return values
-
-
-def get_stitched_frames(cameras, env_id=0):
-    MAX_DEPTH = 25
-
-    stitched_frames = []
-    for name, camera in cameras.items():
-        frames = []
-        for k, v in camera.items():
-            if v.ndim == 2:
-                frame = np.repeat(v[env_id, :, :, None], 3, axis=-1)
-            elif v.shape[-1] == 1:
-                frame = np.repeat(v[env_id, :, :, :], 3, axis=-1)
-            elif v.shape[-1] >= 3:
-                frame = np.repeat(v[env_id, :, :, :3], 1, axis=-1)
-            else:
-                raise ValueError(f"Unknown camera data shape: {v.shape}")
-
-            # Normalize the depth image to 0-255
-            if k in ["depth", "distance_to_image_plane", "distance_to_camera"]:
-                frame = np.clip(frame, 0, MAX_DEPTH)
-                frame = (frame / np.max(frame) * 255).astype(np.uint8)
-
-            frames.append(frame)
-
-        stitched_frames.append(np.concatenate(frames, axis=1))
-
-    return np.concatenate(stitched_frames, axis=0)
+    return cam_views
 
 
-def print_state_on_frame(frame, curr_state, next_state, robot_quat, env_id=0):
-    TEXT_MARGIN = 10
-    TEXT_SCALE = 0.5
-    TEXT_THICKNESS = 1
-    TEXT_COLOR = (255, 255, 255)
-    TEXT_FONT = cv2.FONT_HERSHEY_SIMPLEX
+def _get_semantic_segmentation(rgba_seg_maps, semantic_tags):
+    KNOWN_TAGS = {"ROBOT": 1, "OBJECT_BG": 2, "OBJECT_MAIN": 3}
+    seg_maps = np.zeros_like(rgba_seg_maps[..., :1], dtype=np.uint8)
 
-    lines = _get_state_text(curr_state, next_state, robot_quat, env_id).split("\n")
-    img_height, img_width = frame.shape[:2]
-    # Print the text on the image
-    y = TEXT_MARGIN
-    for line in lines:
-        (text_width, text_height), _ = cv2.getTextSize(
-            line, TEXT_FONT, TEXT_SCALE, TEXT_THICKNESS
-        )
-        x = img_width - text_width - TEXT_MARGIN
-        frame = cv2.putText(
-            np.ascontiguousarray(frame),
-            line,
-            (x, y + text_height),
-            TEXT_FONT,
-            TEXT_SCALE,
-            TEXT_COLOR,
-            TEXT_THICKNESS,
-            cv2.LINE_AA,
-        )
-        y += text_height + TEXT_MARGIN
+    # Iterate over each image (since the tags may not be the same for each image)
+    for si, st in enumerate(semantic_tags):
+        for color, tag in st.items():
+            tag_name = tag["class"].upper()
+            if tag_name not in KNOWN_TAGS.keys():
+                # logging.warning("Unknown semantic tag %s.", tag)
+                continue
 
-    return frame
+            # Convert the color string to a tuple (Unbelievable string here!)
+            mask = np.all(rgba_seg_maps[si] == ast.literal_eval(color), axis=-1)
+            seg_maps[si][mask] = KNOWN_TAGS[tag_name]
 
-
-def _get_state_text(curr_state, next_state, robot_quat, env_id=0):
-    grasp_rot = scipy.spatial.transform.Rotation.from_quat(
-        next_state["grasp_quat"][env_id].cpu().numpy()
-    ).as_euler("xyz", degrees=True)
-    robot_rot = scipy.spatial.transform.Rotation.from_quat(
-        robot_quat[env_id, [1, 2, 3, 0]].cpu().numpy()
-    ).as_euler("xyz", degrees=True)
-
-    text = "SM. State: %d\n" % next_state["sm_state"][env_id].item()
-    text += "Rbt. Rot: %.3f %.3f %.3f\n" % (
-        robot_rot[0],
-        robot_rot[1],
-        robot_rot[2],
-    )
-    text += "EE. Pos: %.3f %.3f %.3f\n" % (
-        curr_state["end_effector"]["pos"][env_id, 0].item(),
-        curr_state["end_effector"]["pos"][env_id, 1].item(),
-        curr_state["end_effector"]["pos"][env_id, 2].item(),
-    )
-    text += "Obj. Pos: %.3f %.3f %.3f\n" % (
-        curr_state["object"]["pos"][env_id, 0].item(),
-        curr_state["object"]["pos"][env_id, 1].item(),
-        curr_state["object"]["pos"][env_id, 2].item(),
-    )
-    text += "Obj. Vel: %.3f %.3f %.3f\n" % (
-        curr_state["object"]["velocity"][env_id, 0].item(),
-        curr_state["object"]["velocity"][env_id, 1].item(),
-        curr_state["object"]["velocity"][env_id, 2].item(),
-    )
-    text += "Gsp. Pos: %.3f %.3f %.3f\n" % (
-        next_state["grasp_postion"][env_id, 0].item(),
-        next_state["grasp_postion"][env_id, 1].item(),
-        next_state["grasp_postion"][env_id, 2].item(),
-    )
-    text += "Gsp. Rot: %.3f %.3f %.3f\n" % (
-        grasp_rot[0],
-        grasp_rot[1],
-        grasp_rot[2],
-    )
-    return text
+    return seg_maps
 
 
 def _is_final_position_reached(object_pos, ee_pos, final_pos):
@@ -426,8 +358,34 @@ def _is_final_position_reached(object_pos, ee_pos, final_pos):
     return torch.bitwise_and(ee_offset < DIST_THRESHOLD, obj_offset < DIST_THRESHOLD)
 
 
-def _get_current_frame(env_cfg, cam_views, curr_state, next_state, is_finished):
-    return cam_views
+def _get_current_env_states(cam_views, curr_state, next_state, is_done):
+    # Reorganize by env_id
+    env_states = []
+    for env_id in range(is_done.size(0)):
+        if is_done[env_id].item():
+            env_states.append({})
+            continue
+
+        env_states.append(
+            {
+                "sm_state": next_state["sm_state"][env_id].item(),
+                "ee_pos": curr_state["end_effector"]["pos"][env_id].cpu().numpy(),
+                "ee_quat": curr_state["end_effector"]["quat"][env_id].cpu().numpy(),
+                "object_pos": curr_state["object"]["pos"][env_id].cpu().numpy(),
+                "object_quat": curr_state["object"]["quat"][env_id].cpu().numpy(),
+                "object_vel": curr_state["object"]["velocity"][env_id].cpu().numpy(),
+                "grasp_pos": next_state["grasp_postion"][env_id].cpu().numpy(),
+                "grasp_quat": next_state["grasp_quat"][env_id].cpu().numpy(),
+                "action": next_state["action"][env_id].cpu().numpy(),
+            }
+        )
+        # Add camera views to the env_states
+        if cam_views is not None:
+            for cam, imgs in cam_views.items():
+                for k, v in imgs.items():
+                    env_states[-1]["%s_%s" % (cam, k)] = v[env_id]
+
+    return env_states
 
 
 def simulate(simulation_app, sim_cfg, task_cfg, dir_cfg, debug_cfg):
@@ -450,7 +408,7 @@ def simulate(simulation_app, sim_cfg, task_cfg, dir_cfg, debug_cfg):
     )
 
     # Simulation loop
-    states = []
+    env_states = [{} for _ in range(env.unwrapped.num_envs)]
     is_done = torch.zeros(
         env.unwrapped.num_envs, dtype=torch.bool, device=env.unwrapped.device
     )
@@ -478,19 +436,6 @@ def simulate(simulation_app, sim_cfg, task_cfg, dir_cfg, debug_cfg):
         )
         next_state = state_machine.compute(curr_state)  # xyz, quat (wxyz), gripper
         cam_views = get_camera_views(env.unwrapped.scene.sensors)
-        if debug_cfg["debug"]:
-            cam_view = get_stitched_frames(cam_views)[..., ::-1]
-            cam_view = print_state_on_frame(
-                cam_view, curr_state, next_state, robot_quat
-            )
-            cv2.imwrite(
-                os.path.join(
-                    dir_cfg["output_dir"],
-                    "%06d.jpg" % env.unwrapped.common_step_counter,
-                ),
-                cam_view,
-            )
-
         # Check whether the simulation is finished
         response = env.step(next_state["action"])
         # Ideally, _[-2] indicates the simulation is finished, which does not work.
@@ -505,14 +450,50 @@ def simulate(simulation_app, sim_cfg, task_cfg, dir_cfg, debug_cfg):
             or response[-1]["log"]["Episode_Termination/object_dropping"]
         ):
             break
-
-        # Save current states (camera views, robot states, and object states)
-        states.append(
-            _get_current_frame(env_cfg, cam_views, curr_state, next_state, is_done)
+        # Save current env. states (camera views, robot states, and object states)
+        _env_states = _get_current_env_states(
+            cam_views, curr_state, next_state, is_done
         )
+        # Visualize the simulation data for debugging
+        if debug_cfg["debug"]:
+            cv2.imwrite(
+                os.path.join(
+                    dir_cfg["output_dir"],
+                    "%06d.jpg" % env.unwrapped.common_step_counter,
+                ),
+                helpers.get_curr_frame(
+                    _env_states.copy(),  # ENV_ID = 0
+                    [
+                        "sm_state",
+                        "ee_pos",
+                        "object_pos",
+                        "object_vel",
+                        "grasp_pos",
+                        "grasp_quat",
+                    ],
+                ),
+            )
+        # Reorganize the env_states by keys
+        for eid, es in enumerate(_env_states):
+            for k, v in es.items():
+                # Omit these keys in the dumped data
+                if k in ["grasp_pos", "grasp_quat"]:
+                    continue
+                if k not in env_states[eid]:
+                    env_states[eid][k] = []
+
+                env_states[eid][k].append(v)
 
     env.close()
-    return states
+    # Ignore the simulation if the task is not finished
+    return env_cfg, [
+        es for env_id, es in enumerate(env_states) if is_done[env_id].item()
+    ]
+
+
+def get_episode_name(task, env_cfg):
+    # TODO: Generate a unique name for the episode
+    return "%s" % task
 
 
 def main(simulation_app, args):
@@ -521,7 +502,7 @@ def main(simulation_app, args):
 
     # Perform simulations in the environment
     while simulation_app.is_running():
-        states = simulate(
+        env_cfg, env_states = simulate(
             simulation_app,
             sim_cfg,
             {
@@ -538,6 +519,17 @@ def main(simulation_app, args):
                 "debug": args.debug,
             },
         )
+        if args.save:
+            for es in env_states:
+                episode_name = get_episode_name(args.task, env_cfg)
+                with h5py.File(
+                    os.path.join(args.output_dir, "%s.h5" % episode_name), "w"
+                ) as fp:
+                    # TODO: Save the env_cfg
+                    # fp.create_dataset("cfg", data=env_cfg, compression="gzip")
+                    for k, v in es.items():
+                        fp.create_dataset(k, data=v, compression="gzip")
+
 
 
 if __name__ == "__main__":
@@ -564,10 +556,8 @@ if __name__ == "__main__":
         default=False,
         help="Save the data from camera at index specified by ``--camera_id``.",
     )
-    # IssacSim Environment Initialization
     isaaclab.app.AppLauncher.add_app_launcher_args(parser)
     isaaclab_args, script_args = parser.parse_known_args()
-    app_launcher = isaaclab.app.AppLauncher(isaaclab_args)
 
     # Arguments for the script
     parser.add_argument("--robot", default="franka")
@@ -587,11 +577,14 @@ if __name__ == "__main__":
     )
     parser.add_argument("--debug", action="store_true", default=False)
     parser.add_argument("--disable_sm", action="store_true", default=False)
+    # TODO: Add a flag to enable path tracing
+    # parser.add_argument("--path_tracing", action="store_true", default=False)
     args = parser.parse_args(script_args)
     # Copy the shared parameters from isaaclab_args to args
     for sp in SHARED_PARAMETERS:
         if sp in isaaclab_args:
             setattr(args, sp, getattr(isaaclab_args, sp))
 
+    app_launcher = isaaclab.app.AppLauncher(isaaclab_args)
     main(app_launcher.app, args)
     app_launcher.app.close()

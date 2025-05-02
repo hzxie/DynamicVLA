@@ -1,4 +1,5 @@
 easydict
+h5py
 opencv-python
 PyYAML
 wandb

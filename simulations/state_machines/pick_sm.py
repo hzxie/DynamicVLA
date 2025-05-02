@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-28 19:23:40
+# @Last Modified at: 2025-05-02 15:06:34
 # @Email:  root@haozhexie.com
 
 import collections
@@ -127,16 +127,8 @@ class PickStateMachine:
         object_position: torch.Tensor,
         object_velocity: torch.Tensor,
     ) -> torch.Tensor:
-
-        # Initialization: Constant waiting time
-        prediction_time = 0.25
-        curr_waiting_time = torch.full(
-            (object_velocity.size(0),), prediction_time, device=self.device
-        )
-        # Initialization: Estimate grasp position according to the velocity
-        grasp_position = object_position + object_velocity * curr_waiting_time[:, None]
-
-        return grasp_position
+        WAITING_TIME = 0.25
+        return object_position + object_velocity * WAITING_TIME
 
     def _get_grasp_quat(self, object_velocity: torch.Tensor) -> torch.Tensor:
         # NOTE: Rotation around the z-axis (0, 0, 1)

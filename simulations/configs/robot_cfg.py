@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-24 16:59:09
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-30 16:30:56
+# @Last Modified at: 2025-05-01 16:11:53
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
@@ -66,7 +66,7 @@ def get_body_name(robot: str) -> str:
 def get_robot_cfg(robot: str) -> ArticulationCfg:
     if robot == "franka":
         cfg = FRANKA_PANDA_HIGH_PD_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-        cfg.spawn.semantic_tags = [("class", "robot")]
+        cfg.spawn.semantic_tags = [("class", "ROBOT")]
     else:
         raise ValueError("Unknown robot: %s" % robot)
 
