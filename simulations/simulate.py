@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-02 21:03:46
+# @Last Modified at: 2025-05-03 15:03:30
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -20,15 +20,16 @@ It uses the `warp` library to run the state machine in parallel on the GPU.
 
 import argparse
 import ast
+import json
 import logging
 import os
 import random
 import sys
+import uuid
 
 import cv2
-import h5py
-import helpers
 import gymnasium as gym
+import h5py
 import isaaclab.app
 import numpy as np
 import scipy.spatial.transform
@@ -95,7 +96,6 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
     env_cfg.scene = _set_up_scene_objects(
         env_cfg.scene, sim_cfg, robot_pose, table["bbox"]
     )
-
     return env_cfg
 
 
@@ -204,7 +204,7 @@ def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox):
         scene_cfg,
         _get_object_cfg(
             table_bbox,
-            # file_path="D:/Projects/DynamicVLA/objects/apple/apple_01.usd",
+            file_path="D:/Projects/DynamicVLA/objects/apple/apple01.usd",
             robot_pos=robot_pose["pos"],
             moving_time=sim_cfg["scene"]["object"]["moving_time"],
             semantic_tags=[("class", "OBJECT_MAIN")],
@@ -389,13 +389,19 @@ def _get_current_env_states(cam_views, curr_state, next_state, is_done):
 
 
 def simulate(simulation_app, sim_cfg, task_cfg, dir_cfg, debug_cfg):
+    import carb.settings
+
     # Create a new environment
     env_cfg = get_env_cfg(
         dir_cfg["scene_dir"], dir_cfg["object_dir"], sim_cfg, task_cfg["robot"]
     )
-    env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg)
+    env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=debug_cfg["seed"])
     # Reset environment at start
     env.reset()
+
+    # Enable Path Tracing
+    if debug_cfg["path_tracing"]:
+        rep.settings.set_render_pathtraced()
 
     # Initialize the state machine
     state_machine = get_state_machine(
@@ -454,25 +460,6 @@ def simulate(simulation_app, sim_cfg, task_cfg, dir_cfg, debug_cfg):
         _env_states = _get_current_env_states(
             cam_views, curr_state, next_state, is_done
         )
-        # Visualize the simulation data for debugging
-        if debug_cfg["debug"]:
-            cv2.imwrite(
-                os.path.join(
-                    dir_cfg["output_dir"],
-                    "%06d.jpg" % env.unwrapped.common_step_counter,
-                ),
-                helpers.get_curr_frame(
-                    _env_states.copy(),  # ENV_ID = 0
-                    [
-                        "sm_state",
-                        "ee_pos",
-                        "object_pos",
-                        "object_vel",
-                        "grasp_pos",
-                        "grasp_quat",
-                    ],
-                ),
-            )
         # Reorganize the env_states by keys
         for eid, es in enumerate(_env_states):
             for k, v in es.items():
@@ -486,14 +473,188 @@ def simulate(simulation_app, sim_cfg, task_cfg, dir_cfg, debug_cfg):
 
     env.close()
     # Ignore the simulation if the task is not finished
+    # If in debug mode, save all simulation data even if the task is not finished
     return env_cfg, [
-        es for env_id, es in enumerate(env_states) if is_done[env_id].item()
+        es
+        for env_id, es in enumerate(env_states)
+        if is_done[env_id].item() or debug_cfg["debug"]
     ]
 
 
-def get_episode_name(task, env_cfg):
-    # TODO: Generate a unique name for the episode
-    return "%s" % task
+def get_episode_name(task, robot, scene_cfg):
+    n_objects = len(
+        [
+            v["class_type"]
+            for v in scene_cfg.values()
+            if type(v) == dict
+            and v["class_type"]
+            == "isaaclab.assets.rigid_object.rigid_object:RigidObject"
+        ]
+    )
+    object_vel = np.linalg.norm(scene_cfg["object"]["init_state"]["lin_vel"])
+    object_type = (
+        os.path.basename(scene_cfg["object"]["spawn"]["usd_path"][:-4])
+        if "usd_path" in scene_cfg["object"]["spawn"]
+        else "cylinder"  # default object type
+    )
+    random_suffix = str(uuid.uuid4())[-12:]
+
+    # Generate a unique name for the episode
+    return "%s_%s_%s%s_O%02d_%s" % (
+        task,
+        robot,
+        object_type,
+        "d" if object_vel > 1e-3 else "s",
+        n_objects,
+        random_suffix,
+    )
+
+
+def get_object_without_numpy(obj):
+    if obj is None:
+        return obj
+    elif isinstance(obj, (str, int, float, bool)):
+        return obj
+    elif isinstance(obj, dict):
+        return {k: get_object_without_numpy(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [get_object_without_numpy(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(get_object_without_numpy(item) for item in obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, (np.int32, np.float64)):
+        return obj.item()
+    else:
+        # logging.warning("Unknown data type: %s" % type(obj))
+        return str(obj)
+
+
+def get_frames(env_state, state_keys=[]):
+    MAX_DEPTH = 25
+
+    cam_frames = {}
+    for st_key, frames in env_state.items():
+        cam_idx = st_key.find("_cam_")
+        if cam_idx == -1:
+            continue
+
+        cam_name = st_key[:cam_idx]
+        img_name = st_key[cam_idx + 5 :]
+        if cam_name not in cam_frames:
+            cam_frames[cam_name] = {}
+        if img_name not in cam_frames[cam_name]:
+            cam_frames[cam_name][img_name] = []
+
+        for frame in frames:
+            if frame.ndim == 2:
+                frame = np.repeat(frame[:, :, None], 3, axis=-1)
+            elif frame.shape[-1] == 1:
+                frame = np.repeat(frame[:, :, :], 3, axis=-1)
+            elif frame.shape[-1] >= 3:
+                frame = frame[:, :, :3]
+            else:
+                raise ValueError(f"Unknown camera data shape: {frame.shape}")
+
+            # Normalize the depth image to 0-255
+            if img_name in ["depth", "distance_to_image_plane", "distance_to_camera"]:
+                frame = np.clip(frame, 0, MAX_DEPTH)
+                frame = (frame / np.max(frame) * 255).astype(np.uint8)
+            if img_name in ["seg", "semantic_segmentation"]:
+                # Assign a color to each semantic class
+                frame = cv2.applyColorMap(frame * 64, cv2.COLORMAP_JET)
+
+            cam_frames[cam_name][img_name].append(frame)
+
+    n_frames = len(cam_frames[cam_name][img_name])
+    frames = [[[] for _ in range(len(cam_frames))] for _ in range(n_frames)]
+    for cam_idx, cam_imgs in enumerate(cam_frames.values()):
+        for img in cam_imgs.values():
+            for frame_idx in range(n_frames):
+                frames[frame_idx][cam_idx].append(img[frame_idx])
+
+    for frame_idx in range(n_frames):
+        frame = np.concatenate(
+            [np.concatenate(r, axis=1) for r in frames[frame_idx]], axis=0
+        )
+        if state_keys:
+            frame = _print_state_on_frame(
+                frame,
+                {k: v[frame_idx] for k, v in env_state.items() if k in state_keys},
+            )
+
+        frames[frame_idx] = frame[..., ::-1]
+
+    return frames
+
+
+def _print_state_on_frame(frame, state):
+    TEXT_MARGIN = 10
+    TEXT_SCALE = 0.5
+    TEXT_THICKNESS = 1
+    TEXT_COLOR = (255, 255, 255)
+    TEXT_FONT = cv2.FONT_HERSHEY_SIMPLEX
+
+    lines = _get_state_text(state).split("\n")
+    img_height, img_width = frame.shape[:2]
+    # Print the text on the image
+    y = TEXT_MARGIN
+    for line in lines:
+        (text_width, text_height), _ = cv2.getTextSize(
+            line, TEXT_FONT, TEXT_SCALE, TEXT_THICKNESS
+        )
+        x = img_width - text_width - TEXT_MARGIN
+        frame = cv2.putText(
+            np.ascontiguousarray(frame),
+            line,
+            (x, y + text_height),
+            TEXT_FONT,
+            TEXT_SCALE,
+            TEXT_COLOR,
+            TEXT_THICKNESS,
+            cv2.LINE_AA,
+        )
+        y += text_height + TEXT_MARGIN
+
+    return frame
+
+
+def _get_state_text(state):
+    text = ""
+    for k, v in state.items():
+        k = k.replace("_", " ").title()
+        if type(v) == int:
+            text += "%s: %d\n" % (k, v)
+        elif type(v) == float:
+            text += "%s: %.3f\n" % (k, v)
+        elif type(v) == np.ndarray:
+            # Convert all quaternions to Euler angles
+            if k.find("Quat") != -1:
+                k = k.replace("Quat", "Rot")
+                v = scipy.spatial.transform.Rotation.from_quat(v).as_euler(
+                    "xyz", degrees=True
+                )
+
+            text += "%s: " % k
+            text += " ".join(["%.3f" % i for i in v]) + "\n"
+        else:
+            raise ValueError(f"Unknown State Value Type: {type(v)}")
+
+    return text
+
+
+def dump_video(frames, output_path, fps=24):
+    if len(frames) == 0:
+        return
+
+    width, height = frames[0].shape[1], frames[0].shape[0]
+    video = cv2.VideoWriter(
+        output_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
+    )
+    for frame in frames:
+        video.write(frame)
+
+    video.release()
 
 
 def main(simulation_app, args):
@@ -512,24 +673,48 @@ def main(simulation_app, args):
             {
                 "scene_dir": args.scene_dir,
                 "object_dir": args.object_dir,
-                "output_dir": args.output_dir,
             },
             {
-                "disable_sm": args.disable_sm,
                 "debug": args.debug,
+                "disable_sm": args.disable_sm,
+                "path_tracing": args.path_tracing,
+                "seed": args.seed,
             },
         )
-        if args.save:
-            for es in env_states:
-                episode_name = get_episode_name(args.task, env_cfg)
+        # Save the simulation data
+        for es in env_states:
+            episode_name = get_episode_name(
+                args.task, args.robot, env_cfg.scene.to_dict()
+            )
+            if args.save:
+                with open(
+                    os.path.join(args.output_dir, "%s.json" % episode_name), "w"
+                ) as fp:
+                    _env_cfg = env_cfg.to_dict()
+                    _env_cfg["seed"] = args.seed
+                    json.dump(get_object_without_numpy(_env_cfg), fp, indent=2)
+
                 with h5py.File(
                     os.path.join(args.output_dir, "%s.h5" % episode_name), "w"
                 ) as fp:
-                    # TODO: Save the env_cfg
-                    # fp.create_dataset("cfg", data=env_cfg, compression="gzip")
                     for k, v in es.items():
                         fp.create_dataset(k, data=v, compression="gzip")
 
+            if args.debug:
+                dump_video(
+                    get_frames(
+                        es,
+                        [
+                            "sm_state",
+                            "ee_pos",
+                            "object_pos",
+                            "object_vel",
+                            "grasp_pos",
+                            "grasp_quat",
+                        ],
+                    ),
+                    os.path.join(args.output_dir, "%s.mp4" % episode_name),
+                )
 
 
 if __name__ == "__main__":
@@ -577,8 +762,8 @@ if __name__ == "__main__":
     )
     parser.add_argument("--debug", action="store_true", default=False)
     parser.add_argument("--disable_sm", action="store_true", default=False)
-    # TODO: Add a flag to enable path tracing
-    # parser.add_argument("--path_tracing", action="store_true", default=False)
+    parser.add_argument("--path_tracing", action="store_true", default=False)
+    parser.add_argument("--seed", type=int, default=random.randint(0, 65535))
     args = parser.parse_args(script_args)
     # Copy the shared parameters from isaaclab_args to args
     for sp in SHARED_PARAMETERS:
