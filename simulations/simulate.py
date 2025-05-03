@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-03 15:03:30
+# @Last Modified at: 2025-05-03 17:45:08
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -94,7 +94,7 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
 
     # Dynamically add objects to scene
     env_cfg.scene = _set_up_scene_objects(
-        env_cfg.scene, sim_cfg, robot_pose, table["bbox"]
+        env_cfg.scene, sim_cfg, robot_pose, table["bbox"], object_dir
     )
     return env_cfg
 
@@ -197,14 +197,18 @@ def _get_light_cfg(light_cfg):
     }
 
 
-def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox):
+def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir):
     import configs.scene_cfg
 
+    target_category = random.choice(os.listdir(object_dir))
+    target_candidates = os.listdir(os.path.join(object_dir, target_category))
     scene_cfg = configs.scene_cfg.set_target_object(
         scene_cfg,
         _get_object_cfg(
             table_bbox,
-            file_path="D:/Projects/DynamicVLA/objects/apple/apple01.usd",
+            file_path=os.path.join(
+                object_dir, target_category, random.choice(target_candidates)
+            ),
             robot_pos=robot_pose["pos"],
             moving_time=sim_cfg["scene"]["object"]["moving_time"],
             semantic_tags=[("class", "OBJECT_MAIN")],
@@ -389,7 +393,7 @@ def _get_current_env_states(cam_views, curr_state, next_state, is_done):
 
 
 def simulate(simulation_app, sim_cfg, task_cfg, dir_cfg, debug_cfg):
-    import carb.settings
+    import omni.replicator.core as rep
 
     # Create a new environment
     env_cfg = get_env_cfg(
