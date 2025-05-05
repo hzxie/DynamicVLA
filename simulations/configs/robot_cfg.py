@@ -150,7 +150,7 @@ def get_gripper_camera_cfg(robot: str) -> dict:
         prim_path = "/Robot/gripper_base/GripperCamera"
     else:
         raise ValueError("Unknown robot: %s" % robot)
-    
+
     return {
         "prim_path": prim_path,
         "pos": [0.065, 0.0, 0.0],
