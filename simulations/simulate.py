@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-03 17:45:08
+# @Last Modified at: 2025-05-05 20:40:49
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -65,7 +65,6 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
     while table is None:
         # Dynamically create basic scene from USD files
         usd_file = os.path.join(scene_dir, random.choice(os.listdir(scene_dir)))
-        # usd_file = "D:/Projects/DynamicVLA/scenes/058205e1-6ec4-4342-a609-1ecce3551c3b.usd"
         logging.info("Loading scene from %s", usd_file)
         env_cfg.scene = configs.scene_cfg.set_house_asset(
             env_cfg.scene, os.path.join(scene_dir, usd_file)
@@ -202,13 +201,13 @@ def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir
 
     target_category = random.choice(os.listdir(object_dir))
     target_candidates = os.listdir(os.path.join(object_dir, target_category))
+    target_object = random.choice(target_candidates)
+    logging.info("Using target object: %s" % target_object)
     scene_cfg = configs.scene_cfg.set_target_object(
         scene_cfg,
         _get_object_cfg(
             table_bbox,
-            file_path=os.path.join(
-                object_dir, target_category, random.choice(target_candidates)
-            ),
+            file_path=os.path.join(object_dir, target_category, target_object),
             robot_pos=robot_pose["pos"],
             moving_time=sim_cfg["scene"]["object"]["moving_time"],
             semantic_tags=[("class", "OBJECT_MAIN")],
