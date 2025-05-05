@@ -180,7 +180,7 @@ class EnvCfg(ManagerBasedRLEnvCfg):
 
 
 def set_robot(robot: str, env_cfg: EnvCfg, robot_pose: list) -> EnvCfg:
-    assert robot in ["franka"], "Unknown robot: %s" % robot
+    assert robot in ["franka", "piper"], "Unknown robot: %s" % robot
     env_cfg.commands.object_pose.body_name = configs.robot_cfg.get_body_name(robot)
     env_cfg.scene.ee_frame = configs.robot_cfg.get_ee_frame_cfg(robot)
     env_cfg.scene.robot = configs.robot_cfg.get_robot_cfg(robot)

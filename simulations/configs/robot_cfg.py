@@ -22,6 +22,7 @@ from isaaclab_tasks.manager_based.manipulation.lift import mdp
 ##
 from isaaclab.markers.config import FRAME_MARKER_CFG  # isort: skip
 from isaaclab_assets.robots.franka import FRANKA_PANDA_HIGH_PD_CFG  # isort: skip
+from robots.piper import AGILEX_PIPER_HIGH_PD_CFG  # isort: skip
 
 
 @configclass
@@ -56,9 +57,32 @@ class FrankaActionCfg(ActionCfg):
     )
 
 
+@configclass
+class PiperActionCfg(ActionCfg):
+    arm_action = DifferentialInverseKinematicsActionCfg(
+        asset_name="robot",
+        joint_names=["joint[1-6]"],
+        body_name="gripper_base",
+        controller=DifferentialIKControllerCfg(
+            command_type="pose", use_relative_mode=False, ik_method="dls"
+        ),
+        body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(
+            pos=[0.0, 0.0, 0.107]
+        ),
+    )
+    gripper_action = mdp.BinaryJointPositionActionCfg(
+        asset_name="robot",
+        joint_names=["joint8", "joint7"],
+        open_command_expr={"joint8": -0.035, "joint7": 0.035},
+        close_command_expr={"joint8": 0.0, "joint7": 0.0},
+    )
+
+
 def get_body_name(robot: str) -> str:
     if robot == "franka":
         return "panda_hand"
+    elif robot == "piper":
+        return "gripper_base"
     else:
         raise ValueError("Unknown robot: %s" % robot)
 
@@ -66,16 +90,20 @@ def get_body_name(robot: str) -> str:
 def get_robot_cfg(robot: str) -> ArticulationCfg:
     if robot == "franka":
         cfg = FRANKA_PANDA_HIGH_PD_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-        cfg.spawn.semantic_tags = [("class", "ROBOT")]
+    elif robot == "piper":
+        cfg = AGILEX_PIPER_HIGH_PD_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
     else:
         raise ValueError("Unknown robot: %s" % robot)
 
+    cfg.spawn.semantic_tags = [("class", "ROBOT")]
     return cfg
 
 
 def get_robot_action_cfg(robot: str) -> ActionCfg:
     if robot == "franka":
         return FrankaActionCfg()
+    elif robot == "piper":
+        return PiperActionCfg()
     else:
         raise ValueError("Unknown robot: %s" % robot)
 
@@ -98,17 +126,34 @@ def get_ee_frame_cfg(robot: str) -> FrameTransformerCfg:
                 ),
             ],
         )
+    elif robot == "piper":
+        return FrameTransformerCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/base_link",
+            debug_vis=False,
+            visualizer_cfg=marker_cfg,
+            target_frames=[
+                FrameTransformerCfg.FrameCfg(
+                    prim_path="{ENV_REGEX_NS}/Robot/gripper_base",
+                    name="end_effector",
+                    offset=OffsetCfg(pos=[0.0, 0.0, 0.1034]),
+                ),
+            ],
+        )
     else:
         raise ValueError("Unknown robot: %s" % robot)
 
 
 def get_gripper_camera_cfg(robot: str) -> dict:
     if robot == "franka":
-        return {
-            "prim_path": "/Robot/panda_hand/GripperCamera",
-            "pos": [0.065, 0.0, 0.0],
-            "quat": [0, 0.7071068, 0.7071068, 0],
-            "convention": "opengl",
-        }
+        prim_path = "/Robot/panda_hand/GripperCamera"
+    elif robot == "piper":
+        prim_path = "/Robot/gripper_base/GripperCamera"
     else:
         raise ValueError("Unknown robot: %s" % robot)
+    
+    return {
+        "prim_path": prim_path,
+        "pos": [0.065, 0.0, 0.0],
+        "quat": [0, 0.7071068, 0.7071068, 0],
+        "convention": "opengl",
+    }
