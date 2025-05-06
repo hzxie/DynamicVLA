@@ -4,14 +4,13 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-05 14:29:46
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-06 11:14:29
+# @Last Modified at: 2025-05-06 18:59:10
 # @Email:  root@haozhexie.com
 
 import argparse
 import os
 import sys
 
-import cv2
 import h5py
 from tqdm import tqdm
 

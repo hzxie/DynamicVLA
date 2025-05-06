@@ -4,19 +4,8 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-06 16:51:04
+# @Last Modified at: 2025-05-06 19:00:58
 # @Email:  root@haozhexie.com
-"""
-Script to run an environment with an action state machine.
-
-The state machine is implemented in the kernel function `infer_state_machine`.
-It uses the `warp` library to run the state machine in parallel on the GPU.
-
-.. code-block:: bash
-
-    ./isaaclab.sh -p simulations/simulate.py --enable_cameras
-
-"""
 
 import argparse
 import ast
@@ -137,8 +126,6 @@ def _set_up_scene_cameras(
 
 
 def _get_top_camera_relative_pose(robot_pose, table_bbox):
-    import configs.scene_cfg
-
     robot_quat = robot_pose["quat"]
     inv_r = scipy.spatial.transform.Rotation.from_quat(
         [robot_quat[1], robot_quat[2], robot_quat[3], robot_quat[0]]
@@ -276,7 +263,7 @@ def get_state_machine(task, robot, sm_args={}):
         "pick": state_machines.pick_sm.PickStateMachine,
     }
     if task not in STATE_MACHINES:
-        raise ValueError(f"Unknown task: %s." % task)
+        raise ValueError("Unknown task: %s." % task)
 
     # Set the final position and quaternion for different tasks and robots
     final_position = _get_final_position(task, robot, sm_args.get("device"))
@@ -305,7 +292,7 @@ def _get_final_position(task, robot, device="cpu"):
                 [FINAL_POSITIONS[task][robot]], dtype=torch.float32, device=device
             )
     else:
-        raise ValueError(f"Unknown task: %s." % task)
+        raise ValueError("Unknown task: %s." % task)
 
 
 def _get_final_quat(task, robot, device="cpu"):
@@ -324,7 +311,7 @@ def _get_final_quat(task, robot, device="cpu"):
                 [FINAL_QUATS[task][robot]], dtype=torch.float32, device=device
             )
     else:
-        raise ValueError(f"Unknown task: %s." % task)
+        raise ValueError("Unknown task: %s." % task)
 
 
 def get_curr_state(ee_state, object_state, env_origins, robot_quat):
@@ -543,7 +530,7 @@ def get_episode_name(task, robot, scene_cfg):
         [
             v["class_type"]
             for v in scene_cfg.values()
-            if type(v) == dict
+            if isinstance(v, dict)
             and v["class_type"]
             == "isaaclab.assets.rigid_object.rigid_object:RigidObject"
         ]

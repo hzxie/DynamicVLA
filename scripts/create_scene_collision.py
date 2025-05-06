@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-04 10:36:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-22 10:37:53
+# @Last Modified at: 2025-05-06 18:58:20
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -36,7 +36,7 @@ def main(input_dir, output_dir):
         # Create collision for all meshes in the stage
         for prim in tqdm(stage.Traverse(), leave=False):
             if prim.GetTypeName() == "Mesh":
-                collider = UsdPhysics.CollisionAPI.Apply(prim)
+                UsdPhysics.CollisionAPI.Apply(prim)
 
         stage.GetRootLayer().Export(output_file)
 

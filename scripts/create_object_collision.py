@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-04 10:36:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-23 09:28:16
+# @Last Modified at: 2025-05-06 18:57:58
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -35,7 +35,6 @@ def create_object_usd(curr_stage, root_prim_path):
 
 def create_asset_prim(_, prim_path, usd_path, scale=(1.0, 1.0, 1.0)):
     import isaacsim.core.utils.prims as prim_utils
-    from pxr import Usd
 
     prim_utils.create_prim(prim_path, prim_type="Mesh", usd_path=usd_path, scale=scale)
 

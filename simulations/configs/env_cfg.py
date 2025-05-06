@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 21:04:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-30 16:31:23
+# @Last Modified at: 2025-05-06 18:59:31
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
@@ -12,7 +12,6 @@ from dataclasses import MISSING
 import configs.robot_cfg
 from configs.scene_cfg import SceneCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
-from isaaclab.envs.mdp.actions.actions_cfg import DifferentialInverseKinematicsActionCfg
 from isaaclab.managers import (
     CurriculumTermCfg,
     EventTermCfg,
