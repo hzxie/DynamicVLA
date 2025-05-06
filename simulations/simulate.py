@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-06 11:22:56
+# @Last Modified at: 2025-05-06 16:51:04
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -269,7 +269,7 @@ def _get_object_cfg(
     )
 
 
-def get_state_machine(task, sm_args={}):
+def get_state_machine(task, robot, sm_args={}):
     import state_machines.pick_sm
 
     STATE_MACHINES = {
@@ -278,7 +278,53 @@ def get_state_machine(task, sm_args={}):
     if task not in STATE_MACHINES:
         raise ValueError(f"Unknown task: %s." % task)
 
+    # Set the final position and quaternion for different tasks and robots
+    final_position = _get_final_position(task, robot, sm_args.get("device"))
+    final_quat = _get_final_quat(task, robot, sm_args.get("device"))
+    if final_position is not None:
+        sm_args["final_position"] = final_position
+    if final_quat is not None:
+        sm_args["final_quat"] = final_quat
+
     return STATE_MACHINES[task](**sm_args)
+
+
+def _get_final_position(task, robot, device="cpu"):
+    FINAL_POSITIONS = {
+        "pick": {
+            "franka": [0.3, 0, 0.3],
+            "piper": [0.3, 0, 0.3],
+        }
+    }
+    if task in FINAL_POSITIONS:
+        if FINAL_POSITIONS[task] is None:
+            # The final position is not set for the task
+            return None
+        if robot in FINAL_POSITIONS[task]:
+            return torch.tensor(
+                [FINAL_POSITIONS[task][robot]], dtype=torch.float32, device=device
+            )
+    else:
+        raise ValueError(f"Unknown task: %s." % task)
+
+
+def _get_final_quat(task, robot, device="cpu"):
+    FINAL_QUATS = {
+        "pick": {
+            "franka": [0, 1, 0, 0],
+            "piper": [0, 0, 0, 1],
+        }
+    }
+    if task in FINAL_QUATS:
+        if FINAL_QUATS[task] is None:
+            # The final quaternion is not set for the task
+            return None
+        if robot in FINAL_QUATS[task]:
+            return torch.tensor(
+                [FINAL_QUATS[task][robot]], dtype=torch.float32, device=device
+            )
+    else:
+        raise ValueError(f"Unknown task: %s." % task)
 
 
 def get_curr_state(ee_state, object_state, env_origins, robot_quat):
@@ -416,6 +462,7 @@ def simulate(simulation_app, sim_cfg, task_cfg, dir_cfg, debug_cfg):
     # Initialize the state machine
     state_machine = get_state_machine(
         task_cfg["task_name"],
+        task_cfg["robot"],
         {
             "dt": env_cfg.sim.dt * env_cfg.decimation,
             "num_envs": env.unwrapped.num_envs,

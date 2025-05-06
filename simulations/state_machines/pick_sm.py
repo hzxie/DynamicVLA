@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-02 15:06:34
+# @Last Modified at: 2025-05-06 16:46:04
 # @Email:  root@haozhexie.com
 
 import collections
@@ -68,6 +68,8 @@ class PickStateMachine:
         self,
         dt: float,
         num_envs: int,
+        final_position: torch.tensor,
+        final_quat: torch.tensor,
         device: torch.device | str = "cpu",
         dist_threshold=0.01,
     ):
@@ -97,10 +99,8 @@ class PickStateMachine:
         self.des_ee_pose = torch.zeros((num_envs, POSE_DIM), device=device)
         self.des_gripper_state = torch.full((num_envs,), 0.0, device=device)
 
-        # the final object position after lifting
-        self.final_object_pose = torch.zeros((num_envs, POSE_DIM), device=device)
-        self.final_object_pose[:, [0, 2]] = 0.3  # set lift position as [0.3, 0, 0.3]
-        self.final_object_pose[:, 4] = 1.0  # set quaternion (xyzw) as [0, 1, 0, 0]
+        # the final object position after lifting (quat in xyzw)
+        self.final_object_pose = torch.cat([final_position, final_quat], dim=1)
 
         # approach above object offset
         self.offset = torch.zeros((num_envs, POSE_DIM), device=device)
