@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-05 20:51:36
+# @Last Modified at: 2025-05-06 11:22:56
 # @Email:  root@haozhexie.com
 """
 Script to run an environment with an action state machine.
@@ -540,7 +540,9 @@ def get_object_without_numpy(obj):
         return str(obj)
 
 
-def get_frames(env_state, state_keys=[]):
+def get_frames(
+    env_state, state_keys=["sm_state", "ee_pos", "object_pos", "object_vel"]
+):
     MAX_DEPTH = 25
 
     cam_frames = {}
@@ -590,7 +592,7 @@ def get_frames(env_state, state_keys=[]):
         if state_keys:
             frame = _print_state_on_frame(
                 frame,
-                {k: v[frame_idx] for k, v in env_state.items() if k in state_keys},
+                {k: env_state[k][frame_idx] for k in state_keys if k in env_state},
             )
 
         frames[frame_idx] = frame[..., ::-1]
@@ -633,11 +635,11 @@ def _get_state_text(state):
     text = ""
     for k, v in state.items():
         k = k.replace("_", " ").title()
-        if type(v) == int:
+        if isinstance(v, (int, np.int32)):
             text += "%s: %d\n" % (k, v)
-        elif type(v) == float:
+        elif isinstance(v, float):
             text += "%s: %.3f\n" % (k, v)
-        elif type(v) == np.ndarray:
+        elif isinstance(v, np.ndarray):
             # Convert all quaternions to Euler angles
             if k.find("Quat") != -1:
                 k = k.replace("Quat", "Rot")
@@ -712,17 +714,7 @@ def main(simulation_app, args):
 
             if args.debug:
                 dump_video(
-                    get_frames(
-                        es,
-                        [
-                            "sm_state",
-                            "ee_pos",
-                            "object_pos",
-                            "object_vel",
-                            "grasp_pos",
-                            "grasp_quat",
-                        ],
-                    ),
+                    get_frames(es),
                     os.path.join(args.output_dir, "%s.mp4" % episode_name),
                 )
 
