@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-06 19:00:58
+# @Last Modified at: 2025-05-14 13:35:58
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -43,7 +43,7 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
         },
         disable_env_checker=True,
     )
-    env_cfg: configs.env_cfg.EnvCfg = isaaclab_tasks.utils.parse_cfg.parse_env_cfg(
+    env_cfg = isaaclab_tasks.utils.parse_cfg.parse_env_cfg(
         "Robot-Env-Cfg-v0",
         device=args.device,
         num_envs=args.num_envs,
@@ -69,7 +69,7 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
     robot_pose = random.choice([a for a in table["anchors"] if a["side"] == "long"])
     side_cam_pose = random.choice([a for a in table["anchors"] if a["side"] == "short"])
     # Set up the robot arm
-    configs.env_cfg.set_robot(robot, env_cfg, robot_pose)
+    env_cfg = configs.env_cfg.set_robot(robot, env_cfg, robot_pose)
     # Set up cameras in the scene
     env_cfg.scene = _set_up_scene_cameras(
         env_cfg.scene, sim_cfg, robot, robot_pose, side_cam_pose, table["bbox"]
@@ -316,23 +316,26 @@ def _get_final_quat(task, robot, device="cpu"):
 
 def get_curr_state(ee_state, object_state, env_origins, robot_quat):
     quat_opengl = robot_quat[:, [1, 2, 3, 0]]  # xyzw
-    return {
-        "end_effector": {
+    curr_state = {}
+    if ee_state is not None:
+        curr_state["end_effector"] = {
             "pos": _get_robot_relative_position(
                 ee_state.target_pos_w[..., 0, :] - env_origins, quat_opengl
             ),
             "quat": ee_state.target_quat_w[..., 0, :],
-        },
-        "object": {
+        }
+    if object_state is not None:
+        curr_state["object"] = {
             "pos": _get_robot_relative_position(
                 object_state.root_pos_w - env_origins, quat_opengl
             ),
-            "quat": object_state.root_quat_w,  # TODO
+            "quat": object_state.root_quat_w,
             "velocity": _get_robot_relative_position(
                 object_state.root_lin_vel_w, quat_opengl
             ),
-        },
-    }
+        }
+
+    return curr_state
 
 
 def _get_robot_relative_position(point, robot_quat):
@@ -462,29 +465,32 @@ def simulate(simulation_app, sim_cfg, task_cfg, dir_cfg, debug_cfg):
     is_done = torch.zeros(
         env.unwrapped.num_envs, dtype=torch.bool, device=env.unwrapped.device
     )
+    robot_origin = (
+        torch.from_numpy(env_cfg.scene.robot.init_state.pos[None, :])
+        .float()
+        .to(env.unwrapped.device)
+    )
+    robot_quat = (
+        torch.from_numpy(env_cfg.scene.robot.init_state.rot[None, :])
+        .float()
+        .to(env.unwrapped.device)
+    )
     while not is_done.all():
         # Add an option to disable the state machine to accelerate the simulation
         if debug_cfg["disable_sm"]:
             env.step(torch.from_numpy(env.action_space.sample()))
             continue
 
-        robot_origin = (
-            torch.from_numpy(env_cfg.scene.robot.init_state.pos[None, :])
-            .float()
-            .to(env.unwrapped.device)
-        )
-        robot_quat = (
-            torch.from_numpy(env_cfg.scene.robot.init_state.rot[None, :])
-            .float()
-            .to(env.unwrapped.device)
-        )
         curr_state = get_curr_state(
             env.unwrapped.scene["ee_frame"].data,
             env.unwrapped.scene["object"].data,
             env.unwrapped.scene.env_origins + robot_origin,
             robot_quat,
         )
-        next_state = state_machine.compute(curr_state)  # xyz, quat (wxyz), gripper
+        next_state = state_machine.compute(
+            curr_state
+        )  # xyz, quat (wxyz), gripper (-1/1)
+        print(next_state["action"])
         cam_views = get_camera_views(env.unwrapped.scene.sensors)
         # Check whether the simulation is finished
         response = env.step(next_state["action"])

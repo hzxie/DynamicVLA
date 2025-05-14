@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-24 16:59:09
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-01 16:11:53
+# @Last Modified at: 2025-05-14 13:35:40
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
@@ -157,3 +157,12 @@ def get_gripper_camera_cfg(robot: str) -> dict:
         "quat": [0, 0.7071068, 0.7071068, 0],
         "convention": "opengl",
     }
+
+
+def get_robot_name(usd_path: str) -> str:
+    if usd_path.endswith("panda_instanceable.usd"):
+        return "franka"
+    elif usd_path.endswith("piper.usd"):
+        return "piper"
+    else:
+        raise ValueError("Unknown robot name: %s" % usd_path)

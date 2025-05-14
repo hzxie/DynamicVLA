@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-23 12:28:24
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-06 19:01:25
+# @Last Modified at: 2025-05-08 13:17:37
 # @Email:  root@haozhexie.com
 
 import logging
@@ -65,7 +65,7 @@ class SceneCfg(InteractiveSceneCfg):
     )
 
 
-def get_camera_cfg(cam_cfg: dict, cam_extra_cfg: dict) -> SceneCfg:
+def get_camera_cfg(cam_cfg: dict, cam_extra_cfg: dict = {}) -> SceneCfg:
     for k, v in cam_extra_cfg.items():
         cam_cfg[k] = v
 

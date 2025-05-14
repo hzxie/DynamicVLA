@@ -2,4 +2,5 @@ easydict
 h5py
 opencv-python
 PyYAML
+pyzmq
 wandb
