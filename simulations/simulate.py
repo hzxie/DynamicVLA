@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-14 13:35:58
+# @Last Modified at: 2025-05-14 14:30:05
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -366,7 +366,7 @@ def _get_robot_relative_position(point, robot_quat):
     return inv_offset
 
 
-def get_camera_views(sensors):
+def get_camera_views(sensors, views=["rgb"]):
     # NOTE: import isaaclab.utils does not work
     from isaaclab.utils import convert_dict_to_backend
 
@@ -387,6 +387,8 @@ def get_camera_views(sensors):
                 )
                 # Remove the original semantic segmentation (with New Key: "seg")
                 del cam_views[name]["semantic_segmentation"]
+
+            cam_views[name] = {k: v for k, v in cam_views[name].items() if k in views}
 
     return cam_views
 
@@ -504,8 +506,9 @@ def simulate(simulation_app, sim_cfg, task_cfg, dir_cfg, debug_cfg):
         next_state = state_machine.compute(
             curr_state
         )  # xyz, quat (wxyz), gripper (-1/1)
-        print(next_state["action"])
-        cam_views = get_camera_views(env.unwrapped.scene.sensors)
+        cam_views = get_camera_views(
+            env.unwrapped.scene.sensors, ["rgb", "depth", "seg"]
+        )
         # Check whether the simulation is finished
         response = env.step(next_state["action"])
         # Ideally, _[-2] indicates the simulation is finished, which does not work.

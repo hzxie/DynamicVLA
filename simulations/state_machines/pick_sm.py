@@ -68,7 +68,7 @@ class PickStateMachine:
         num_envs: int,
         final_position: torch.tensor,
         final_quat: torch.tensor,
-        reachable_range: float, 
+        reachable_range: float,
         device: torch.device | str = "cpu",
         dist_threshold=0.01,
     ):
@@ -213,7 +213,7 @@ class PickStateMachine:
                 self.des_gripper_state_wp,
                 self.offset_wp,
                 self.dist_threshold,
-                self.reachable_range
+                self.reachable_range,
             ],
             device=self.device,
         )
@@ -253,7 +253,7 @@ def infer_state_machine(
     gripper_state: wp.array(dtype=float),
     offset: wp.array(dtype=wp.transform),
     dist_threshold: float,
-    reachable_range: float, 
+    reachable_range: float,
 ):
     # retrieve thread id
     tid = wp.tid()

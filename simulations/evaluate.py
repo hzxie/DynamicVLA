@@ -4,24 +4,20 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-14 14:21:24
+# @Last Modified at: 2025-05-14 19:14:16
 # @Email:  root@haozhexie.com
 
 import argparse
 import json
 import logging
 import os
+import random
 import sys
 
-import cv2
 import gymnasium as gym
-import h5py
 import isaaclab.app
 import numpy as np
-import random
-import scipy.spatial.transform
 import torch
-import yaml
 import zmq
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
@@ -30,7 +26,7 @@ sys.path.append(os.path.dirname(__file__))
 import simulations.simulate as sim
 
 
-def get_message_queues(host, img_port, act_port):
+def get_zmq_sockets(host, img_port, act_port):
     context = zmq.Context()
 
     img_socket = context.socket(zmq.PUB)
@@ -228,10 +224,39 @@ def _set_up_scene_objects(scene_cfg, cfg, object_dir):
     return scene_cfg
 
 
+def get_latest_action(act_socket):
+    action = None
+    while True:
+        try:
+            action = act_socket.recv_pyobj(flags=zmq.NOBLOCK)
+        except zmq.Again:
+            break
+
+    return action
+
+
+def get_action_tensor(action, num_envs, device):
+    if isinstance(action, np.ndarray):
+        action = torch.from_numpy(action).to(device)
+    elif isinstance(action, torch.tensor):
+        action = action.to(device)
+    else:
+        logging.warning("Unsupported action type: %s" % type(action))
+        action = None
+
+    if action.size(0) != num_envs or action.size(1) != 8:
+        logging.warning(
+            "Received action with shape %s, expected (%d, 8)" % (action.shape, num_envs)
+        )
+        action = None
+
+    return action
+
+
 def main(simulation_app, args):
     logging.info("Starting evaluation server...")
     # Set up Zero MQ context and sockets
-    img_mq, act_mq = get_message_queues(args.host, args.img_port, args.act_port)
+    img_socket, act_socket = get_zmq_sockets(args.host, args.img_port, args.act_port)
     logging.info(
         "ZeroMQs are listensing on %s:%d for images and %s:%d for actions"
         % (args.host, args.img_port, args.host, args.act_port)
@@ -267,17 +292,17 @@ def main(simulation_app, args):
 
     last_action = None
     while simulation_app.is_running():
-        cam_views = sim.get_camera_views(env.unwrapped.scene.sensors)
-        img_mq.send_pyobj(cam_views)
-        try:
-            while True:
-                action = act_mq.recv(flags=zmq.NOBLOCK)
-                last_action = action
-        except zmq.Again:
-            # No more messages in the queue
-            pass
+        cam_views = sim.get_camera_views(env.unwrapped.scene.sensors, ["rgb", "depth"])
+        img_socket.send_pyobj(cam_views)
+        action = get_latest_action(act_socket)
+        if action is not None:
+            logging.debug("Received action: %s" % action)
+            action = get_action_tensor(
+                action, env.unwrapped.num_envs, env.unwrapped.device
+            )
+            last_action = action
 
-        # If no action is received, use the previous action to make the 
+        # If no action is received, use the previous action to make the
         # simulation continuous
         if last_action is None:
             curr_state = sim.get_curr_state(
@@ -290,7 +315,7 @@ def main(simulation_app, args):
                 [
                     curr_state["end_effector"]["pos"],
                     curr_state["end_effector"]["quat"],
-                    torch.ones(args.num_envs, 1, device=env.unwrapped.device),
+                    torch.ones(env.unwrapped.num_envs, 1, device=env.unwrapped.device),
                 ],
                 dim=1,
             )
