@@ -68,6 +68,7 @@ class PickStateMachine:
         num_envs: int,
         final_position: torch.tensor,
         final_quat: torch.tensor,
+        reachable_range: float, 
         device: torch.device | str = "cpu",
         dist_threshold=0.01,
     ):
@@ -99,6 +100,9 @@ class PickStateMachine:
 
         # the final object position after lifting (quat in xyzw)
         self.final_object_pose = torch.cat([final_position, final_quat], dim=1)
+
+        # the reachable range of robot
+        self.reachable_range = reachable_range
 
         # approach above object offset
         self.offset = torch.zeros((num_envs, POSE_DIM), device=device)
@@ -209,6 +213,7 @@ class PickStateMachine:
                 self.des_gripper_state_wp,
                 self.offset_wp,
                 self.dist_threshold,
+                self.reachable_range
             ],
             device=self.device,
         )
@@ -248,6 +253,7 @@ def infer_state_machine(
     gripper_state: wp.array(dtype=float),
     offset: wp.array(dtype=wp.transform),
     dist_threshold: float,
+    reachable_range: float, 
 ):
     # retrieve thread id
     tid = wp.tid()
@@ -258,8 +264,13 @@ def infer_state_machine(
         # print("REST")
         gripper_state[tid] = GripperState.OPEN
         des_ee_pose[tid] = ee_pose[tid]
+
+        dist = get_distance(
+            wp.vec3(0.0, 0.0, 0.0),
+            wp.transform_get_translation(grasp_pose[tid]),
+        )
         # wait for a while
-        if sm_wait_time[tid] >= PickSmWaitTime.REST:
+        if sm_wait_time[tid] >= PickSmWaitTime.REST and reachable_range > dist:
             # move to next state and reset wait time
             sm_state[tid] = PickSmState.APPROACH_ABOVE_OBJECT
             sm_wait_time[tid] = 0.0

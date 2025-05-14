@@ -268,10 +268,13 @@ def get_state_machine(task, robot, sm_args={}):
     # Set the final position and quaternion for different tasks and robots
     final_position = _get_final_position(task, robot, sm_args.get("device"))
     final_quat = _get_final_quat(task, robot, sm_args.get("device"))
+    reachable_range = _get_reachable_range(robot, sm_args.get("device"))
     if final_position is not None:
         sm_args["final_position"] = final_position
     if final_quat is not None:
         sm_args["final_quat"] = final_quat
+    if reachable_range is not None:
+        sm_args["reachable_range"] = reachable_range
 
     return STATE_MACHINES[task](**sm_args)
 
@@ -312,6 +315,17 @@ def _get_final_quat(task, robot, device="cpu"):
             )
     else:
         raise ValueError("Unknown task: %s." % task)
+
+
+def _get_reachable_range(robot, device="cpu"):
+    REACHABLE_RANGE = {
+        "franka": 0.75,
+        "piper": 0.4,
+    }
+    if robot in REACHABLE_RANGE:
+        return REACHABLE_RANGE[robot]
+    else:
+        raise ValueError("Unknown robot: %s." % robot)
 
 
 def get_curr_state(ee_state, object_state, env_origins, robot_quat):
