@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-20 14:41:09
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-03-31 14:31:09
+# @Last Modified at: 2025-05-14 20:12:16
 # @Email:  root@haozhexie.com
 #
 # References:
@@ -23,7 +23,7 @@ from tqdm import tqdm
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 sys.path.append(PROJECT_HOME)
 
-import helpers.maya
+import utils.maya_controller
 
 
 def _get_furniture_category(model):
@@ -487,7 +487,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # Connect to Maya server
-    maya_ctl = helpers.maya.MayaController(port=args.port)
+    maya_ctl = utils.maya_controller.MayaController(port=args.port)
     maya_ctl.send_python_command("from maya.api import OpenMaya")
     logging.info("Connected to Maya Server.")
     # Load the Maya USD plugin

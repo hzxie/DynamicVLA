@@ -4,16 +4,16 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-14 15:09:46
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-03-14 15:19:48
+# @Last Modified at: 2025-05-14 20:13:03
 # @Email:  root@haozhexie.com
 
 import argparse
+import datetime
 import importlib
 import logging
 import os
+import pprint
 import sys
-from datetime import datetime
-from pprint import pprint
 
 import core
 import cv2
@@ -34,7 +34,7 @@ def get_args_from_command_line():
         "--exp",
         dest="exp_name",
         help="The name of the experiment",
-        default="%s" % datetime.now(),
+        default="%s" % datetime.datetime.now(),
         type=str,
     )
     parser.add_argument(
@@ -115,7 +115,7 @@ def main():
     # Print the current config
     local_rank = args.local_rank
     if local_rank == 0:
-        pprint(cfg)
+        pprint.pprint(cfg)
 
     # Initialize the DDP environment
     if torch.cuda.is_available() and not args.test:

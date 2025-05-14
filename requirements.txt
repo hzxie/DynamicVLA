@@ -3,4 +3,8 @@ h5py
 opencv-python
 PyYAML
 pyzmq
+torch
+torchvision
+tqdm
+transformers[torch]
 wandb
