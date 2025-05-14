@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-14 19:19:06
+# @Last Modified at: 2025-05-14 19:44:45
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -53,7 +53,19 @@ def get_zmq_sockets(host, img_port, act_port):
     return img_socket, action_socket
 
 
-def get_action(images):
+def get_latest_image(img_socket):
+    image = None
+    while True:
+        try:
+            image = img_socket.recv_pyobj(flags=zmq.NOBLOCK)
+        except zmq.Again:
+            break
+
+    return image
+
+
+def get_action(image):
+    # TODO: Replace this function with VLA model inference
     frame_idx = getattr(get_action, "index", 0)
     with h5py.File("datasets/pick_franka_apple00d_O01_5d9c640bc1f7.h5", "r") as fp:
         action = fp["action"][()]
@@ -69,15 +81,14 @@ def main(host, img_port, act_port):
         % (args.host, args.img_port, args.host, args.act_port)
     )
     while True:
-        try:
-            images = img_socket.recv_pyobj(flags=zmq.NOBLOCK)
-            action = get_action(images)
-            if action is not None:
-                act_socket.send_pyobj(action, flags=zmq.NOBLOCK)
-                logging.info("Sending action: %s" % action)
-        except zmq.Again:
-            logging.warning("No image available.")
-            time.sleep(1)
+        image = get_latest_image(img_socket)
+        if image is None:
+            continue
+
+        action = get_action(image)
+        if action is not None:
+            act_socket.send_pyobj(action, flags=zmq.NOBLOCK)
+            logging.info("Sending action: %s" % action)
 
 
 if __name__ == "__main__":
