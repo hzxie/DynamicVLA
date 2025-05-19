@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-14 14:30:05
+# @Last Modified at: 2025-05-19 18:59:56
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -126,11 +126,13 @@ def _set_up_scene_cameras(
 
 
 def _get_top_camera_relative_pose(robot_pose, table_bbox):
+    # import configs.scene_cfg
     robot_quat = robot_pose["quat"]
     inv_r = scipy.spatial.transform.Rotation.from_quat(
         [robot_quat[1], robot_quat[2], robot_quat[3], robot_quat[0]]
     ).inv()
-    # Relative position of the camera to the robot
+
+    # Plan A: Look at the table center
     tbl_center = (table_bbox.min + table_bbox.max) / 2.0
     tbl_center[2] = table_bbox.max[2] + 1
     cx, cy, cz = inv_r.apply(np.array(tbl_center) - robot_pose["pos"])
@@ -141,6 +143,17 @@ def _get_top_camera_relative_pose(robot_pose, table_bbox):
         "quat": [0.7071068, 0, 0, -0.7071068],
         "convention": "opengl",
     }
+
+    # Plan B: Look at the robot base
+    # dx, dy, _ = inv_r.apply((np.array(tbl_center) - robot_pose["pos"]) * 1.5)
+    # dz = table_bbox.max[2] + 0.25
+    # cam_quat = configs.scene_cfg.get_quat_from_look_at([dx, dy, dz], [0.0, 0.0, 0.0])
+    # return {
+    #     "prim_path": "/Robot/TopCamera",
+    #     "pos": [dx, dy, dz],
+    #     "quat": cam_quat,
+    #     "convention": "world",
+    # }
 
 
 def _get_side_camera_relative_pose(cam_pose, robot_pose, table_bbox):
@@ -268,13 +281,13 @@ def get_state_machine(task, robot, sm_args={}):
     # Set the final position and quaternion for different tasks and robots
     final_position = _get_final_position(task, robot, sm_args.get("device"))
     final_quat = _get_final_quat(task, robot, sm_args.get("device"))
-    reachable_range = _get_reachable_range(robot, sm_args.get("device"))
+    reach_dist_thres = _get_reach_dist_threshold(robot)
     if final_position is not None:
         sm_args["final_position"] = final_position
     if final_quat is not None:
         sm_args["final_quat"] = final_quat
-    if reachable_range is not None:
-        sm_args["reachable_range"] = reachable_range
+    if reach_dist_thres is not None:
+        sm_args["reach_dist_thres"] = reach_dist_thres
 
     return STATE_MACHINES[task](**sm_args)
 
@@ -317,7 +330,7 @@ def _get_final_quat(task, robot, device="cpu"):
         raise ValueError("Unknown task: %s." % task)
 
 
-def _get_reachable_range(robot, device="cpu"):
+def _get_reach_dist_threshold(robot):
     REACHABLE_RANGE = {
         "franka": 0.75,
         "piper": 0.6,

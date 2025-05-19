@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-06 19:00:07
+# @Last Modified at: 2025-05-19 14:43:55
 # @Email:  root@haozhexie.com
 
 import collections
@@ -68,9 +68,10 @@ class PickStateMachine:
         num_envs: int,
         final_position: torch.tensor,
         final_quat: torch.tensor,
-        reachable_range: float,
+        reach_dist_thres: float,
+        grasp_dist_thres: float = 0.01,
+        object_dist_thres: float = 0.1,
         device: torch.device | str = "cpu",
-        dist_threshold=0.01,
     ):
         """Initialize the state machine.
 
@@ -85,7 +86,6 @@ class PickStateMachine:
         self.dt = float(dt)
         self.num_envs = num_envs
         self.device = device
-        self.dist_threshold = dist_threshold
         # initialize state machine
         self.sm_dt = torch.full((num_envs,), dt, device=device)
         self.sm_state = torch.full((num_envs,), 0, dtype=torch.int32, device=device)
@@ -101,8 +101,12 @@ class PickStateMachine:
         # the final object position after lifting (quat in xyzw)
         self.final_object_pose = torch.cat([final_position, final_quat], dim=1)
 
-        # the reachable range of robot
-        self.reachable_range = reachable_range
+        # the reachable range of the robot (too near or too far cannot be reached)
+        self.reach_dist_thres = reach_dist_thres
+        # the distance threshold for grasping
+        self.grasp_dist_thres = grasp_dist_thres
+        # the distance threshold for the object to be considered grasped
+        self.object_dist_thres = object_dist_thres
 
         # approach above object offset
         self.offset = torch.zeros((num_envs, POSE_DIM), device=device)
@@ -142,9 +146,7 @@ class PickStateMachine:
         #       ]
 
         # Determine the grasp quaternion according to the velocity
-        gsp_theta = torch.arctan2(
-            object_velocity[:, 1], object_velocity[:, 0]
-        )
+        gsp_theta = torch.arctan2(object_velocity[:, 1], object_velocity[:, 0])
         gsp_theta = torch.where(gsp_theta >= np.pi / 2, gsp_theta - np.pi, gsp_theta)
         gsp_theta = torch.where(gsp_theta <= -np.pi / 2, gsp_theta + np.pi, gsp_theta)
         gsp_theta = np.pi / 2 - gsp_theta
@@ -216,8 +218,9 @@ class PickStateMachine:
                 self.des_ee_pose_wp,
                 self.des_gripper_state_wp,
                 self.offset_wp,
-                self.dist_threshold,
-                self.reachable_range,
+                self.reach_dist_thres,
+                self.grasp_dist_thres,
+                self.object_dist_thres,
             ],
             device=self.device,
         )
@@ -256,8 +259,9 @@ def infer_state_machine(
     des_ee_pose: wp.array(dtype=wp.transform),
     gripper_state: wp.array(dtype=float),
     offset: wp.array(dtype=wp.transform),
-    dist_threshold: float,
-    reachable_range: float,
+    reach_dist_threshold: float,  # the object is reachable
+    grasp_dist_threshold: float,  # the object is graspable
+    object_dist_threshold: float,  # the object to be considered grasped
 ):
     # retrieve thread id
     tid = wp.tid()
@@ -268,13 +272,12 @@ def infer_state_machine(
         # print("REST")
         gripper_state[tid] = GripperState.OPEN
         des_ee_pose[tid] = ee_pose[tid]
-
         dist = get_distance(
             wp.vec3(0.0, 0.0, 0.0),
             wp.transform_get_translation(grasp_pose[tid]),
         )
         # wait for a while
-        if sm_wait_time[tid] >= PickSmWaitTime.REST and reachable_range > dist:
+        if sm_wait_time[tid] >= PickSmWaitTime.REST and dist < reach_dist_threshold:
             # move to next state and reset wait time
             sm_state[tid] = PickSmState.APPROACH_ABOVE_OBJECT
             sm_wait_time[tid] = 0.0
@@ -286,8 +289,11 @@ def infer_state_machine(
             wp.transform_get_translation(ee_pose[tid]),
             wp.transform_get_translation(object_pose[tid]),
         )
-        # NOTE: the original z-offset: offset[tid][2]
-        if dist < dist_threshold + offset[tid][2]:
+        # check if the object is reachable
+        if dist >= reach_dist_threshold:
+            sm_state[tid] = PickSmState.REST
+            sm_wait_time[tid] = 0.0
+        elif dist < grasp_dist_threshold + offset[tid][2]:
             # wait for a while
             if sm_wait_time[tid] >= PickSmWaitTime.APPROACH_ABOVE_OBJECT:
                 # move to next state and reset wait time
@@ -300,7 +306,7 @@ def infer_state_machine(
             wp.transform_get_translation(ee_pose[tid]),
             wp.transform_get_translation(object_pose[tid]),
         )
-        if dist < dist_threshold:
+        if dist < grasp_dist_threshold:
             if sm_wait_time[tid] >= PickSmWaitTime.APPROACH_OBJECT:
                 # move to next state and reset wait time
                 sm_state[tid] = PickSmState.GRASP_OBJECT
@@ -330,7 +336,7 @@ def infer_state_machine(
             wp.transform_get_translation(object_pose[tid]),
         )
         # check if the object is grasped
-        if dist > 0.1:
+        if dist > object_dist_threshold:
             sm_state[tid] = PickSmState.REST
             sm_wait_time[tid] = 0.0
 
