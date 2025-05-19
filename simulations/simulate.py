@@ -302,7 +302,7 @@ def _get_final_quat(task, robot, device="cpu"):
     FINAL_QUATS = {
         "pick": {
             "franka": [0, 1, 0, 0],
-            "piper": [0, 0, 0, 1],
+            "piper": [0, 1, 0, 0],
         }
     }
     if task in FINAL_QUATS:
@@ -320,7 +320,7 @@ def _get_final_quat(task, robot, device="cpu"):
 def _get_reachable_range(robot, device="cpu"):
     REACHABLE_RANGE = {
         "franka": 0.75,
-        "piper": 0.4,
+        "piper": 0.6,
     }
     if robot in REACHABLE_RANGE:
         return REACHABLE_RANGE[robot]
