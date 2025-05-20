@@ -40,8 +40,8 @@ class PickSmWaitTime:
 
     REST = wp.constant(0.1)
     APPROACH_ABOVE_OBJECT = wp.constant(0.2)
-    APPROACH_OBJECT = wp.constant(0.5)
-    GRASP_OBJECT = wp.constant(0.2)
+    APPROACH_OBJECT = wp.constant(0.2)
+    GRASP_OBJECT = wp.constant(0.3)
     LIFT_OBJECT = wp.constant(0.3)
     TO_TARGET = wp.constant(0.6)
 
@@ -134,6 +134,7 @@ class PickStateMachine:
         object_velocity: torch.Tensor,
     ) -> torch.Tensor:
         WAITING_TIME = 0.25
+        object_position[:, 2] -= 0.005
         return object_position + object_velocity * WAITING_TIME
 
     def _get_grasp_quat(self, object_velocity: torch.Tensor) -> torch.Tensor:
@@ -285,15 +286,19 @@ def infer_state_machine(
         # print("APPROACH_ABOVE_OBJECT")
         gripper_state[tid] = GripperState.OPEN
         des_ee_pose[tid] = wp.transform_multiply(offset[tid], grasp_pose[tid])
-        dist = get_z_offset(
+        grasp_dist = get_z_offset(
             wp.transform_get_translation(ee_pose[tid]),
             wp.transform_get_translation(object_pose[tid]),
         )
+        reach_dist = get_distance(
+            wp.vec3(0.0, 0.0, 0.0),
+            wp.transform_get_translation(grasp_pose[tid]),
+        )
         # check if the object is reachable
-        if dist >= reach_dist_threshold:
+        if reach_dist >= reach_dist_threshold:
             sm_state[tid] = PickSmState.REST
             sm_wait_time[tid] = 0.0
-        elif dist < grasp_dist_threshold + offset[tid][2]:
+        elif grasp_dist < grasp_dist_threshold + offset[tid][2]:
             # wait for a while
             if sm_wait_time[tid] >= PickSmWaitTime.APPROACH_ABOVE_OBJECT:
                 # move to next state and reset wait time
