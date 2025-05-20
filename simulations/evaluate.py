@@ -4,10 +4,11 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-14 19:14:16
+# @Last Modified at: 2025-05-20 11:16:17
 # @Email:  root@haozhexie.com
 
 import argparse
+import datetime
 import json
 import logging
 import os
@@ -56,9 +57,7 @@ def get_test_env(
         cfg = json.load(fp)
 
     # Create the environment
-    robot_name, env_cfg = _get_env_cfg(
-        cfg, num_envs, scene_dir, object_dir, device, disable_fabric
-    )
+    env_cfg = _get_env_cfg(cfg, num_envs, scene_dir, object_dir, device, disable_fabric)
     env_cfg.dt = physics_time_step
     env_cfg.episode_length_s = timeout
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=cfg["seed"])
@@ -72,7 +71,7 @@ def get_test_env(
     if path_tracing:
         rep.settings.set_render_pathtraced()
 
-    return robot_name, env
+    return env
 
 
 def _get_env_cfg(cfg, num_envs, scene_dir, object_dir, device, disable_fabric):
@@ -127,7 +126,7 @@ def _get_env_cfg(cfg, num_envs, scene_dir, object_dir, device, disable_fabric):
 
     # Dynamically add objects to scene
     env_cfg.scene = _set_up_scene_objects(env_cfg.scene, cfg["scene"], object_dir)
-    return robot_name, env_cfg
+    return env_cfg
 
 
 def _set_up_scene_cameras(scene_cfg, cfg):
@@ -170,7 +169,6 @@ def _set_up_scene_cameras(scene_cfg, cfg):
 
 
 def _set_up_scene_distant_light(scene_cfg, cfg):
-    import configs.object_cfg
     import configs.scene_cfg
 
     scene_cfg = configs.scene_cfg.set_light_asset(
@@ -224,6 +222,20 @@ def _set_up_scene_objects(scene_cfg, cfg, object_dir):
     return scene_cfg
 
 
+def get_final_position(env_cfg, device="cpu"):
+    # Load the environment configuration
+    with open(env_cfg, "r") as fp:
+        env_cfg = json.load(fp)
+
+    if "final_position" in env_cfg:
+        final_position = env_cfg["final_position"]
+    else:
+        logging.warning("Final position not found in environment configuration.")
+        final_position = [0.3, 0.0, 0.3]
+
+    return torch.tensor(final_position, dtype=torch.float32, device=device).unsqueeze(0)
+
+
 def get_latest_action(act_socket):
     action = None
     while True:
@@ -253,6 +265,20 @@ def get_action_tensor(action, num_envs, device):
     return action
 
 
+def get_frames(cam_views):
+    frames = {}
+    for cv in cam_views:
+        for cam, sensors in cv.items():
+            for sensor, view in sensors.items():
+                key = "%s_%s" % (cam, sensor)
+                if key not in frames:
+                    frames[key] = []
+
+                frames[key].append(view.squeeze(0))
+
+    return frames
+
+
 def main(simulation_app, args):
     logging.info("Starting evaluation server...")
     # Set up Zero MQ context and sockets
@@ -264,7 +290,7 @@ def main(simulation_app, args):
 
     # Set up test environment
     logging.info("Recovering test environment from %s" % args.env_cfg)
-    robot_name, env = get_test_env(
+    env = get_test_env(
         args.env_cfg,
         args.num_envs,
         args.scene_dir,
@@ -275,6 +301,7 @@ def main(simulation_app, args):
         args.disable_fabric,
         args.path_tracing,
     )
+    env.reset()
 
     # Simulation loop
     robot_origin = (
@@ -290,10 +317,14 @@ def main(simulation_app, args):
         .to(env.unwrapped.device)
     )
 
+    final_position = get_final_position(args.env_cfg, env.unwrapped.device)
+    episode_reset = 0
     last_action = None
+    cam_views = []
     while simulation_app.is_running():
-        cam_views = sim.get_camera_views(env.unwrapped.scene.sensors, ["rgb", "depth"])
-        img_socket.send_pyobj(cam_views)
+        cam_view = sim.get_camera_views(env.unwrapped.scene.sensors, ["rgb", "depth"])
+        img_socket.send_pyobj(cam_view)
+        cam_views.append(cam_view)
         action = get_latest_action(act_socket)
         if action is not None:
             logging.debug("Received action: %s" % action)
@@ -307,7 +338,7 @@ def main(simulation_app, args):
         if last_action is None:
             curr_state = sim.get_curr_state(
                 env.unwrapped.scene["ee_frame"].data,
-                None,
+                env.unwrapped.scene["object"].data,
                 env.unwrapped.scene.env_origins + robot_origin,
                 robot_quat,
             )
@@ -320,7 +351,44 @@ def main(simulation_app, args):
                 dim=1,
             )
 
-        env.step(last_action)
+        response = env.step(last_action)
+        if (
+            response[-1]["log"]["Episode_Termination/time_out"]
+            or response[-1]["log"]["Episode_Termination/object_dropping"]
+        ):
+            logging.info("Episode terminated due to timeout or object dropping")
+            episode_reset = 1
+        elif sim.is_final_position_reached(
+            curr_state["object"]["pos"],
+            curr_state["end_effector"]["pos"],
+            final_position,
+        ):
+            logging.info("Episode terminated due to success")
+            episode_reset = 2
+
+        if episode_reset != 0:
+            logging.info("Resetting environment with code")
+            env.reset()
+            episode_reset = 0
+            last_action = None
+            # Clear the action socket
+            get_latest_action(act_socket)
+            # Save the frames if needed
+            if args.save:
+                sim.dump_video(
+                    sim.get_frames(get_frames(cam_views), state_keys=[]),
+                    os.path.join(
+                        args.output_dir,
+                        "%s_%s_%s.mp4"
+                        % (
+                            os.path.basename(args.env_cfg)[:-5],
+                            datetime.datetime.now().strftime("%m%d_%H%M%S"),
+                            "SUCCESS" if episode_reset == 2 else "FAIL",
+                        ),
+                    ),
+                )
+            # Clear the cam_views
+            cam_views = []
 
 
 if __name__ == "__main__":

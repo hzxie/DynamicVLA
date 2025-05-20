@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-19 18:59:56
+# @Last Modified at: 2025-05-20 11:17:40
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -279,7 +279,7 @@ def get_state_machine(task, robot, sm_args={}):
         raise ValueError("Unknown task: %s." % task)
 
     # Set the final position and quaternion for different tasks and robots
-    final_position = _get_final_position(task, robot, sm_args.get("device"))
+    final_position = get_final_position(task, robot, sm_args.get("device"))
     final_quat = _get_final_quat(task, robot, sm_args.get("device"))
     reach_dist_thres = _get_reach_dist_threshold(robot)
     if final_position is not None:
@@ -292,7 +292,7 @@ def get_state_machine(task, robot, sm_args={}):
     return STATE_MACHINES[task](**sm_args)
 
 
-def _get_final_position(task, robot, device="cpu"):
+def get_final_position(task, robot, device="cpu"):
     FINAL_POSITIONS = {
         "pick": {
             "franka": [0.3, 0, 0.3],
@@ -425,7 +425,7 @@ def _get_semantic_segmentation(rgba_seg_maps, semantic_tags):
     return seg_maps
 
 
-def _is_final_position_reached(object_pos, ee_pos, final_pos):
+def is_final_position_reached(object_pos, ee_pos, final_pos):
     DIST_THRESHOLD = 0.02
 
     ee_offset = (ee_pos - final_pos).abs().sum(dim=1)
@@ -463,7 +463,7 @@ def _get_current_env_states(cam_views, curr_state, next_state, is_done):
     return env_states
 
 
-def simulate(simulation_app, sim_cfg, task_cfg, dir_cfg, debug_cfg):
+def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
     import omni.replicator.core as rep
 
     # Create a new environment
@@ -525,7 +525,7 @@ def simulate(simulation_app, sim_cfg, task_cfg, dir_cfg, debug_cfg):
         # Check whether the simulation is finished
         response = env.step(next_state["action"])
         # Ideally, _[-2] indicates the simulation is finished, which does not work.
-        is_done = _is_final_position_reached(
+        is_done = is_final_position_reached(
             curr_state["object"]["pos"],
             curr_state["end_effector"]["pos"],
             state_machine.final_object_pose[:, :3],
@@ -657,7 +657,7 @@ def get_frames(
 
     for frame_idx in range(n_frames):
         frame = np.concatenate(
-            [np.concatenate(r, axis=1) for r in frames[frame_idx]], axis=0
+            [np.concatenate(r, axis=0) for r in frames[frame_idx]], axis=1
         )
         if state_keys:
             frame = _print_state_on_frame(
@@ -746,7 +746,6 @@ def main(simulation_app, args):
     # Perform simulations in the environment
     while simulation_app.is_running():
         env_cfg, env_states = simulate(
-            simulation_app,
             sim_cfg,
             {
                 "task_name": args.task,
@@ -774,6 +773,9 @@ def main(simulation_app, args):
                 ) as fp:
                     _env_cfg = env_cfg.to_dict()
                     _env_cfg["seed"] = args.seed
+                    _env_cfg["final_position"] = get_final_position(
+                        args.task, args.robot
+                    ).numpy()
                     json.dump(get_object_without_numpy(_env_cfg), fp, indent=2)
 
                 with h5py.File(
