@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-20 11:16:17
+# @Last Modified at: 2025-05-20 14:19:37
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -247,7 +247,7 @@ def get_latest_action(act_socket):
     return action
 
 
-def get_action_tensor(action, num_envs, device):
+def _get_action_tensor(action, num_envs, device):
     if isinstance(action, np.ndarray):
         action = torch.from_numpy(action).to(device)
     elif isinstance(action, torch.tensor):
@@ -265,70 +265,20 @@ def get_action_tensor(action, num_envs, device):
     return action
 
 
-def get_frames(cam_views):
-    frames = {}
-    for cv in cam_views:
-        for cam, sensors in cv.items():
-            for sensor, view in sensors.items():
-                key = "%s_%s" % (cam, sensor)
-                if key not in frames:
-                    frames[key] = []
-
-                frames[key].append(view.squeeze(0))
-
-    return frames
-
-
-def main(simulation_app, args):
-    logging.info("Starting evaluation server...")
-    # Set up Zero MQ context and sockets
-    img_socket, act_socket = get_zmq_sockets(args.host, args.img_port, args.act_port)
-    logging.info(
-        "ZeroMQs are listensing on %s:%d for images and %s:%d for actions"
-        % (args.host, args.img_port, args.host, args.act_port)
-    )
-
-    # Set up test environment
-    logging.info("Recovering test environment from %s" % args.env_cfg)
-    env = get_test_env(
-        args.env_cfg,
-        args.num_envs,
-        args.scene_dir,
-        args.object_dir,
-        args.physics_time_step,
-        args.timeout,
-        args.device,
-        args.disable_fabric,
-        args.path_tracing,
-    )
-    env.reset()
-
-    # Simulation loop
-    robot_origin = (
-        torch.from_numpy(np.array(env.unwrapped.cfg.scene.robot.init_state.pos))
-        .unsqueeze(0)
-        .float()
-        .to(env.unwrapped.device)
-    )
-    robot_quat = (
-        torch.from_numpy(np.array(env.unwrapped.cfg.scene.robot.init_state.rot))
-        .unsqueeze(0)
-        .float()
-        .to(env.unwrapped.device)
-    )
-
-    final_position = get_final_position(args.env_cfg, env.unwrapped.device)
-    episode_reset = 0
+def simulate(env, img_socket, act_socket, robot_origin, robot_quat, final_position):
+    sim_status = 0
     last_action = None
     cam_views = []
-    while simulation_app.is_running():
+
+    # The simulation loop
+    while sim_status == 0:
         cam_view = sim.get_camera_views(env.unwrapped.scene.sensors, ["rgb", "depth"])
         img_socket.send_pyobj(cam_view)
         cam_views.append(cam_view)
         action = get_latest_action(act_socket)
         if action is not None:
             logging.debug("Received action: %s" % action)
-            action = get_action_tensor(
+            action = _get_action_tensor(
                 action, env.unwrapped.num_envs, env.unwrapped.device
             )
             last_action = action
@@ -356,39 +306,96 @@ def main(simulation_app, args):
             response[-1]["log"]["Episode_Termination/time_out"]
             or response[-1]["log"]["Episode_Termination/object_dropping"]
         ):
-            logging.info("Episode terminated due to timeout or object dropping")
-            episode_reset = 1
+            sim_status = 1
         elif sim.is_final_position_reached(
             curr_state["object"]["pos"],
             curr_state["end_effector"]["pos"],
             final_position,
         ):
-            logging.info("Episode terminated due to success")
-            episode_reset = 2
+            sim_status = 2
 
-        if episode_reset != 0:
-            logging.info("Resetting environment with code")
-            env.reset()
-            episode_reset = 0
-            last_action = None
-            # Clear the action socket
-            get_latest_action(act_socket)
-            # Save the frames if needed
-            if args.save:
-                sim.dump_video(
-                    sim.get_frames(get_frames(cam_views), state_keys=[]),
-                    os.path.join(
-                        args.output_dir,
-                        "%s_%s_%s.mp4"
-                        % (
-                            os.path.basename(args.env_cfg)[:-5],
-                            datetime.datetime.now().strftime("%m%d_%H%M%S"),
-                            "SUCCESS" if episode_reset == 2 else "FAIL",
-                        ),
-                    ),
-                )
-            # Clear the cam_views
-            cam_views = []
+    return sim_status, cam_views
+
+
+def get_frames(cam_views):
+    frames = {}
+    for cv in cam_views:
+        for cam, sensors in cv.items():
+            for sensor, view in sensors.items():
+                key = "%s_%s" % (cam, sensor)
+                if key not in frames:
+                    frames[key] = []
+
+                frames[key].append(view.squeeze(0))
+
+    return frames
+
+
+def get_episode_name(cfg_filename, sim_status):
+    return "%s_%s_%s.mp4" % (
+        cfg_filename[:-5],
+        datetime.datetime.now().strftime("%m%d_%H%M%S"),
+        "SUCCESS" if sim_status == 2 else "FAIL",
+    )
+
+
+def main(simulation_app, args):
+    logging.info("Starting evaluation server...")
+    # Set up Zero MQ context and sockets
+    img_socket, act_socket = get_zmq_sockets(args.host, args.img_port, args.act_port)
+    logging.info(
+        "ZeroMQs are listensing on %s:%d for images and %s:%d for actions"
+        % (args.host, args.img_port, args.host, args.act_port)
+    )
+
+    # Set up test environment
+    logging.info("Recovering test environment from %s" % args.env_cfg)
+    env = get_test_env(
+        args.env_cfg,
+        args.num_envs,
+        args.scene_dir,
+        args.object_dir,
+        args.physics_time_step,
+        args.timeout,
+        args.device,
+        args.disable_fabric,
+        args.path_tracing,
+    )
+    env.reset()
+
+    robot_origin = (
+        torch.from_numpy(np.array(env.unwrapped.cfg.scene.robot.init_state.pos))
+        .unsqueeze(0)
+        .float()
+        .to(env.unwrapped.device)
+    )
+    robot_quat = (
+        torch.from_numpy(np.array(env.unwrapped.cfg.scene.robot.init_state.rot))
+        .unsqueeze(0)
+        .float()
+        .to(env.unwrapped.device)
+    )
+    final_position = get_final_position(args.env_cfg, env.unwrapped.device)
+
+    # Simulation loop
+    while simulation_app.is_running():
+        sim_status, cam_views = simulate(
+            env, img_socket, act_socket, robot_origin, robot_quat, final_position
+        )
+        logging.info("Resetting environment with code: %d" % sim_status)
+        env.reset()
+        # Clear the action socket
+        get_latest_action(act_socket)
+        # Save the frames if needed
+        # NOTE: Reset will occur twice, and the second time will include just one frame
+        if args.save and len(cam_views) > 1:
+            episode_name = get_episode_name(os.path.basename(args.env_cfg), sim_status)
+            episode_file_path = os.path.join(args.output_dir, episode_name)
+            logging.info("Saving videos to %s" % episode_file_path)
+            sim.dump_video(
+                sim.get_frames(get_frames(cam_views), state_keys=[]),
+                episode_file_path,
+            )
 
 
 if __name__ == "__main__":
