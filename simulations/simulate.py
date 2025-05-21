@@ -333,7 +333,7 @@ def _get_final_quat(task, robot, device="cpu"):
 def _get_reach_dist_threshold(robot):
     REACHABLE_RANGE = {
         "franka": 0.75,
-        "piper": 0.6,
+        "piper": 0.55,
     }
     if robot in REACHABLE_RANGE:
         return REACHABLE_RANGE[robot]
