@@ -71,7 +71,9 @@ class PickStateMachine:
         final_quat: torch.tensor,
         reach_dist_thres: float,
         grasp_dist_thres: float = 0.01,
+        grasp_pose_thres: float = 15.0, 
         object_dist_thres: float = 0.1,
+        gripper_length: float = 0.3, 
         device: torch.device | str = "cpu",
     ):
         """Initialize the state machine.
@@ -106,8 +108,12 @@ class PickStateMachine:
         self.reach_dist_thres = reach_dist_thres
         # the distance threshold for grasping
         self.grasp_dist_thres = grasp_dist_thres
+        # the angle threshold (degree) for grasping
+        self.grasp_pose_thres = grasp_pose_thres
         # the distance threshold for the object to be considered grasped
         self.object_dist_thres = object_dist_thres
+        # the gripper length
+        self.gripper_length = gripper_length
 
         # approach above object offset
         self.offset = torch.zeros((num_envs, POSE_DIM), device=device)
@@ -136,8 +142,21 @@ class PickStateMachine:
         object_velocity: torch.Tensor,
     ) -> torch.Tensor:
         WAITING_TIME = 0.25
-        object_position[:, 2] -= 0.005  # TODO: Do something with object_size[:, 2]
-        return object_position + object_velocity * WAITING_TIME
+        OBJECT_HEIGHT_THRES = 0.006
+        grasp_position = object_position + object_velocity * WAITING_TIME
+        object_height = object_size[:, 2]
+        grasp_position_z = object_position[:, 2]
+
+        # Plan A: Grasp as low as you can
+        grasp_position_z = object_height - self.gripper_length
+        
+        # # Plan B: Try to grasp the center of the object
+        # grasp_position_z = torch.where(object_height > OBJECT_HEIGHT_THRES * 2, grasp_position_z - OBJECT_HEIGHT_THRES, grasp_position_z)
+        # grasp_position_z = torch.where(object_height > self.gripper_length * 2, object_height - self.gripper_length, grasp_position_z)
+        
+        # ensure grasping height higher than table
+        grasp_position[:, 2] = torch.where(grasp_position_z < OBJECT_HEIGHT_THRES, OBJECT_HEIGHT_THRES, grasp_position_z)
+        return grasp_position
 
     def _get_grasp_quat(self, object_velocity: torch.Tensor) -> torch.Tensor:
         # NOTE: Rotation around the z-axis (0, 0, 1)
@@ -245,6 +264,7 @@ class PickStateMachine:
                 self.offset_wp,
                 self.reach_dist_thres,
                 self.grasp_dist_thres,
+                self.grasp_pose_thres,
                 self.object_dist_thres,
             ],
             device=self.device,
@@ -287,6 +307,7 @@ def infer_state_machine(
     offset: wp.array(dtype=wp.transform),
     reach_dist_threshold: float,  # the object is reachable
     grasp_dist_threshold: float,  # the object is graspable
+    grasp_pose_threshold: float,  # the ee pose is aligned with object
     object_dist_threshold: float,  # the object to be considered grasped
 ):
     # retrieve thread id
@@ -327,7 +348,7 @@ def infer_state_machine(
         if reach_dist >= reach_dist_threshold:
             sm_state[tid] = PickSmState.REST
             sm_wait_time[tid] = 0.0
-        elif grasp_dist < grasp_dist_threshold + offset[tid][2] and pose_angle[tid] < 15:
+        elif grasp_dist < grasp_dist_threshold + offset[tid][2] and pose_angle[tid] < grasp_pose_threshold:
             # wait for a while
             if sm_wait_time[tid] >= PickSmWaitTime.APPROACH_ABOVE_OBJECT:
                 # move to next state and reset wait time

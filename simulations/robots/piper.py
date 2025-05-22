@@ -73,6 +73,7 @@ AGILEX_PIPER_CFG = ArticulationCfg(
             velocity_limit=0.2,
             stiffness=2e3,
             damping=1e2,
+            friction=30,
         ),
     },
     soft_joint_pos_limit_factor=1.0,
