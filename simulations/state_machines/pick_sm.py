@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-19 14:43:55
+# @Last Modified at: 2025-05-22 11:10:20
 # @Email:  root@haozhexie.com
 
 import collections
@@ -66,6 +66,7 @@ class PickStateMachine:
         self,
         dt: float,
         num_envs: int,
+        object_size: torch.tensor,
         final_position: torch.tensor,
         final_quat: torch.tensor,
         reach_dist_thres: float,
@@ -86,6 +87,7 @@ class PickStateMachine:
         self.dt = float(dt)
         self.num_envs = num_envs
         self.device = device
+        self.object_size = object_size
         # initialize state machine
         self.sm_dt = torch.full((num_envs,), dt, device=device)
         self.sm_state = torch.full((num_envs,), 0, dtype=torch.int32, device=device)
@@ -93,7 +95,6 @@ class PickStateMachine:
 
         # desired grasp state
         self.grasp_position = torch.zeros((num_envs, 3), device=device)
-
         # next gripper state
         self.des_ee_pose = torch.zeros((num_envs, POSE_DIM), device=device)
         self.des_gripper_state = torch.full((num_envs,), 0.0, device=device)
@@ -130,11 +131,12 @@ class PickStateMachine:
 
     def _get_grasp_position(
         self,
+        object_size: torch.Tensor,
         object_position: torch.Tensor,
         object_velocity: torch.Tensor,
     ) -> torch.Tensor:
         WAITING_TIME = 0.25
-        object_position[:, 2] -= 0.005
+        object_position[:, 2] -= 0.005  # TODO: Do something with object_size[:, 2]
         return object_position + object_velocity * WAITING_TIME
 
     def _get_grasp_quat(self, object_velocity: torch.Tensor) -> torch.Tensor:
@@ -190,6 +192,7 @@ class PickStateMachine:
 
         # Determine the object position before lifting
         self.grasp_position = self._get_grasp_position(
+            self.object_size,
             curr_state["object"]["pos"],
             curr_state["object"]["velocity"],
         )

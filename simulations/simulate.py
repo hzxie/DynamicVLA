@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-20 11:17:40
+# @Last Modified at: 2025-05-22 11:05:48
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -292,6 +292,23 @@ def get_state_machine(task, robot, sm_args={}):
     return STATE_MACHINES[task](**sm_args)
 
 
+def _get_object_size(object_path, device="cpu"):
+    import omni.usd
+    import pxr
+
+    usd_context = omni.usd.get_context()
+    stage = usd_context.get_stage()
+    prim = stage.GetPrimAtPath(object_path)
+    bbox_cache = pxr.UsdGeom.BBoxCache(
+        pxr.Usd.TimeCode.Default(), [pxr.UsdGeom.Tokens.default_]
+    )
+    bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
+    size = bbox.max - bbox.min
+    return torch.tensor(
+        [[size[0], size[1], size[2]]], dtype=torch.float32, device=device
+    )
+
+
 def get_final_position(task, robot, device="cpu"):
     FINAL_POSITIONS = {
         "pick": {
@@ -472,7 +489,10 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
     )
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=debug_cfg["seed"])
     # Reset environment at start
-    env.reset()
+    env.reset(seed=debug_cfg["seed"])
+    random.seed(debug_cfg["seed"])
+    np.random.seed(debug_cfg["seed"])
+    torch.manual_seed(debug_cfg["seed"])
 
     # Enable Path Tracing
     if debug_cfg["path_tracing"]:
@@ -486,6 +506,7 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
             "dt": env_cfg.sim.dt * env_cfg.decimation,
             "num_envs": env.unwrapped.num_envs,
             "device": env.unwrapped.device,
+            "object_size": _get_object_size("/World/envs/env_0/Object"),
         },
     )
 
