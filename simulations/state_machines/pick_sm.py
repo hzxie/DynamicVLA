@@ -39,7 +39,7 @@ class PickSmWaitTime:
     """Additional wait times (in s) for states for before switching."""
 
     REST = wp.constant(0.1)
-    APPROACH_ABOVE_OBJECT = wp.constant(0.2)
+    APPROACH_ABOVE_OBJECT = wp.constant(0.4)
     APPROACH_OBJECT = wp.constant(0.2)
     GRASP_OBJECT = wp.constant(0.3)
     LIFT_OBJECT = wp.constant(0.2)
