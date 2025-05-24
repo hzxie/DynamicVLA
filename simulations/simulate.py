@@ -507,8 +507,10 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
             "dt": env_cfg.sim.dt * env_cfg.decimation,
             "num_envs": env.unwrapped.num_envs,
             "device": env.unwrapped.device,
-            "object_size": _get_object_size("/World/envs/env_0/Object", env.unwrapped.device),
-            "gripper_length": env_cfg.gripper_length
+            "object_size": _get_object_size(
+                "/World/envs/env_0/Object", env.unwrapped.device
+            ),
+            "gripper_length": env_cfg.gripper_length,
         },
     )
 

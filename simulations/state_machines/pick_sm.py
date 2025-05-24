@@ -71,9 +71,9 @@ class PickStateMachine:
         final_quat: torch.tensor,
         reach_dist_thres: float,
         grasp_dist_thres: float = 0.01,
-        grasp_pose_thres: float = 15.0, 
+        grasp_pose_thres: float = 15.0,
         object_dist_thres: float = 0.1,
-        gripper_length: float = 0.3, 
+        gripper_length: float = 0.3,
         device: torch.device | str = "cpu",
     ):
         """Initialize the state machine.
@@ -149,13 +149,17 @@ class PickStateMachine:
 
         # Plan A: Grasp as low as you can
         grasp_position_z = object_height - self.gripper_length
-        
+
         # # Plan B: Try to grasp the center of the object
         # grasp_position_z = torch.where(object_height > OBJECT_HEIGHT_THRES * 2, grasp_position_z - OBJECT_HEIGHT_THRES, grasp_position_z)
         # grasp_position_z = torch.where(object_height > self.gripper_length * 2, object_height - self.gripper_length, grasp_position_z)
-        
+
         # ensure grasping height higher than table
-        grasp_position[:, 2] = torch.where(grasp_position_z < OBJECT_HEIGHT_THRES, OBJECT_HEIGHT_THRES, grasp_position_z)
+        grasp_position[:, 2] = torch.where(
+            grasp_position_z < OBJECT_HEIGHT_THRES,
+            OBJECT_HEIGHT_THRES,
+            grasp_position_z,
+        )
         return grasp_position
 
     def _get_grasp_quat(self, object_velocity: torch.Tensor) -> torch.Tensor:
@@ -186,20 +190,22 @@ class PickStateMachine:
         # Consider the basic rotation of the gripper
         return self._quat_multiply(gsp_quat, self.final_object_pose[:, 3:7])
 
-    def _get_pose_angle(self, object_velocity: torch.Tensor, ee_quat: torch.Tensor) -> torch.Tensor :
+    def _get_pose_angle(
+        self, object_velocity: torch.Tensor, ee_quat: torch.Tensor
+    ) -> torch.Tensor:
         # Determine the object direction according to the velocity
         obj_pose = torch.arctan2(object_velocity[:, 1], object_velocity[:, 0])
         obj_pose = torch.where(obj_pose >= np.pi / 2, obj_pose - np.pi, obj_pose)
         obj_pose = torch.where(obj_pose <= -np.pi / 2, obj_pose + np.pi, obj_pose)
         obj_pose = obj_pose + np.pi / 2
-        
+
         # Determine the end-effector direction according to the quaternion
         w, x, y, z = ee_quat.unbind(dim=1)
         ee_pose = torch.atan2(2 * (x * y + z * w), 1 - 2 * (y**2 + z**2))
         ee_pose = torch.where(ee_pose <= 0, ee_pose + np.pi, ee_pose)
 
         # return the angle between them
-        pose_angle = obj_pose - ee_pose 
+        pose_angle = obj_pose - ee_pose
         pose_angle = abs(pose_angle)
         pose_angle = torch.where(pose_angle > np.pi / 2, np.pi - pose_angle, pose_angle)
         return pose_angle * 180 / np.pi
@@ -235,7 +241,9 @@ class PickStateMachine:
         )
 
         grasp_quat = self._get_grasp_quat(curr_state["object"]["velocity"])
-        pose_angle = self._get_pose_angle(curr_state["object"]["velocity"], curr_state["end_effector"]["quat"])
+        pose_angle = self._get_pose_angle(
+            curr_state["object"]["velocity"], curr_state["end_effector"]["quat"]
+        )
         grasp_pose = torch.cat([self.grasp_position, grasp_quat], dim=-1)
         object_pose = torch.cat([curr_state["object"]["pos"], grasp_quat], dim=-1)
 
@@ -258,7 +266,7 @@ class PickStateMachine:
                 object_pose_wp,
                 ee_pose_wp,
                 final_object_pose_wp,
-                pose_angle_wp, 
+                pose_angle_wp,
                 self.des_ee_pose_wp,
                 self.des_gripper_state_wp,
                 self.offset_wp,
@@ -348,7 +356,10 @@ def infer_state_machine(
         if reach_dist >= reach_dist_threshold:
             sm_state[tid] = PickSmState.REST
             sm_wait_time[tid] = 0.0
-        elif grasp_dist < grasp_dist_threshold + offset[tid][2] and pose_angle[tid] < grasp_pose_threshold:
+        elif (
+            grasp_dist < grasp_dist_threshold + offset[tid][2]
+            and pose_angle[tid] < grasp_pose_threshold
+        ):
             # wait for a while
             if sm_wait_time[tid] >= PickSmWaitTime.APPROACH_ABOVE_OBJECT:
                 # move to next state and reset wait time

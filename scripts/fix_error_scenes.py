@@ -4,12 +4,11 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-22 14:40:51
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-23 20:14:28
+# @Last Modified at: 2025-05-24 08:42:03
 # @Email:  root@haozhexie.com
 
 import argparse
 import logging
-import numpy as np
 import os
 import sys
 
@@ -141,7 +140,7 @@ def contains_invisible_prims(stage):
 
 
 def main(scene_dir):
-    from pxr import Sdf, Usd, UsdGeom, UsdUtils
+    from pxr import Usd, UsdGeom
 
     usd_files = [f for f in os.listdir(scene_dir) if f.endswith(".usd")]
     for uf in tqdm(usd_files):
