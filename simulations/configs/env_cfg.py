@@ -168,6 +168,8 @@ class EnvCfg(ManagerBasedRLEnvCfg):
         self.decimation = 1
         # the length of the episode in seconds
         self.episode_length_s = 5.0
+        # the length of the gripper
+        self.gripper_length = 0.04
         # simulation settings
         self.sim.dt = 0.025  # 40Hz
         self.sim.render_interval = self.decimation
@@ -180,6 +182,7 @@ class EnvCfg(ManagerBasedRLEnvCfg):
 
 def set_robot(robot: str, env_cfg: EnvCfg, robot_pose: list) -> EnvCfg:
     assert robot in ["franka", "piper"], "Unknown robot: %s" % robot
+    env_cfg.gripper_length = configs.robot_cfg.get_gripper_length(robot)
     env_cfg.commands.object_pose.body_name = configs.robot_cfg.get_body_name(robot)
     env_cfg.scene.ee_frame = configs.robot_cfg.get_ee_frame_cfg(robot)
     env_cfg.scene.robot = configs.robot_cfg.get_robot_cfg(robot)
