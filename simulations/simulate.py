@@ -29,7 +29,7 @@ PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.p
 sys.path.append(os.path.dirname(__file__))
 
 
-def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
+def get_env_cfg(scene_dir, object_dir, sim_cfg, robot, task):
     # The following packages MUST be imported after the simulation app is created
     import configs.env_cfg
     import configs.scene_cfg
@@ -85,7 +85,7 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
 
     # Dynamically add objects to scene
     env_cfg.scene = _set_up_scene_objects(
-        env_cfg.scene, sim_cfg, robot_pose, table["bbox"], object_dir
+        env_cfg.scene, sim_cfg, robot_pose, table["bbox"], object_dir, task
     )
     return env_cfg
 
@@ -199,7 +199,7 @@ def _get_light_cfg(light_cfg):
     }
 
 
-def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir):
+def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir, task):
     import configs.scene_cfg
 
     target_category = random.choice(os.listdir(object_dir))
@@ -216,6 +216,7 @@ def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir
             table_bbox,
             file_path=os.path.join(object_dir, target_category, target_object),
             robot_pos=robot_pose["pos"],
+            static=task in ["place"], 
             moving_time=sim_cfg["scene"]["object"]["moving_time"],
             semantic_tags=[("class", "OBJECT_MAIN")],
         ),
@@ -238,14 +239,26 @@ def _get_object_cfg(
     PADDING = 0.02
     object_cfg = {}
     tbl_z = table_bbox.max[2] + PADDING
-    object_cfg["pos"] = np.array(
-        [
-            random.uniform(table_bbox.min[0] + PADDING, table_bbox.max[0] - PADDING),
-            random.uniform(table_bbox.min[1] + PADDING, table_bbox.max[1] - PADDING),
-            tbl_z,
-        ]
-    )
-    if not static:
+    if static :
+        object_range_min_0 = table_bbox.min[0] * 3 / 4 + table_bbox.max[0] / 4
+        object_range_max_0 = table_bbox.min[0] / 4 + table_bbox.max[0] * 3 / 4
+        object_range_min_1 = table_bbox.min[1] * 3 / 4 + table_bbox.max[1] / 4
+        object_range_max_1 = table_bbox.min[1] / 4 + table_bbox.max[1] * 3 / 4
+        object_cfg["pos"] = np.array(
+            [
+                random.uniform(object_range_min_0, object_range_max_0),
+                random.uniform(object_range_min_1, object_range_max_1),
+                tbl_z,
+            ]
+        )
+    else :
+        object_cfg["pos"] = np.array(
+            [
+                random.uniform(table_bbox.min[0] + PADDING, table_bbox.max[0] - PADDING),
+                random.uniform(table_bbox.min[1] + PADDING, table_bbox.max[1] - PADDING),
+                tbl_z,
+            ]
+        )
         assert (
             robot_pos is not None
         ), "Robot position must be provided for dynamic objects."
@@ -270,10 +283,11 @@ def _get_object_cfg(
 
 
 def get_state_machine(task, robot, sm_args={}):
-    import state_machines.pick_sm
+    import state_machines.pick_sm, state_machines.place_sm
 
     STATE_MACHINES = {
         "pick": state_machines.pick_sm.PickStateMachine,
+        "place": state_machines.place_sm.PlaceStateMachine,
     }
     if task not in STATE_MACHINES:
         raise ValueError("Unknown task: %s." % task)
@@ -314,6 +328,10 @@ def get_final_position(task, robot, device="cpu"):
         "pick": {
             "franka": [0.3, 0, 0.3],
             "piper": [0.3, 0, 0.3],
+        }, 
+        "place": {
+            "franka": [0.3, 0, 0.3],
+            "piper": [0.3, 0, 0.3],
         }
     }
     if task in FINAL_POSITIONS:
@@ -331,6 +349,10 @@ def get_final_position(task, robot, device="cpu"):
 def _get_final_quat(task, robot, device="cpu"):
     FINAL_QUATS = {
         "pick": {
+            "franka": [0, 1, 0, 0],
+            "piper": [0, 1, 0, 0],
+        }, 
+        "place": {
             "franka": [0, 1, 0, 0],
             "piper": [0, 1, 0, 0],
         }
@@ -485,7 +507,7 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
 
     # Create a new environment
     env_cfg = get_env_cfg(
-        dir_cfg["scene_dir"], dir_cfg["object_dir"], sim_cfg, task_cfg["robot"]
+        dir_cfg["scene_dir"], dir_cfg["object_dir"], sim_cfg, task_cfg["robot"], task_cfg["task_name"]
     )
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=debug_cfg["seed"])
     # Reset environment at start
