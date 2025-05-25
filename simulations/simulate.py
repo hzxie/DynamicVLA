@@ -29,7 +29,7 @@ PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.p
 sys.path.append(os.path.dirname(__file__))
 
 
-def get_env_cfg(scene_dir, object_dir, sim_cfg, robot, task):
+def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, robot, task):
     # The following packages MUST be imported after the simulation app is created
     import configs.env_cfg
     import configs.scene_cfg
@@ -85,7 +85,7 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot, task):
 
     # Dynamically add objects to scene
     env_cfg.scene = _set_up_scene_objects(
-        env_cfg.scene, sim_cfg, robot_pose, table["bbox"], object_dir, task
+        env_cfg.scene, sim_cfg, robot_pose, table["bbox"], object_dir, container_dir, task
     )
     return env_cfg
 
@@ -199,7 +199,7 @@ def _get_light_cfg(light_cfg):
     }
 
 
-def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir, task):
+def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir, container_dir, task):
     import configs.scene_cfg
 
     target_category = random.choice(os.listdir(object_dir))
@@ -221,6 +221,22 @@ def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir
             semantic_tags=[("class", "OBJECT_MAIN")],
         ),
     )
+    if task in ["place"] :
+        container_candidates = [
+            f
+            for f in os.listdir(container_dir)
+            if f.endswith(".usd")
+        ]
+        target_container = random.choice(container_candidates)
+        scene_cfg = configs.scene_cfg.add_object_to_scene(
+            scene_cfg, 
+            "container", 
+            _get_container_cfg(
+                table_bbox,
+                file_path=os.path.join(container_dir, target_container),
+                semantic_tags=[("class", "OBJECT_BG")],
+            ),
+        )
     # TODO: Add more objects to the scene
     # scene_cfg = configs.scene_cfg.add_object_to_scene(scene_cfg)
     return scene_cfg
@@ -275,6 +291,37 @@ def _get_object_cfg(
         )
 
     return configs.object_cfg.get_object_cfg(
+        object_cfg,
+        configs.object_cfg.get_spawner_cfg(
+            file_path=file_path, semantic_tags=semantic_tags
+        ),
+    )
+
+
+def _get_container_cfg(
+    table_bbox,
+    file_path=None,
+    semantic_tags=None,
+):
+    import configs.object_cfg
+
+    PADDING = 0.02
+    object_cfg = {}
+    tbl_z = table_bbox.max[2] + 0.1
+    
+    object_range_min_0 = table_bbox.min[0] * 3 / 4 + table_bbox.max[0] / 4
+    object_range_max_0 = table_bbox.min[0] / 4 + table_bbox.max[0] * 3 / 4
+    object_range_min_1 = table_bbox.min[1] * 3 / 4 + table_bbox.max[1] / 4
+    object_range_max_1 = table_bbox.min[1] / 4 + table_bbox.max[1] * 3 / 4
+    object_cfg["pos"] = np.array(
+        [
+            random.uniform(object_range_min_0, object_range_max_0),
+            random.uniform(object_range_min_1, object_range_max_1),
+            tbl_z,
+        ]
+    )
+
+    return configs.object_cfg.get_container_cfg(
         object_cfg,
         configs.object_cfg.get_spawner_cfg(
             file_path=file_path, semantic_tags=semantic_tags
@@ -380,7 +427,7 @@ def _get_reach_dist_threshold(robot):
         raise ValueError("Unknown robot: %s." % robot)
 
 
-def get_curr_state(ee_state, object_state, env_origins, robot_quat):
+def get_curr_state(ee_state, object_state, container_state, env_origins, robot_quat):
     quat_opengl = robot_quat[:, [1, 2, 3, 0]]  # xyzw
     curr_state = {}
     if ee_state is not None:
@@ -399,6 +446,13 @@ def get_curr_state(ee_state, object_state, env_origins, robot_quat):
             "velocity": _get_robot_relative_position(
                 object_state.root_lin_vel_w, quat_opengl
             ),
+        }
+    if container_state is not None:
+        curr_state["container"] = {
+            "pos": _get_robot_relative_position(
+                container_state.root_pos_w - env_origins, quat_opengl
+            ),
+            "quat": container_state.root_quat_w,
         }
 
     return curr_state
@@ -507,7 +561,7 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
 
     # Create a new environment
     env_cfg = get_env_cfg(
-        dir_cfg["scene_dir"], dir_cfg["object_dir"], sim_cfg, task_cfg["robot"], task_cfg["task_name"]
+        dir_cfg["scene_dir"], dir_cfg["object_dir"], dir_cfg["container_dir"], sim_cfg, task_cfg["robot"], task_cfg["task_name"]
     )
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=debug_cfg["seed"])
     # Reset environment at start
@@ -557,9 +611,16 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
             env.step(torch.from_numpy(env.action_space.sample()))
             continue
 
+        # TODO: It's too ugly, I'll fix it
+        if task_cfg["task_name"] in ["place"] : 
+            container_state = env.unwrapped.scene["container"].data
+        else :
+            container_state = None
+        
         curr_state = get_curr_state(
             env.unwrapped.scene["ee_frame"].data,
             env.unwrapped.scene["object"].data,
+            container_state,
             env.unwrapped.scene.env_origins + robot_origin,
             robot_quat,
         )
@@ -801,6 +862,7 @@ def main(simulation_app, args):
             {
                 "scene_dir": args.scene_dir,
                 "object_dir": args.object_dir,
+                "container_dir": args.container_dir,
             },
             {
                 "debug": args.debug,
@@ -872,6 +934,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--object_dir", default=os.path.join(PROJECT_HOME, os.pardir, "objects")
+    )
+    parser.add_argument(
+        "--container_dir", default=os.path.join(PROJECT_HOME, os.pardir, "containers")
     )
     parser.add_argument(
         "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "datasets")

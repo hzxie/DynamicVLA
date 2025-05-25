@@ -124,7 +124,7 @@ class TerminationsCfg:
     object_dropping = TerminationTermCfg(
         func=mdp.root_height_below_minimum,
         params={
-            "minimum_height": 0.05,
+            "minimum_height": 0.1,
             "asset_cfg": SceneEntityCfg("object"),
         },
         time_out=True,
