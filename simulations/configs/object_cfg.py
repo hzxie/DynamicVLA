@@ -33,6 +33,17 @@ def get_object_cfg(
     )
 
 
+def get_container_cfg(
+    obj_cfg: dict, spawner_cfg: SpawnerCfg
+) -> RigidObjectCfg | DeformableObjectCfg:
+    init_state = RigidObjectCfg.InitialStateCfg(pos=obj_cfg["pos"])
+    return RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Container",
+        init_state=init_state,
+        spawn=spawner_cfg,
+    )
+
+
 def get_spawner_cfg(
     file_path: str = None, mass: int = 0.5, semantic_tags=None
 ) -> SpawnerCfg:

@@ -21,7 +21,7 @@ from isaaclab_tasks.manager_based.manipulation.lift import mdp
 # Pre-defined configs
 ##
 from isaaclab.markers.config import FRAME_MARKER_CFG  # isort: skip
-from isaaclab_assets.robots.franka import FRANKA_PANDA_HIGH_PD_CFG  # isort: skip
+from robots.franka import FRANKA_PANDA_HIGH_PD_CFG  # isort: skip
 from robots.piper import AGILEX_PIPER_HIGH_PD_CFG  # isort: skip
 
 
@@ -135,7 +135,7 @@ def get_ee_frame_cfg(robot: str) -> FrameTransformerCfg:
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Robot/gripper_base",
                     name="end_effector",
-                    offset=OffsetCfg(pos=[0.0, 0.0, 0.1034]),
+                    offset=OffsetCfg(pos=[0.0, 0.0, 0.1234]),
                 ),
             ],
         )
@@ -157,6 +157,15 @@ def get_gripper_camera_cfg(robot: str) -> dict:
         "quat": [0, 0.7071068, 0.7071068, 0],
         "convention": "opengl",
     }
+
+
+def get_gripper_length(robot: str) -> float:
+    if robot == "franka":
+        return 0.045
+    elif robot == "piper":
+        return 0.07
+    else:
+        raise ValueError("Unknown robot: %s" % robot)
 
 
 def get_robot_name(usd_path: str) -> str:

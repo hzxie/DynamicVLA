@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-30 13:26:00
+# @Last Modified at: 2025-05-30 13:52:49
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -29,7 +29,7 @@ PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.p
 sys.path.append(os.path.dirname(__file__))
 
 
-def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
+def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, robot, task):
     # The following packages MUST be imported after the simulation app is created
     import configs.env_cfg
     import configs.scene_cfg
@@ -85,7 +85,7 @@ def get_env_cfg(scene_dir, object_dir, sim_cfg, robot):
 
     # Dynamically add objects to scene
     env_cfg.scene = _set_up_scene_objects(
-        env_cfg.scene, sim_cfg, robot_pose, table["bbox"], object_dir
+        env_cfg.scene, sim_cfg, robot_pose, table["bbox"], object_dir, container_dir, task
     )
     return env_cfg
 
@@ -199,7 +199,7 @@ def _get_light_cfg(light_cfg):
     }
 
 
-def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir):
+def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir, container_dir, task):
     import configs.scene_cfg
 
     target_category = random.choice(os.listdir(object_dir))
@@ -216,10 +216,27 @@ def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir
             table_bbox,
             file_path=os.path.join(object_dir, target_category, target_object),
             robot_pos=robot_pose["pos"],
+            static=task in ["place"], 
             moving_time=sim_cfg["scene"]["object"]["moving_time"],
             semantic_tags=[("class", "OBJECT_MAIN")],
         ),
     )
+    if task in ["place"] :
+        container_candidates = [
+            f
+            for f in os.listdir(container_dir)
+            if f.endswith(".usd")
+        ]
+        target_container = random.choice(container_candidates)
+        scene_cfg = configs.scene_cfg.add_object_to_scene(
+            scene_cfg, 
+            "container", 
+            _get_container_cfg(
+                table_bbox,
+                file_path=os.path.join(container_dir, target_container),
+                semantic_tags=[("class", "OBJECT_BG")],
+            ),
+        )
     # TODO: Add more objects to the scene
     # scene_cfg = configs.scene_cfg.add_object_to_scene(scene_cfg)
     return scene_cfg
@@ -238,14 +255,26 @@ def _get_object_cfg(
     PADDING = 0.02
     object_cfg = {}
     tbl_z = table_bbox.max[2] + PADDING
-    object_cfg["pos"] = np.array(
-        [
-            random.uniform(table_bbox.min[0] + PADDING, table_bbox.max[0] - PADDING),
-            random.uniform(table_bbox.min[1] + PADDING, table_bbox.max[1] - PADDING),
-            tbl_z,
-        ]
-    )
-    if not static:
+    if static :
+        object_range_min_0 = table_bbox.min[0] * 3 / 4 + table_bbox.max[0] / 4
+        object_range_max_0 = table_bbox.min[0] / 4 + table_bbox.max[0] * 3 / 4
+        object_range_min_1 = table_bbox.min[1] * 3 / 4 + table_bbox.max[1] / 4
+        object_range_max_1 = table_bbox.min[1] / 4 + table_bbox.max[1] * 3 / 4
+        object_cfg["pos"] = np.array(
+            [
+                random.uniform(object_range_min_0, object_range_max_0),
+                random.uniform(object_range_min_1, object_range_max_1),
+                tbl_z,
+            ]
+        )
+    else :
+        object_cfg["pos"] = np.array(
+            [
+                random.uniform(table_bbox.min[0] + PADDING, table_bbox.max[0] - PADDING),
+                random.uniform(table_bbox.min[1] + PADDING, table_bbox.max[1] - PADDING),
+                tbl_z,
+            ]
+        )
         assert (
             robot_pos is not None
         ), "Robot position must be provided for dynamic objects."
@@ -269,11 +298,43 @@ def _get_object_cfg(
     )
 
 
+def _get_container_cfg(
+    table_bbox,
+    file_path=None,
+    semantic_tags=None,
+):
+    import configs.object_cfg
+
+    PADDING = 0.02
+    object_cfg = {}
+    tbl_z = table_bbox.max[2] + 0.1
+    
+    object_range_min_0 = table_bbox.min[0] * 3 / 4 + table_bbox.max[0] / 4
+    object_range_max_0 = table_bbox.min[0] / 4 + table_bbox.max[0] * 3 / 4
+    object_range_min_1 = table_bbox.min[1] * 3 / 4 + table_bbox.max[1] / 4
+    object_range_max_1 = table_bbox.min[1] / 4 + table_bbox.max[1] * 3 / 4
+    object_cfg["pos"] = np.array(
+        [
+            random.uniform(object_range_min_0, object_range_max_0),
+            random.uniform(object_range_min_1, object_range_max_1),
+            tbl_z,
+        ]
+    )
+
+    return configs.object_cfg.get_container_cfg(
+        object_cfg,
+        configs.object_cfg.get_spawner_cfg(
+            file_path=file_path, semantic_tags=semantic_tags
+        ),
+    )
+
+
 def get_state_machine(task, robot, sm_args={}):
-    import state_machines.pick_sm
+    import state_machines.pick_sm, state_machines.place_sm
 
     STATE_MACHINES = {
         "pick": state_machines.pick_sm.PickStateMachine,
+        "place": state_machines.place_sm.PlaceStateMachine,
     }
     if task not in STATE_MACHINES:
         raise ValueError("Unknown task: %s." % task)
@@ -292,9 +353,30 @@ def get_state_machine(task, robot, sm_args={}):
     return STATE_MACHINES[task](**sm_args)
 
 
+def _get_object_size(object_path, device="cpu"):
+    import omni.usd
+    import pxr
+
+    usd_context = omni.usd.get_context()
+    stage = usd_context.get_stage()
+    prim = stage.GetPrimAtPath(object_path)
+    bbox_cache = pxr.UsdGeom.BBoxCache(
+        pxr.Usd.TimeCode.Default(), [pxr.UsdGeom.Tokens.default_]
+    )
+    bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
+    size = bbox.max - bbox.min
+    return torch.tensor(
+        [[size[0], size[1], size[2]]], dtype=torch.float32, device=device
+    )
+
+
 def get_final_position(task, robot, device="cpu"):
     FINAL_POSITIONS = {
         "pick": {
+            "franka": [0.3, 0, 0.3],
+            "piper": [0.3, 0, 0.3],
+        }, 
+        "place": {
             "franka": [0.3, 0, 0.3],
             "piper": [0.3, 0, 0.3],
         }
@@ -316,6 +398,10 @@ def _get_final_quat(task, robot, device="cpu"):
         "pick": {
             "franka": [0, 1, 0, 0],
             "piper": [0, 1, 0, 0],
+        }, 
+        "place": {
+            "franka": [0, 1, 0, 0],
+            "piper": [0, 1, 0, 0],
         }
     }
     if task in FINAL_QUATS:
@@ -333,7 +419,7 @@ def _get_final_quat(task, robot, device="cpu"):
 def _get_reach_dist_threshold(robot):
     REACHABLE_RANGE = {
         "franka": 0.75,
-        "piper": 0.6,
+        "piper": 0.55,
     }
     if robot in REACHABLE_RANGE:
         return REACHABLE_RANGE[robot]
@@ -341,7 +427,7 @@ def _get_reach_dist_threshold(robot):
         raise ValueError("Unknown robot: %s." % robot)
 
 
-def get_curr_state(ee_state, object_state, env_origins, robot_quat):
+def get_curr_state(ee_state, object_state, container_state, env_origins, robot_quat):
     quat_opengl = robot_quat[:, [1, 2, 3, 0]]  # xyzw
     curr_state = {}
     if ee_state is not None:
@@ -360,6 +446,13 @@ def get_curr_state(ee_state, object_state, env_origins, robot_quat):
             "velocity": _get_robot_relative_position(
                 object_state.root_lin_vel_w, quat_opengl
             ),
+        }
+    if container_state is not None:
+        curr_state["container"] = {
+            "pos": _get_robot_relative_position(
+                container_state.root_pos_w - env_origins, quat_opengl
+            ),
+            "quat": container_state.root_quat_w,
         }
 
     return curr_state
@@ -468,11 +561,15 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
 
     # Create a new environment
     env_cfg = get_env_cfg(
-        dir_cfg["scene_dir"], dir_cfg["object_dir"], sim_cfg, task_cfg["robot"]
+        dir_cfg["scene_dir"], dir_cfg["object_dir"], dir_cfg["container_dir"], sim_cfg, task_cfg["robot"], task_cfg["task_name"]
     )
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=debug_cfg["seed"])
     # Reset environment at start
-    env.reset()
+    # env.reset()
+    env.reset(seed=debug_cfg["seed"])
+    random.seed(debug_cfg["seed"])
+    np.random.seed(debug_cfg["seed"])
+    torch.manual_seed(debug_cfg["seed"])
 
     # Enable Path Tracing
     if debug_cfg["path_tracing"]:
@@ -486,6 +583,10 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
             "dt": env_cfg.sim.dt * env_cfg.decimation,
             "num_envs": env.unwrapped.num_envs,
             "device": env.unwrapped.device,
+            "object_size": _get_object_size(
+                "/World/envs/env_0/Object", env.unwrapped.device
+            ),
+            "gripper_length": env_cfg.gripper_length,
         },
     )
 
@@ -510,9 +611,16 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
             env.step(torch.from_numpy(env.action_space.sample()))
             continue
 
+        # TODO: It's too ugly, I'll fix it
+        if task_cfg["task_name"] in ["place"] : 
+            container_state = env.unwrapped.scene["container"].data
+        else :
+            container_state = None
+        
         curr_state = get_curr_state(
             env.unwrapped.scene["ee_frame"].data,
             env.unwrapped.scene["object"].data,
+            container_state,
             env.unwrapped.scene.env_origins + robot_origin,
             robot_quat,
         )
@@ -754,6 +862,7 @@ def main(simulation_app, args):
             {
                 "scene_dir": args.scene_dir,
                 "object_dir": args.object_dir,
+                "container_dir": args.container_dir,
             },
             {
                 "debug": args.debug,
@@ -825,6 +934,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--object_dir", default=os.path.join(PROJECT_HOME, os.pardir, "objects")
+    )
+    parser.add_argument(
+        "--container_dir", default=os.path.join(PROJECT_HOME, os.pardir, "containers")
     )
     parser.add_argument(
         "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "datasets")
