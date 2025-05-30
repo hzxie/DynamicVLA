@@ -8,9 +8,10 @@
 # @Email:  root@haozhexie.com
 
 import argparse
-import h5py
 import logging
 import uuid
+
+import h5py
 import zmq
 import zmq.utils.monitor
 

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-20 11:17:40
+# @Last Modified at: 2025-05-30 13:26:00
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -705,7 +705,7 @@ def _get_state_text(state):
     text = ""
     for k, v in state.items():
         k = k.replace("_", " ").title()
-        if isinstance(v, (int, np.int32)):
+        if isinstance(v, (int, np.int32, np.int64)):
             text += "%s: %d\n" % (k, v)
         elif isinstance(v, float):
             text += "%s: %.3f\n" % (k, v)

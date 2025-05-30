@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-05 14:29:46
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-06 18:59:10
+# @Last Modified at: 2025-05-30 13:26:36
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -15,7 +15,7 @@ import h5py
 from tqdm import tqdm
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
-sys.path.append(os.path.dirname(__file__))
+sys.path.append(PROJECT_HOME)
 
 
 import simulations.simulate as sim
@@ -29,9 +29,8 @@ def main(input_dir, output_dir):
 
         sim.dump_video(
             sim.get_frames(env_states),
-            os.path.join(args.output_dir, "%s.mp4" % os.path.splitext(file)[0]),
+            os.path.join(output_dir, "%s.mp4" % os.path.splitext(file)[0]),
         )
-        break
 
 
 if __name__ == "__main__":
