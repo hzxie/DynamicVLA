@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-30 21:40:48
+# @Last Modified at: 2025-05-31 12:09:39
 # @Email:  root@haozhexie.com
 #
 # Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/convert_libero_data_to_lerobot.py
@@ -13,15 +13,16 @@ import argparse
 import json
 import logging
 import os
+import pathlib
 import random
 import shutil
 import sys
 
 import h5py
+import lerobot.common.datasets.utils
 import numpy as np
 from huggingface_hub.constants import HF_HOME
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.common.datasets.utils import write_jsonlines
 from tqdm import tqdm
 
 
@@ -224,7 +225,6 @@ def main(input_dir, push_to_hub):
     lerobot_dataset = create_lerobot_dataset(REPO_ID, dataset_metadata)
     logging.info("Dataset Overview: %s" % lerobot_dataset)
 
-    cam_parameters = []
     for i, e in enumerate(tqdm(episodes)):
         if e.find(dataset_metadata["robot_type"]) == -1:
             continue
@@ -235,16 +235,11 @@ def main(input_dir, push_to_hub):
             lerobot_dataset.add_frame(f)
 
         lerobot_dataset.save_episode()
-        cam_parameters.append(
-            {"episode_idx": i, "filename": e, "cameras": _metadata["cameras"]}
+        # Manually save the camera parameters
+        lerobot.common.datasets.utils.append_jsonlines(
+            {"episode_idx": i, "filename": e, "cameras": _metadata["cameras"]},
+            pathlib.Path(os.path.join(OUTPUT_DIR, "meta", "camera.jsonl")),
         )
-        if i >= 500:
-            break
-    
-    # Consolidate the dataset
-    lerobot_dataset.consolidate(run_compute_stats=True)
-    # Save the camera parameters
-    write_jsonlines(cam_parameters, os.path.join(OUTPUT_DIR, "meta", "camera.jsonl"))
 
     if push_to_hub:
         lerobot_dataset.push_to_hub(
