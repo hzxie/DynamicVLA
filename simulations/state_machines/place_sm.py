@@ -63,8 +63,8 @@ class PlaceStateMachine:
     3. APPROACH_OBJECT: The robot moves to the position.
     4. GRASP_OBJECT: The robot grasps the object.
     5. LIFT_OBJECT: The robot lifts the object to a height.
-    6. ABOVE_TARGET: The robot moves above the desired pose. 
-    7. TO_TARGET: The robot moves the object to the desired pose. 
+    6. ABOVE_TARGET: The robot moves above the desired pose.
+    7. TO_TARGET: The robot moves the object to the desired pose.
     8. PLACE: The robot place the object. This is the final state.
     """
 
@@ -77,9 +77,9 @@ class PlaceStateMachine:
         final_quat: torch.tensor,
         reach_dist_thres: float,
         grasp_dist_thres: float = 0.01,
-        grasp_pose_thres: float = 15.0, 
+        grasp_pose_thres: float = 15.0,
         object_dist_thres: float = 0.1,
-        gripper_length: float = 0.3, 
+        gripper_length: float = 0.3,
         device: torch.device | str = "cpu",
     ):
         """Initialize the state machine.
@@ -155,13 +155,17 @@ class PlaceStateMachine:
 
         # Plan A: Grasp as low as you can
         grasp_position_z = object_height - self.gripper_length
-        
+
         # # Plan B: Try to grasp the center of the object
         # grasp_position_z = torch.where(object_height > OBJECT_HEIGHT_THRES * 2, grasp_position_z - OBJECT_HEIGHT_THRES, grasp_position_z)
         # grasp_position_z = torch.where(object_height > self.gripper_length * 2, object_height - self.gripper_length, grasp_position_z)
-        
+
         # ensure grasping height higher than table
-        grasp_position[:, 2] = torch.where(grasp_position_z < OBJECT_HEIGHT_THRES, OBJECT_HEIGHT_THRES, grasp_position_z)
+        grasp_position[:, 2] = torch.where(
+            grasp_position_z < OBJECT_HEIGHT_THRES,
+            OBJECT_HEIGHT_THRES,
+            grasp_position_z,
+        )
         return grasp_position
 
     def compute(self, curr_state: dict) -> torch.Tensor:
@@ -180,10 +184,14 @@ class PlaceStateMachine:
         )
 
         grasp_pose = torch.cat([self.grasp_position, self.standard_orientation], dim=-1)
-        object_pose = torch.cat([curr_state["object"]["pos"], self.standard_orientation], dim=-1)
+        object_pose = torch.cat(
+            [curr_state["object"]["pos"], self.standard_orientation], dim=-1
+        )
 
         # Determine the target position
-        final_object_pose = torch.cat([curr_state["container"]["pos"], self.standard_orientation], dim=-1)
+        final_object_pose = torch.cat(
+            [curr_state["container"]["pos"], self.standard_orientation], dim=-1
+        )
 
         # Convert to warp
         ee_pose_wp = wp.from_torch(ee_pose.contiguous(), wp.transform)
@@ -263,7 +271,7 @@ def infer_state_machine(
             # move to next state and reset wait time
             sm_state[tid] = PlaceSmState.APPROACH_ABOVE_OBJECT
             sm_wait_time[tid] = 0.0
-        
+
     elif state == PlaceSmState.APPROACH_ABOVE_OBJECT:
         gripper_state[tid] = GripperState.OPEN
         des_ee_pose[tid] = wp.transform_multiply(offset[tid], grasp_pose[tid])
@@ -271,13 +279,13 @@ def infer_state_machine(
             wp.transform_get_translation(ee_pose[tid]),
             wp.transform_get_translation(des_ee_pose[tid]),
         )
-        if grasp_dist < grasp_dist_threshold :
+        if grasp_dist < grasp_dist_threshold:
             # wait for a while
             if sm_wait_time[tid] >= PlaceSmWaitTime.APPROACH_ABOVE_OBJECT:
                 # move to next state and reset wait time
                 sm_state[tid] = PlaceSmState.APPROACH_OBJECT
                 sm_wait_time[tid] = 0.0
-        
+
     elif state == PlaceSmState.APPROACH_OBJECT:
         gripper_state[tid] = GripperState.OPEN
         des_ee_pose[tid] = grasp_pose[tid]
@@ -290,7 +298,7 @@ def infer_state_machine(
                 # move to next state and reset wait time
                 sm_state[tid] = PlaceSmState.GRASP_OBJECT
                 sm_wait_time[tid] = 0.0
-        
+
     elif state == PlaceSmState.GRASP_OBJECT:
         gripper_state[tid] = GripperState.CLOSE
         des_ee_pose[tid] = grasp_pose[tid]
@@ -299,7 +307,7 @@ def infer_state_machine(
             # move to next state and reset wait time
             sm_state[tid] = PlaceSmState.LIFT_OBJECT
             sm_wait_time[tid] = 0.0
-        
+
     elif state == PlaceSmState.LIFT_OBJECT:
         gripper_state[tid] = GripperState.CLOSE
         if sm_wait_time[tid] < PlaceSmWaitTime.LIFT_OBJECT:
@@ -309,7 +317,7 @@ def infer_state_machine(
             # move to next state and reset wait time
             sm_state[tid] = PlaceSmState.ABOVE_TARGET
             sm_wait_time[tid] = 0.0
-        
+
     elif state == PlaceSmState.ABOVE_TARGET:
         des_ee_pose[tid] = wp.transform_multiply(offset[tid], final_object_pose[tid])
         gripper_state[tid] = GripperState.CLOSE
@@ -322,7 +330,7 @@ def infer_state_machine(
         if obj_dist > object_dist_threshold:
             sm_state[tid] = PlaceSmState.REST
             sm_wait_time[tid] = 0.0
-        
+
         tgt_dist = get_distance(
             wp.transform_get_translation(ee_pose[tid]),
             wp.transform_get_translation(des_ee_pose[tid]),
@@ -331,11 +339,11 @@ def infer_state_machine(
         if tgt_dist < grasp_dist_threshold:
             sm_state[tid] = PlaceSmState.PLACE
             sm_wait_time[tid] = 0.0
-        
+
     elif state == PlaceSmState.TO_TARGET:
         des_ee_pose[tid] = final_object_pose[tid]
         gripper_state[tid] = GripperState.CLOSE
-        
+
         tgt_dist = get_distance(
             wp.transform_get_translation(ee_pose[tid]),
             wp.transform_get_translation(des_ee_pose[tid]),
@@ -344,7 +352,7 @@ def infer_state_machine(
         if tgt_dist < grasp_dist_threshold:
             sm_state[tid] = PlaceSmState.PLACE
             sm_wait_time[tid] = 0.0
-        
+
     elif state == PlaceSmState.PLACE:
         gripper_state[tid] = GripperState.OPEN
 

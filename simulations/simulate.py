@@ -85,7 +85,13 @@ def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, robot, task):
 
     # Dynamically add objects to scene
     env_cfg.scene = _set_up_scene_objects(
-        env_cfg.scene, sim_cfg, robot_pose, table["bbox"], object_dir, container_dir, task
+        env_cfg.scene,
+        sim_cfg,
+        robot_pose,
+        table["bbox"],
+        object_dir,
+        container_dir,
+        task,
     )
     return env_cfg
 
@@ -199,7 +205,9 @@ def _get_light_cfg(light_cfg):
     }
 
 
-def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir, container_dir, task):
+def _set_up_scene_objects(
+    scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir, container_dir, task
+):
     import configs.scene_cfg
 
     target_category = random.choice(os.listdir(object_dir))
@@ -216,21 +224,19 @@ def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir
             table_bbox,
             file_path=os.path.join(object_dir, target_category, target_object),
             robot_pos=robot_pose["pos"],
-            static=task in ["place"], 
+            static=task in ["place"],
             moving_time=sim_cfg["scene"]["object"]["moving_time"],
             semantic_tags=[("class", "OBJECT_MAIN")],
         ),
     )
-    if task in ["place"] :
+    if task in ["place"]:
         container_candidates = [
-            f
-            for f in os.listdir(container_dir)
-            if f.endswith(".usd")
+            f for f in os.listdir(container_dir) if f.endswith(".usd")
         ]
         target_container = random.choice(container_candidates)
         scene_cfg = configs.scene_cfg.add_object_to_scene(
-            scene_cfg, 
-            "container", 
+            scene_cfg,
+            "container",
             _get_container_cfg(
                 table_bbox,
                 file_path=os.path.join(container_dir, target_container),
@@ -255,7 +261,7 @@ def _get_object_cfg(
     PADDING = 0.02
     object_cfg = {}
     tbl_z = table_bbox.max[2] + PADDING
-    if static :
+    if static:
         object_range_min_0 = table_bbox.min[0] * 3 / 4 + table_bbox.max[0] / 4
         object_range_max_0 = table_bbox.min[0] / 4 + table_bbox.max[0] * 3 / 4
         object_range_min_1 = table_bbox.min[1] * 3 / 4 + table_bbox.max[1] / 4
@@ -267,11 +273,15 @@ def _get_object_cfg(
                 tbl_z,
             ]
         )
-    else :
+    else:
         object_cfg["pos"] = np.array(
             [
-                random.uniform(table_bbox.min[0] + PADDING, table_bbox.max[0] - PADDING),
-                random.uniform(table_bbox.min[1] + PADDING, table_bbox.max[1] - PADDING),
+                random.uniform(
+                    table_bbox.min[0] + PADDING, table_bbox.max[0] - PADDING
+                ),
+                random.uniform(
+                    table_bbox.min[1] + PADDING, table_bbox.max[1] - PADDING
+                ),
                 tbl_z,
             ]
         )
@@ -308,7 +318,7 @@ def _get_container_cfg(
     PADDING = 0.02
     object_cfg = {}
     tbl_z = table_bbox.max[2] + 0.1
-    
+
     object_range_min_0 = table_bbox.min[0] * 3 / 4 + table_bbox.max[0] / 4
     object_range_max_0 = table_bbox.min[0] / 4 + table_bbox.max[0] * 3 / 4
     object_range_min_1 = table_bbox.min[1] * 3 / 4 + table_bbox.max[1] / 4
@@ -375,11 +385,11 @@ def get_final_position(task, robot, device="cpu"):
         "pick": {
             "franka": [0.3, 0, 0.3],
             "piper": [0.3, 0, 0.3],
-        }, 
+        },
         "place": {
             "franka": [0.3, 0, 0.3],
             "piper": [0.3, 0, 0.3],
-        }
+        },
     }
     if task in FINAL_POSITIONS:
         if FINAL_POSITIONS[task] is None:
@@ -398,11 +408,11 @@ def _get_final_quat(task, robot, device="cpu"):
         "pick": {
             "franka": [0, 1, 0, 0],
             "piper": [0, 1, 0, 0],
-        }, 
+        },
         "place": {
             "franka": [0, 1, 0, 0],
             "piper": [0, 1, 0, 0],
-        }
+        },
     }
     if task in FINAL_QUATS:
         if FINAL_QUATS[task] is None:
@@ -561,7 +571,12 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
 
     # Create a new environment
     env_cfg = get_env_cfg(
-        dir_cfg["scene_dir"], dir_cfg["object_dir"], dir_cfg["container_dir"], sim_cfg, task_cfg["robot"], task_cfg["task_name"]
+        dir_cfg["scene_dir"],
+        dir_cfg["object_dir"],
+        dir_cfg["container_dir"],
+        sim_cfg,
+        task_cfg["robot"],
+        task_cfg["task_name"],
     )
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=debug_cfg["seed"])
     # Reset environment at start
@@ -612,11 +627,11 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
             continue
 
         # TODO: It's too ugly, I'll fix it
-        if task_cfg["task_name"] in ["place"] : 
+        if task_cfg["task_name"] in ["place"]:
             container_state = env.unwrapped.scene["container"].data
-        else :
+        else:
             container_state = None
-        
+
         curr_state = get_curr_state(
             env.unwrapped.scene["ee_frame"].data,
             env.unwrapped.scene["object"].data,
