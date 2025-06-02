@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-31 12:09:39
+# @Last Modified at: 2025-06-02 17:27:53
 # @Email:  root@haozhexie.com
 #
 # Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/convert_libero_data_to_lerobot.py
@@ -14,7 +14,6 @@ import json
 import logging
 import os
 import pathlib
-import random
 import shutil
 import sys
 
@@ -24,6 +23,11 @@ import numpy as np
 from huggingface_hub.constants import HF_HOME
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 from tqdm import tqdm
+
+PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
+sys.path.append(PROJECT_HOME)
+
+import utils.instruction_generator
 
 
 def _get_cameras(scene_cfg):
@@ -137,32 +141,9 @@ def create_lerobot_dataset(repo_id, metadata):
     )
 
 
-def _get_action_name(action):
-    if action == "pick":
-        return random.choice(["Pick up", "Grasp", "Lift"])
-
-    raise ValueError("Unknown action type: %s" % action)
-
-
-def _get_object_name(object_name):
-    if object_name == "fcan":
-        return "food can"
-    elif object_name == "dbottle":
-        return "drink bottle"
-    elif object_name == "wbottle":
-        return "water bottle"
-
-
 def _get_task_instruction(episode_file_name):
-    tokens = episode_file_name.split("_")
-    action_type = tokens[0]
-    object_name = tokens[2][:-3]
-    object_dyn = "the moving" if tokens[2][-1:] == "d" else "the static"
-
-    return "%s %s %s" % (
-        _get_action_name(action_type),
-        object_dyn,
-        _get_object_name(object_name),
+    return utils.instruction_generator.InstructionGenerator.generate_instruction(
+        filename=episode_file_name
     )
 
 
@@ -229,10 +210,14 @@ def main(input_dir, push_to_hub):
         if e.find(dataset_metadata["robot_type"]) == -1:
             continue
 
-        _metadata = get_episode_metadata(os.path.join(input_dir, e))
-        _frames = get_episode_frames(os.path.join(input_dir, e))
-        for f in _frames:
-            lerobot_dataset.add_frame(f)
+        try:
+            _metadata = get_episode_metadata(os.path.join(input_dir, e))
+            _frames = get_episode_frames(os.path.join(input_dir, e))
+            for f in _frames:
+                lerobot_dataset.add_frame(f)
+        except Exception as ex:
+            logging.exception(ex)
+            continue
 
         lerobot_dataset.save_episode()
         # Manually save the camera parameters
