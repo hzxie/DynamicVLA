@@ -55,22 +55,22 @@ AGILEX_PIPER_CFG = ArticulationCfg(
     actuators={
         "piper_shoulder": ImplicitActuatorCfg(
             joint_names_expr=["joint[1-3]"],
-            effort_limit=87.0,
-            velocity_limit=2.175,
+            effort_limit_sim=87.0,
+            velocity_limit_sim=2.175,
             stiffness=80.0,
             damping=4.0,
         ),
         "piper_forearm": ImplicitActuatorCfg(
             joint_names_expr=["joint[4-6]"],
-            effort_limit=12.0,
-            velocity_limit=2.61,
+            effort_limit_sim=12.0,
+            velocity_limit_sim=2.61,
             stiffness=80.0,
             damping=4.0,
         ),
         "hand": ImplicitActuatorCfg(
             joint_names_expr=["joint8", "joint7"],
-            effort_limit=200.0,
-            velocity_limit=0.2,
+            effort_limit_sim=200.0,
+            velocity_limit_sim=0.2,
             stiffness=2e3,
             damping=1e2,
             friction=30,

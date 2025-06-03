@@ -71,7 +71,7 @@ class PickStateMachine:
         final_quat: torch.tensor,
         reach_dist_thres: float,
         grasp_dist_thres: float = 0.01,
-        grasp_pose_thres: float = 15.0,
+        grasp_pose_thres: float = 20.0,
         object_dist_thres: float = 0.1,
         gripper_length: float = 0.3,
         device: torch.device | str = "cpu",
