@@ -142,7 +142,7 @@ class PickStateMachine:
         object_velocity: torch.Tensor,
     ) -> torch.Tensor:
         WAITING_TIME = 0.23
-        OBJECT_HEIGHT_THRES = 0.01
+        OBJECT_HEIGHT_THRES = 0.015
         grasp_position = object_position.clone() + object_velocity * WAITING_TIME
         object_height = object_size[:, 2]
         grasp_position_z = grasp_position[:, 2]
