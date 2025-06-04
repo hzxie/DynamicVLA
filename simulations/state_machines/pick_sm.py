@@ -71,7 +71,7 @@ class PickStateMachine:
         final_quat: torch.tensor,
         reach_dist_thres: float,
         grasp_dist_thres: float = 0.01,
-        grasp_pose_thres: float = 15.0,
+        grasp_pose_thres: float = 20.0,
         object_dist_thres: float = 0.1,
         gripper_length: float = 0.3,
         device: torch.device | str = "cpu",
@@ -141,8 +141,8 @@ class PickStateMachine:
         object_position: torch.Tensor,
         object_velocity: torch.Tensor,
     ) -> torch.Tensor:
-        WAITING_TIME = 0.25
-        OBJECT_HEIGHT_THRES = 0.006
+        WAITING_TIME = 0.23
+        OBJECT_HEIGHT_THRES = 0.015
         grasp_position = object_position.clone() + object_velocity * WAITING_TIME
         object_height = object_size[:, 2]
         grasp_position_z = grasp_position[:, 2]
@@ -300,6 +300,19 @@ def get_z_offset(current_pos: wp.vec3, desired_pos: wp.vec3) -> float:
     return wp.abs(current_pos[2] - desired_pos[2])
 
 
+@wp.func
+def get_xy_offset(current_pos: wp.vec3, object_pos: wp.vec3, grasp_pos: wp.vec3) -> float:
+    current_xy = wp.vec2(current_pos[0], current_pos[1])
+    object_xy = wp.vec2(object_pos[0], object_pos[1])
+    grasp_xy = wp.vec2(grasp_pos[0], grasp_pos[1])
+    line_dir = grasp_xy - object_xy
+    line_dir_normalized = line_dir / wp.length(line_dir)
+    obj_to_current = current_xy - object_xy
+    projection = wp.dot(obj_to_current, line_dir_normalized)
+    closest_point = object_xy + projection * line_dir_normalized
+    return wp.length(current_xy - closest_point)
+
+
 @wp.kernel
 def infer_state_machine(
     dt: wp.array(dtype=float),
@@ -340,9 +353,14 @@ def infer_state_machine(
         # print("APPROACH_ABOVE_OBJECT")
         gripper_state[tid] = GripperState.OPEN
         des_ee_pose[tid] = wp.transform_multiply(offset[tid], grasp_pose[tid])
-        grasp_dist = get_z_offset(
+        grasp_z_dist = get_z_offset(
             wp.transform_get_translation(ee_pose[tid]),
             wp.transform_get_translation(object_pose[tid]),
+        )
+        grasp_xy_dist = get_xy_offset(
+            wp.transform_get_translation(ee_pose[tid]),
+            wp.transform_get_translation(object_pose[tid]),
+            wp.transform_get_translation(grasp_pose[tid]),
         )
         reach_dist = get_distance(
             wp.vec3(0.0, 0.0, 0.0),
@@ -357,7 +375,8 @@ def infer_state_machine(
             sm_state[tid] = PickSmState.REST
             sm_wait_time[tid] = 0.0
         elif (
-            grasp_dist < grasp_dist_threshold + offset[tid][2]
+            grasp_z_dist < grasp_dist_threshold + offset[tid][2]
+            and grasp_xy_dist < grasp_dist_threshold
             and pose_angle[tid] < grasp_pose_threshold
         ):
             # wait for a while
