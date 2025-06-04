@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 21:04:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-14 13:49:19
+# @Last Modified at: 2025-06-04 19:51:47
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
@@ -168,10 +168,8 @@ class EnvCfg(ManagerBasedRLEnvCfg):
         self.decimation = 1
         # the length of the episode in seconds
         self.episode_length_s = 5.0
-        # the length of the gripper
-        self.gripper_length = 0.04
         # simulation settings
-        self.sim.dt = 0.025  # 40Hz
+        self.sim.dt = 0.04  # 25Hz
         self.sim.render_interval = self.decimation
         self.sim.physx.bounce_threshold_velocity = 0.2
         self.sim.physx.bounce_threshold_velocity = 0.01
@@ -182,7 +180,6 @@ class EnvCfg(ManagerBasedRLEnvCfg):
 
 def set_robot(robot: str, env_cfg: EnvCfg, robot_pose: list) -> EnvCfg:
     assert robot in ["franka", "piper"], "Unknown robot: %s" % robot
-    env_cfg.gripper_length = configs.robot_cfg.get_gripper_length(robot)
     env_cfg.commands.object_pose.body_name = configs.robot_cfg.get_body_name(robot)
     env_cfg.scene.ee_frame = configs.robot_cfg.get_ee_frame_cfg(robot)
     env_cfg.scene.robot = configs.robot_cfg.get_robot_cfg(robot)

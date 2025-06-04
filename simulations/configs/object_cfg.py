@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-16 14:38:58
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-04-30 16:31:32
+# @Last Modified at: 2025-06-04 15:47:28
 # @Email:  root@haozhexie.com
 
 import isaaclab.sim as sim_utils
@@ -16,8 +16,10 @@ from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 
 
 def get_object_cfg(
-    obj_cfg: dict, spawner_cfg: SpawnerCfg
+    prim_path: str, obj_cfg: dict, spawner_cfg: SpawnerCfg
 ) -> RigidObjectCfg | DeformableObjectCfg:
+    assert prim_path.startswith("/")
+
     init_state = RigidObjectCfg.InitialStateCfg(pos=obj_cfg["pos"])
     if "lin_vel" in obj_cfg:
         init_state.lin_vel = obj_cfg["lin_vel"]
@@ -27,18 +29,7 @@ def get_object_cfg(
         init_state.rot = obj_cfg["quat"]
 
     return RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Object",
-        init_state=init_state,
-        spawn=spawner_cfg,
-    )
-
-
-def get_container_cfg(
-    obj_cfg: dict, spawner_cfg: SpawnerCfg
-) -> RigidObjectCfg | DeformableObjectCfg:
-    init_state = RigidObjectCfg.InitialStateCfg(pos=obj_cfg["pos"])
-    return RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Container",
+        prim_path="{ENV_REGEX_NS}%s" % prim_path,
         init_state=init_state,
         spawn=spawner_cfg,
     )

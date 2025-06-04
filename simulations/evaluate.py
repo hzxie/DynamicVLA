@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-20 14:19:37
+# @Last Modified at: 2025-06-04 15:49:47
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -25,18 +25,25 @@ PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.p
 sys.path.append(os.path.dirname(__file__))
 
 import simulations.simulate as sim
+import utils.instruction_generator
 
 
 def get_zmq_sockets(host, img_port, act_port):
     context = zmq.Context()
 
-    img_socket = context.socket(zmq.PUB)
-    img_socket.bind("tcp://%s:%d" % (host, img_port))
+    obs_socket = context.socket(zmq.PUB)
+    obs_socket.bind("tcp://%s:%d" % (host, img_port))
 
     act_socket = context.socket(zmq.PULL)
     act_socket.bind("tcp://%s:%d" % (host, act_port))
 
-    return img_socket, act_socket
+    return obs_socket, act_socket
+
+
+def get_task_instruction(env_cfg_file_path):
+    return utils.instruction_generator.InstructionGenerator.generate_instruction(
+        filename=os.path.basename(env_cfg_file_path)
+    )
 
 
 def get_test_env(
@@ -202,6 +209,7 @@ def _set_up_scene_objects(scene_cfg, cfg, object_dir):
             assert os.path.exists(usd_file_path)
 
         object_cfg = configs.object_cfg.get_object_cfg(
+            "/Object",
             {
                 "pos": v["init_state"]["pos"],
                 "quat": v["init_state"]["rot"],
@@ -233,7 +241,7 @@ def get_final_position(env_cfg, device="cpu"):
         logging.warning("Final position not found in environment configuration.")
         final_position = [0.3, 0.0, 0.3]
 
-    return torch.tensor(final_position, dtype=torch.float32, device=device).unsqueeze(0)
+    return torch.tensor(final_position, dtype=torch.float32, device=device)
 
 
 def get_latest_action(act_socket):
@@ -265,7 +273,7 @@ def _get_action_tensor(action, num_envs, device):
     return action
 
 
-def simulate(env, img_socket, act_socket, robot_origin, robot_quat, final_position):
+def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_position):
     sim_status = 0
     last_action = None
     cam_views = []
@@ -273,8 +281,22 @@ def simulate(env, img_socket, act_socket, robot_origin, robot_quat, final_positi
     # The simulation loop
     while sim_status == 0:
         cam_view = sim.get_camera_views(env.unwrapped.scene.sensors, ["rgb", "depth"])
-        img_socket.send_pyobj(cam_view)
+        rbt_state = sim.get_curr_state(
+            ee_state=env.unwrapped.scene["ee_frame"].data,
+            robot_joint_pos=env.unwrapped.scene.state["articulation"]["robot"][
+                "joint_position"
+            ],
+            env_origins=env.unwrapped.scene.env_origins + robot_origin,
+            robot_quat=robot_quat,
+        )
         cam_views.append(cam_view)
+        obs_socket.send_pyobj(
+            {
+                "observation.state": rbt_state,
+                "observation.image": cam_view,
+            }
+        )
+
         action = get_latest_action(act_socket)
         if action is not None:
             logging.debug("Received action: %s" % action)
@@ -287,10 +309,13 @@ def simulate(env, img_socket, act_socket, robot_origin, robot_quat, final_positi
         # simulation continuous
         if last_action is None:
             curr_state = sim.get_curr_state(
-                env.unwrapped.scene["ee_frame"].data,
-                env.unwrapped.scene["object"].data,
-                env.unwrapped.scene.env_origins + robot_origin,
-                robot_quat,
+                ee_state=env.unwrapped.scene["ee_frame"].data,
+                robot_joint_pos=env.unwrapped.scene.state["articulation"]["robot"][
+                    "joint_position"
+                ],
+                object_state=env.unwrapped.scene["object"].data,
+                env_origins=env.unwrapped.scene.env_origins + robot_origin,
+                robot_quat=robot_quat,
             )
             last_action = torch.cat(
                 [
@@ -342,7 +367,7 @@ def get_episode_name(cfg_filename, sim_status):
 def main(simulation_app, args):
     logging.info("Starting evaluation server...")
     # Set up Zero MQ context and sockets
-    img_socket, act_socket = get_zmq_sockets(args.host, args.img_port, args.act_port)
+    obs_socket, act_socket = get_zmq_sockets(args.host, args.img_port, args.act_port)
     logging.info(
         "ZeroMQs are listensing on %s:%d for images and %s:%d for actions"
         % (args.host, args.img_port, args.host, args.act_port)
@@ -350,6 +375,7 @@ def main(simulation_app, args):
 
     # Set up test environment
     logging.info("Recovering test environment from %s" % args.env_cfg)
+    instruction = get_task_instruction(args.env_cfg)
     env = get_test_env(
         args.env_cfg,
         args.num_envs,
@@ -379,8 +405,10 @@ def main(simulation_app, args):
 
     # Simulation loop
     while simulation_app.is_running():
+        # Send the task instruction at the beginning of the simulation
+        obs_socket.send_pyobj({"task": instruction})
         sim_status, cam_views = simulate(
-            env, img_socket, act_socket, robot_origin, robot_quat, final_position
+            env, obs_socket, act_socket, robot_origin, robot_quat, final_position
         )
         logging.info("Resetting environment with code: %d" % sim_status)
         env.reset()

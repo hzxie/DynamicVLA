@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-30 13:52:49
+# @Last Modified at: 2025-06-04 19:57:19
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -26,10 +26,9 @@ import torch
 import yaml
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
-sys.path.append(os.path.dirname(__file__))
 
 
-def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, robot, task):
+def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, robot):
     # The following packages MUST be imported after the simulation app is created
     import configs.env_cfg
     import configs.scene_cfg
@@ -90,9 +89,13 @@ def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, robot, task):
         robot_pose,
         table["bbox"],
         object_dir,
-        container_dir,
-        task,
     )
+    # Set up the container
+    if os.path.exists(container_dir):
+        env_cfg.scene = _set_up_scene_container(
+            env_cfg.scene, table["bbox"], container_dir
+        )
+
     return env_cfg
 
 
@@ -149,7 +152,6 @@ def _get_top_camera_relative_pose(robot_pose, table_bbox):
         "quat": [0.7071068, 0, 0, -0.7071068],
         "convention": "opengl",
     }
-
     # Plan B: Look at the robot base
     # dx, dy, _ = inv_r.apply((np.array(tbl_center) - robot_pose["pos"]) * 1.5)
     # dz = table_bbox.max[2] + 0.25
@@ -205,9 +207,7 @@ def _get_light_cfg(light_cfg):
     }
 
 
-def _set_up_scene_objects(
-    scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir, container_dir, task
-):
+def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir):
     import configs.scene_cfg
 
     target_category = random.choice(os.listdir(object_dir))
@@ -224,25 +224,10 @@ def _set_up_scene_objects(
             table_bbox,
             file_path=os.path.join(object_dir, target_category, target_object),
             robot_pos=robot_pose["pos"],
-            static=task in ["place"],
             moving_time=sim_cfg["scene"]["object"]["moving_time"],
             semantic_tags=[("class", "OBJECT_MAIN")],
         ),
     )
-    if task in ["place"]:
-        container_candidates = [
-            f for f in os.listdir(container_dir) if f.endswith(".usd")
-        ]
-        target_container = random.choice(container_candidates)
-        scene_cfg = configs.scene_cfg.add_object_to_scene(
-            scene_cfg,
-            "container",
-            _get_container_cfg(
-                table_bbox,
-                file_path=os.path.join(container_dir, target_container),
-                semantic_tags=[("class", "OBJECT_BG")],
-            ),
-        )
     # TODO: Add more objects to the scene
     # scene_cfg = configs.scene_cfg.add_object_to_scene(scene_cfg)
     return scene_cfg
@@ -301,6 +286,7 @@ def _get_object_cfg(
         )
 
     return configs.object_cfg.get_object_cfg(
+        "/Object",
         object_cfg,
         configs.object_cfg.get_spawner_cfg(
             file_path=file_path, semantic_tags=semantic_tags
@@ -308,14 +294,29 @@ def _get_object_cfg(
     )
 
 
-def _get_container_cfg(
-    table_bbox,
-    file_path=None,
-    semantic_tags=None,
-):
+def _set_up_scene_container(scene_cfg, table_bbox, container_dir):
     import configs.object_cfg
 
-    PADDING = 0.02
+    container_candidates = [f for f in os.listdir(container_dir) if f.endswith(".usd")]
+    target_container = random.choice(container_candidates)
+    container_cfg = _get_container_cfg(table_bbox)
+
+    scene_cfg = configs.scene_cfg.add_object_to_scene(
+        scene_cfg,
+        "container",
+        configs.object_cfg.get_object_cfg(
+            "/Container",
+            container_cfg,
+            configs.object_cfg.get_spawner_cfg(
+                file_path=os.path.join(container_dir, target_container),
+                semantic_tags=[("class", "CONTAINER")],
+            ),
+        ),
+    )
+    return scene_cfg
+
+
+def _get_container_cfg(table_bbox):
     object_cfg = {}
     tbl_z = table_bbox.max[2] + 0.1
 
@@ -330,13 +331,9 @@ def _get_container_cfg(
             tbl_z,
         ]
     )
+    # TODO: How about quat?
 
-    return configs.object_cfg.get_container_cfg(
-        object_cfg,
-        configs.object_cfg.get_spawner_cfg(
-            file_path=file_path, semantic_tags=semantic_tags
-        ),
-    )
+    return object_cfg
 
 
 def get_state_machine(task, robot, sm_args={}):
@@ -437,7 +434,14 @@ def _get_reach_dist_threshold(robot):
         raise ValueError("Unknown robot: %s." % robot)
 
 
-def get_curr_state(ee_state, object_state, container_state, env_origins, robot_quat):
+def get_curr_state(
+    ee_state,
+    robot_joint_pos=None,
+    object_state=None,
+    container_state=None,
+    env_origins=None,
+    robot_quat=None,
+):
     quat_opengl = robot_quat[:, [1, 2, 3, 0]]  # xyzw
     curr_state = {}
     if ee_state is not None:
@@ -447,6 +451,8 @@ def get_curr_state(ee_state, object_state, container_state, env_origins, robot_q
             ),
             "quat": ee_state.target_quat_w[..., 0, :],
         }
+    if robot_joint_pos is not None:
+        curr_state["joints"] = robot_joint_pos
     if object_state is not None:
         curr_state["object"] = {
             "pos": _get_robot_relative_position(
@@ -510,7 +516,7 @@ def get_camera_views(sensors, views=["rgb"]):
 
 
 def _get_semantic_segmentation(rgba_seg_maps, semantic_tags):
-    KNOWN_TAGS = {"ROBOT": 1, "OBJECT_BG": 2, "OBJECT_MAIN": 3}
+    KNOWN_TAGS = {"ROBOT": 1, "OBJECT_BG": 2, "OBJECT_MAIN": 3, "CONTAINER": 4}
     seg_maps = np.zeros_like(rgba_seg_maps[..., :1], dtype=np.uint8)
 
     # Iterate over each image (since the tags may not be the same for each image)
@@ -536,7 +542,7 @@ def is_final_position_reached(object_pos, ee_pos, final_pos):
     return torch.bitwise_and(ee_offset < DIST_THRESHOLD, obj_offset < DIST_THRESHOLD)
 
 
-def _get_current_env_states(cam_views, curr_state, next_state, is_done):
+def _get_curr_env_states(cam_views, curr_state, next_state, is_done):
     # Reorganize by env_id
     env_states = []
     for env_id in range(is_done.size(0)):
@@ -549,6 +555,7 @@ def _get_current_env_states(cam_views, curr_state, next_state, is_done):
                 "sm_state": next_state["sm_state"][env_id].item(),
                 "ee_pos": curr_state["end_effector"]["pos"][env_id].cpu().numpy(),
                 "ee_quat": curr_state["end_effector"]["quat"][env_id].cpu().numpy(),
+                "joints": curr_state["joints"][env_id].cpu().numpy(),
                 "object_pos": curr_state["object"]["pos"][env_id].cpu().numpy(),
                 "object_quat": curr_state["object"]["quat"][env_id].cpu().numpy(),
                 "object_vel": curr_state["object"]["velocity"][env_id].cpu().numpy(),
@@ -568,6 +575,7 @@ def _get_current_env_states(cam_views, curr_state, next_state, is_done):
 
 def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
     import omni.replicator.core as rep
+    import configs.robot_cfg
 
     # Create a new environment
     env_cfg = get_env_cfg(
@@ -576,7 +584,6 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
         dir_cfg["container_dir"],
         sim_cfg,
         task_cfg["robot"],
-        task_cfg["task_name"],
     )
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=debug_cfg["seed"])
     # Reset environment at start
@@ -601,7 +608,7 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
             "object_size": _get_object_size(
                 "/World/envs/env_0/Object", env.unwrapped.device
             ),
-            "gripper_length": env_cfg.gripper_length,
+            "gripper_length": configs.robot_cfg.get_gripper_length(task_cfg["robot"]),
         },
     )
 
@@ -620,22 +627,22 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
         .float()
         .to(env.unwrapped.device)
     )
+
     while not is_done.all():
         # Add an option to disable the state machine to accelerate the simulation
         if debug_cfg["disable_sm"]:
             env.step(torch.from_numpy(env.action_space.sample()))
             continue
 
-        # TODO: It's too ugly, I'll fix it
-        if task_cfg["task_name"] in ["place"]:
-            container_state = env.unwrapped.scene["container"].data
-        else:
-            container_state = None
-
         curr_state = get_curr_state(
             env.unwrapped.scene["ee_frame"].data,
+            env.unwrapped.scene.state["articulation"]["robot"]["joint_position"],
             env.unwrapped.scene["object"].data,
-            container_state,
+            (
+                env.unwrapped.scene["container"].data
+                if "container" in env.unwrapped.scene.keys()
+                else None
+            ),
             env.unwrapped.scene.env_origins + robot_origin,
             robot_quat,
         )
@@ -660,9 +667,7 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
         ):
             break
         # Save current env. states (camera views, robot states, and object states)
-        _env_states = _get_current_env_states(
-            cam_views, curr_state, next_state, is_done
-        )
+        _env_states = _get_curr_env_states(cam_views, curr_state, next_state, is_done)
         # Reorganize the env_states by keys
         for eid, es in enumerate(_env_states):
             for k, v in es.items():
@@ -754,10 +759,11 @@ def get_frames(
         for frame in frames:
             if frame.ndim == 2:
                 frame = np.repeat(frame[:, :, None], 3, axis=-1)
-            elif frame.shape[-1] == 1:
-                frame = np.repeat(frame[:, :, :], 3, axis=-1)
-            elif frame.shape[-1] >= 3:
-                frame = frame[:, :, :3]
+            elif frame.ndim == 3:
+                if frame.shape[-1] == 1:
+                    frame = np.repeat(frame, 3, axis=-1)
+                elif frame.shape[-1] >= 3:
+                    frame = frame[:, :, :3]
             else:
                 raise ValueError(f"Unknown camera data shape: {frame.shape}")
 
@@ -801,7 +807,7 @@ def _print_state_on_frame(frame, state):
     TEXT_FONT = cv2.FONT_HERSHEY_SIMPLEX
 
     lines = _get_state_text(state).split("\n")
-    img_height, img_width = frame.shape[:2]
+    _, img_width = frame.shape[:2]
     # Print the text on the image
     y = TEXT_MARGIN
     for line in lines:
