@@ -301,7 +301,9 @@ def get_z_offset(current_pos: wp.vec3, desired_pos: wp.vec3) -> float:
 
 
 @wp.func
-def get_xy_offset(current_pos: wp.vec3, object_pos: wp.vec3, grasp_pos: wp.vec3) -> float:
+def get_xy_offset(
+    current_pos: wp.vec3, object_pos: wp.vec3, grasp_pos: wp.vec3
+) -> float:
     current_xy = wp.vec2(current_pos[0], current_pos[1])
     object_xy = wp.vec2(object_pos[0], object_pos[1])
     grasp_xy = wp.vec2(grasp_pos[0], grasp_pos[1])

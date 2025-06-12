@@ -1,10 +1,11 @@
 easydict
 h5py
 opencv-python
+pytest
 PyYAML
 pyzmq
 torch
 torchvision
 tqdm
-transformers[torch]
+transformers[torch]==4.48.1
 wandb

@@ -4,7 +4,7 @@
 # @Author: NVIDIA
 # @Date:   2023-04-29 11:50:12
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-29 12:18:02
+# @Last Modified at: 2025-05-15 20:15:09
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/NVlabs/imaginaire
 
@@ -67,6 +67,7 @@ def init_dist(local_rank, backend="nccl", **kwargs):
     if torch.distributed.is_available():
         if torch.distributed.is_initialized():
             return torch.cuda.current_device()
+
         torch.cuda.set_device(local_rank)
         torch.distributed.init_process_group(
             backend=backend, init_method="env://", **kwargs
@@ -82,12 +83,19 @@ def init_dist(local_rank, backend="nccl", **kwargs):
     # assert pValue.contents.value == 128
 
 
+def cleanup_dist():
+    # Fix: process group has NOT been destroyed before we destruct ProcessGroupNCCL.
+    if torch.distributed.is_initialized():
+        torch.distributed.destroy_process_group()
+
+
 def get_rank():
     r"""Get rank of the thread."""
     rank = 0
     if torch.distributed.is_available():
         if torch.distributed.is_initialized():
             rank = torch.distributed.get_rank()
+
     return rank
 
 
@@ -97,6 +105,7 @@ def get_world_size():
     if torch.distributed.is_available():
         if torch.distributed.is_initialized():
             world_size = torch.distributed.get_world_size()
+
     return world_size
 
 

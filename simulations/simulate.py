@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-04 19:57:19
+# @Last Modified at: 2025-06-12 15:31:20
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -441,6 +441,7 @@ def get_curr_state(
     container_state=None,
     env_origins=None,
     robot_quat=None,
+    device="cpu",
 ):
     quat_opengl = robot_quat[:, [1, 2, 3, 0]]  # xyzw
     curr_state = {}
@@ -470,6 +471,15 @@ def get_curr_state(
             ),
             "quat": container_state.root_quat_w,
         }
+
+    if device == "cpu":
+        for csk, csv in curr_state.items():
+            if isinstance(csv, dict):
+                for k, v in csv.items():
+                    if isinstance(v, torch.Tensor):
+                        curr_state[csk][k] = v.cpu().numpy()
+            elif isinstance(csv, torch.Tensor):
+                curr_state[csk] = csv.cpu().numpy()
 
     return curr_state
 
@@ -645,6 +655,7 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
             ),
             env.unwrapped.scene.env_origins + robot_origin,
             robot_quat,
+            env.unwrapped.device,
         )
         next_state = state_machine.compute(
             curr_state

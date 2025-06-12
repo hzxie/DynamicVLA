@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-31 19:42:51
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-02 17:32:15
+# @Last Modified at: 2025-06-12 16:37:45
 # @Email:  root@haozhexie.com
 
 import random
@@ -18,7 +18,7 @@ class InstructionGenerator:
         object_name = tokens[2][:-3]
         object_dyn = "the rolling" if tokens[2][-1:] == "d" else "the static"
 
-        return "%s %s %s" % (
+        return "%s %s %s.\n" % (
             InstructionGenerator._get_action_name(action_type),
             object_dyn,
             InstructionGenerator._get_object_name(object_name),

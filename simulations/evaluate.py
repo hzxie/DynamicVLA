@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-04 15:49:47
+# @Last Modified at: 2025-06-12 15:21:47
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -280,14 +280,14 @@ def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_positi
 
     # The simulation loop
     while sim_status == 0:
+        scene_state = env.unwrapped.scene.state
         cam_view = sim.get_camera_views(env.unwrapped.scene.sensors, ["rgb", "depth"])
         rbt_state = sim.get_curr_state(
             ee_state=env.unwrapped.scene["ee_frame"].data,
-            robot_joint_pos=env.unwrapped.scene.state["articulation"]["robot"][
-                "joint_position"
-            ],
+            robot_joint_pos=scene_state["articulation"]["robot"]["joint_position"],
             env_origins=env.unwrapped.scene.env_origins + robot_origin,
             robot_quat=robot_quat,
+            device="cpu",
         )
         cam_views.append(cam_view)
         obs_socket.send_pyobj(
@@ -310,12 +310,11 @@ def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_positi
         if last_action is None:
             curr_state = sim.get_curr_state(
                 ee_state=env.unwrapped.scene["ee_frame"].data,
-                robot_joint_pos=env.unwrapped.scene.state["articulation"]["robot"][
-                    "joint_position"
-                ],
+                robot_joint_pos=scene_state["articulation"]["robot"]["joint_position"],
                 object_state=env.unwrapped.scene["object"].data,
                 env_origins=env.unwrapped.scene.env_origins + robot_origin,
                 robot_quat=robot_quat,
+                device=env.unwrapped.device,
             )
             last_action = torch.cat(
                 [
