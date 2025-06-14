@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-12 15:21:47
+# @Last Modified at: 2025-06-13 14:26:59
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -302,6 +302,10 @@ def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_positi
             logging.debug("Received action: %s" % action)
             action = _get_action_tensor(
                 action, env.unwrapped.num_envs, env.unwrapped.device
+            )
+            # Delta the end-effector position from the action
+            action[:, :3] += torch.from_numpy(rbt_state["end_effector"]["pos"]).to(
+                action.device
             )
             last_action = action
 

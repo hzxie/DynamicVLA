@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-12 18:30:54
+# @Last Modified at: 2025-06-13 11:03:23
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -115,11 +115,12 @@ def get_transformed_observation(observation, device="cuda"):
             observation["observation.state"]["end_effector"]["pos"],
             scipy.spatial.transform.Rotation.from_quat(
                 observation["observation.state"]["end_effector"]["quat"]
-            ).as_euler("xyz", degrees=True),
+            ).as_euler("xyz", degrees=False),
             observation["observation.state"]["joints"][:, -1:],
         ],
         axis=-1,
     ).astype(np.float32)
+
     return {
         "observation.image": torch.from_numpy(cam_rgb).permute(0, 3, 1, 2).to(device),
         "observation.state": torch.from_numpy(ee_pose).to(device),
@@ -134,9 +135,20 @@ def get_action(vla_model, observation):
             return None
 
     with torch.inference_mode():
-        action = vla_model.select_action(get_transformed_observation(observation))
+        action = (
+            vla_model.select_action(get_transformed_observation(observation))
+            .cpu()
+            .numpy()
+        )
+        ee_pos = action[:, :3]
+        ee_quat = scipy.spatial.transform.Rotation.from_euler(
+            "xyz", action[:, 3:6], degrees=False
+        ).as_quat()[
+            :, [3, 0, 1, 2]
+        ]  # Convert to quaternion (w, x, y, z) format
+        gripper = action[:, -1:]
 
-    return action.squeeze(0).cpu().numpy()
+    return np.concatenate([ee_pos, ee_quat, gripper], axis=-1).astype(np.float32)
 
 
 def main(vla_model, vla_weights, host, img_port, act_port):
