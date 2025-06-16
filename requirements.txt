@@ -1,9 +1,11 @@
 easydict
 h5py
 opencv-python
+pynvml
 pytest
 PyYAML
 pyzmq
+tensorboard
 torch
 torchvision
 tqdm

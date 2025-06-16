@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-03 14:22:24
+# @Last Modified at: 2025-06-16 19:01:38
 # @Email:  root@haozhexie.com
 #
 # Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/convert_libero_data_to_lerobot.py
@@ -141,7 +141,7 @@ def create_lerobot_dataset(repo_id, metadata):
     )
 
 
-def _get_task_instruction(episode_file_name):
+def get_task_instruction(episode_file_name):
     return utils.instruction_generator.InstructionGenerator.generate_instruction(
         filename=episode_file_name
     )
@@ -155,7 +155,6 @@ def get_episode_frames(episode_path):
     for i in range(len(env_states["action"])):
         _frame = {
             "action": env_states["action"][i],
-            "task": _get_task_instruction(os.path.basename(episode_path)),
             "observation.state": np.concatenate(
                 [
                     env_states["ee_pos"][i],
@@ -213,8 +212,9 @@ def main(input_dir, push_to_hub):
         try:
             _metadata = get_episode_metadata(os.path.join(input_dir, e))
             _frames = get_episode_frames(os.path.join(input_dir, e))
+            _task = get_task_instruction(os.path.basename(e))
             for f in _frames:
-                lerobot_dataset.add_frame(f)
+                lerobot_dataset.add_frame(f, _task)
         except Exception as ex:
             logging.exception(ex)
             continue

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-14 15:09:46
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-14 20:13:03
+# @Last Modified at: 2025-06-14 09:53:05
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -15,12 +15,12 @@ import os
 import pprint
 import sys
 
-import core
 import cv2
 import easydict
 import torch
 import yaml
 
+import core
 import utils.distributed
 
 # Fix deadlock in DataLoader
@@ -124,20 +124,24 @@ def main():
 
     # Start train/test processes
     if not args.test:
-        core.train(cfg)
+        try:
+            core.train(cfg)
+        finally:
+            utils.distributed.cleanup_dist()
     else:
         if "CKPT" not in cfg.CONST or not os.path.exists(cfg.CONST.CKPT):
             logging.error("Please specify the file path of checkpoint.")
             sys.exit(2)
-
-        core.test(cfg)
+        try:
+            core.test(cfg)
+        finally:
+            utils.distributed.cleanup_dist()
 
 
 if __name__ == "__main__":
     # References: https://stackoverflow.com/a/53553516/1841143
     importlib.reload(logging)
     logging.basicConfig(
-        format="[%(levelname)s] %(asctime)s %(message)s",
-        level=logging.INFO,
+        level=logging.INFO, format="[%(levelname)s] %(asctime)s %(message)s"
     )
     main()
