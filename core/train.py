@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-18 16:26:37
+# @Last Modified at: 2025-06-18 18:20:46
 # @Email:  root@haozhexie.com
 
 import logging
@@ -28,20 +28,22 @@ def train(cfg):
     local_rank = utils.distributed.get_rank()
 
     # Set up datasets
+    delta_timestamps={
+        # Load the previous image and state at -0.1 seconds before current frame,
+        # then load current image and state corresponding to 0.0 second.
+        "observation.image": [-0.1, 0.0],
+        "observation.state": [-0.1, 0.0],
+        "observation.environment_state": [-0.1, 0.0],
+        # Load the previous action (-0.1), the next action to be executed (0.0),
+        # and 14 future actions with a 0.1 seconds spacing. All these actions will be
+        # used to supervise the policy.
+        "action": [i / 10 for i in range(-1, 15)],
+    }
     # train_dataset = lerobot.common.datasets.lerobot_dataset.LeRobotDataset(
     train_dataset = utils.datasets.LeRobotDataset(
         cfg.CONST.DATASET,
-        delta_timestamps={
-            # Load the previous image and state at -0.1 seconds before current frame,
-            # then load current image and state corresponding to 0.0 second.
-            "observation.image": [-0.1, 0.0],
-            "observation.state": [-0.1, 0.0],
-            "observation.environment_state": [-0.1, 0.0],
-            # Load the previous action (-0.1), the next action to be executed (0.0),
-            # and 14 future actions with a 0.1 seconds spacing. All these actions will be
-            # used to supervise the policy.
-            "action": [i / 10 for i in range(-1, 15)],
-        },
+        split="train",
+        delta_timestamps=delta_timestamps,
     )
     train_sampler = None
     if torch.cuda.is_available():
@@ -54,8 +56,8 @@ def train(cfg):
         batch_size=cfg.TRAIN.BATCH_SIZE,
         num_workers=cfg.CONST.N_WORKERS,
         pin_memory=True,
-        # sampler=train_sampler,
-        # persistent_workers=True,
+        sampler=train_sampler,
+        persistent_workers=True,
     )
 
     # Set up the policy

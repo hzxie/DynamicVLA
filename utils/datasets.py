@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-17 16:10:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-18 16:51:17
+# @Last Modified at: 2025-06-18 18:20:33
 # @Email:  root@haozhexie.com
 
 import logging
@@ -137,7 +137,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         )
 
     def __len__(self) -> int:
-        return self.meta.total_frames
+        return torch.sum(self.episode_data_index["length"]).item()
 
     def _get_episode(self, ep_idx: int) -> dict[str, torch.Tensor | bytes]:
         episode = {}
