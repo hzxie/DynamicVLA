@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-16 19:00:55
+# @Last Modified at: 2025-06-18 16:26:37
 # @Email:  root@haozhexie.com
 
 import logging
@@ -13,11 +13,13 @@ import shutil
 import time
 
 import torch
+
+# import lerobot.common.datasets.lerobot_dataset
 import utils.average_meter
 import utils.distributed
 import utils.helpers
 import utils.summary_writer
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+import utils.datasets
 
 
 def train(cfg):
@@ -26,7 +28,8 @@ def train(cfg):
     local_rank = utils.distributed.get_rank()
 
     # Set up datasets
-    train_dataset = LeRobotDataset(
+    # train_dataset = lerobot.common.datasets.lerobot_dataset.LeRobotDataset(
+    train_dataset = utils.datasets.LeRobotDataset(
         cfg.CONST.DATASET,
         delta_timestamps={
             # Load the previous image and state at -0.1 seconds before current frame,
@@ -51,8 +54,8 @@ def train(cfg):
         batch_size=cfg.TRAIN.BATCH_SIZE,
         num_workers=cfg.CONST.N_WORKERS,
         pin_memory=True,
-        sampler=train_sampler,
-        persistent_workers=True,
+        # sampler=train_sampler,
+        # persistent_workers=True,
     )
 
     # Set up the policy
@@ -143,7 +146,6 @@ def train(cfg):
                         train_losses.val(),
                     )
                 )
-            break
 
         epoch_end_time = time.perf_counter()
         if utils.distributed.is_master():

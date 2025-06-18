@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-16 19:01:38
+# @Last Modified at: 2025-06-17 16:30:11
 # @Email:  root@haozhexie.com
 #
 # Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/convert_libero_data_to_lerobot.py
@@ -18,10 +18,10 @@ import shutil
 import sys
 
 import h5py
+import huggingface_hub.constants
+import lerobot.common.datasets.lerobot_dataset
 import lerobot.common.datasets.utils
 import numpy as np
-from huggingface_hub.constants import HF_HOME
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 from tqdm import tqdm
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
@@ -131,7 +131,7 @@ def create_lerobot_dataset(repo_id, metadata):
                 },
             }
 
-    return LeRobotDataset.create(
+    return lerobot.common.datasets.lerobot_dataset.LeRobotDataset.create(
         repo_id=repo_id,
         robot_type=metadata["robot_type"],
         fps=metadata["fps"],
@@ -186,7 +186,7 @@ def get_episode_frames(episode_path):
 
 def main(input_dir, push_to_hub):
     REPO_ID = "hzxie/dynamic_objects"
-    OUTPUT_DIR = os.path.join(HF_HOME, "lerobot", REPO_ID)
+    OUTPUT_DIR = os.path.join(huggingface_hub.constants.HF_HOME, "lerobot", REPO_ID)
 
     logging.info("Creating LeRobot dataset from %s to %s" % (input_dir, OUTPUT_DIR))
     if os.path.exists(OUTPUT_DIR):
