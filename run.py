@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-14 15:09:46
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-14 09:53:05
+# @Last Modified at: 2025-06-18 18:42:33
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -104,7 +104,7 @@ def main():
     if args.exp_name is not None:
         cfg.CONST.EXP_NAME = args.exp_name
     if args.dataset is not None:
-        cfg.CONST.DATASET = args.dataset
+        cfg.DATASET.NAME = args.dataset
     if args.ckpt is not None:
         cfg.CONST.CKPT = args.ckpt
     if args.run_id is not None:

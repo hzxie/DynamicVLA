@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-17 16:10:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-18 18:20:33
+# @Last Modified at: 2025-06-18 18:51:06
 # @Email:  root@haozhexie.com
 
 import logging
@@ -21,6 +21,23 @@ import torch
 import torchcodec.decoders
 
 from tqdm import tqdm
+
+
+def get_dataset(
+    dataset_name: str,
+    split: str,
+    pin_memory: bool,
+    delta_timestamps: dict[str, list[float]],
+) -> torch.utils.data.Dataset:
+    if dataset_name.startswith("lerobot/"):
+        return LeRobotDataset(
+            dataset_name[8:],  # Remove 'lerobot/' prefix
+            split=split,
+            pin_memory=pin_memory,
+            delta_timestamps=delta_timestamps,
+        )
+    else:
+        raise ValueError(f"Unknown dataset {dataset_name}")
 
 
 class LeRobotDataset(torch.utils.data.Dataset):
@@ -66,10 +83,10 @@ class LeRobotDataset(torch.utils.data.Dataset):
         repo_id: str,
         root: str | pathlib.Path | None = None,
         split: str = "train",
-        pin_memory: bool = True,
+        pin_memory: bool = False,
         episodes: list[int] | None = None,
         image_transforms: typing.Callable | None = None,
-        delta_timestamps: dict[list[float]] | None = None,
+        delta_timestamps: dict[str, list[float]] | None = None,
         tolerance_s: float = 1e-4,
     ):
         super().__init__()

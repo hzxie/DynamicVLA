@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-18 18:20:46
+# @Last Modified at: 2025-06-18 19:18:09
 # @Email:  root@haozhexie.com
 
 import logging
@@ -13,6 +13,8 @@ import shutil
 import time
 
 import torch
+
+import core.test
 
 # import lerobot.common.datasets.lerobot_dataset
 import utils.average_meter
@@ -28,40 +30,48 @@ def train(cfg):
     local_rank = utils.distributed.get_rank()
 
     # Set up datasets
-    delta_timestamps={
-        # Load the previous image and state at -0.1 seconds before current frame,
-        # then load current image and state corresponding to 0.0 second.
-        "observation.image": [-0.1, 0.0],
-        "observation.state": [-0.1, 0.0],
-        "observation.environment_state": [-0.1, 0.0],
-        # Load the previous action (-0.1), the next action to be executed (0.0),
-        # and 14 future actions with a 0.1 seconds spacing. All these actions will be
-        # used to supervise the policy.
-        "action": [i / 10 for i in range(-1, 15)],
-    }
     # train_dataset = lerobot.common.datasets.lerobot_dataset.LeRobotDataset(
-    train_dataset = utils.datasets.LeRobotDataset(
-        cfg.CONST.DATASET,
+    train_dataset = utils.datasets.get_dataset(
+        cfg.DATASET.NAME,
         split="train",
-        delta_timestamps=delta_timestamps,
+        pin_memory=cfg.DATASET.PIN_MEMORY,
+        delta_timestamps=cfg.DATASET.DELTA_TIMESTAMPS,
+    )
+    test_dataset = utils.datasets.get_dataset(
+        cfg.DATASET.NAME,
+        split="test",
+        pin_memory=cfg.DATASET.PIN_MEMORY,
+        delta_timestamps=cfg.DATASET.DELTA_TIMESTAMPS,
     )
     train_sampler = None
+    test_sampler = None
     if torch.cuda.is_available():
         train_sampler = torch.utils.data.distributed.DistributedSampler(
             train_dataset, rank=local_rank, shuffle=True, drop_last=True
+        )
+        test_sampler = torch.utils.data.distributed.DistributedSampler(
+            test_dataset, rank=local_rank, shuffle=False, drop_last=True
         )
 
     train_data_loader = torch.utils.data.DataLoader(
         dataset=train_dataset,
         batch_size=cfg.TRAIN.BATCH_SIZE,
         num_workers=cfg.CONST.N_WORKERS,
-        pin_memory=True,
+        pin_memory=cfg.DATASET.PIN_MEMORY,
         sampler=train_sampler,
+        persistent_workers=True,
+    )
+    test_data_loader = torch.utils.data.DataLoader(
+        dataset=train_dataset,
+        batch_size=cfg.TRAIN.BATCH_SIZE,
+        num_workers=cfg.CONST.N_WORKERS,
+        pin_memory=cfg.DATASET.PIN_MEMORY,
+        sampler=test_sampler,
         persistent_workers=True,
     )
 
     # Set up the policy
-    policy = utils.helpers.get_policy(cfg.CONST.DATASET)
+    policy = utils.helpers.get_policy(cfg.CONST.POLICY_NAME, train_dataset.meta)
     if utils.distributed.is_master():
         logging.info(
             "#Parameters: %s/%s"
@@ -151,7 +161,7 @@ def train(cfg):
 
         epoch_end_time = time.perf_counter()
         if utils.distributed.is_master():
-            tb_writer.add_scalars({"Loss/Epoch": train_losses.avg()}, epoch_idx)
+            tb_writer.add_scalars({"Loss/Epoch/Train": train_losses.avg()}, epoch_idx)
             logging.info(
                 "[Epoch %d/%d] EpochTime = %.3f (s) Losses = %.4f"
                 % (
@@ -162,15 +172,23 @@ def train(cfg):
                 )
             )
 
-        # TODO: Evaluate the current model
+        # Evaluate the current model
+        test_losses = core.test(
+            cfg,
+            test_data_loader=test_data_loader,
+            policy=policy,
+        )
+        if utils.distributed.is_master():
+            tb_writer.add_scalars({"Loss/Epoch/Test": test_losses.avg()}, epoch_idx)
 
         # Save the model checkpoint
         if utils.distributed.is_master():
+            logging.info("Saving model checkpoint to %s ..." % cfg.DIR.CHECKPOINTS)
             policy.module.save_pretrained(cfg.DIR.CHECKPOINTS)
             if epoch_idx % cfg.TRAIN.CKPT_SAVE_FREQ == 0:
                 shutil.copy(
                     os.path.join(cfg.DIR.CHECKPOINTS, "model.safetensors"),
                     os.path.join(
-                        cfg.DIR.CHECKPOINTS, "model.safetensors.epoch%04d" % epoch_idx
+                        cfg.DIR.CHECKPOINTS, "model.epoch%04d.safetensors" % epoch_idx
                     ),
                 )
