@@ -1,7 +1,7 @@
 CONST:
   EXP_NAME: null
   N_WORKERS: 8
-  POLICY_NAME: "pi0"
+  POLICY_NAME: "pi0fast"
 
 DATASET:
   NAME: "lerobot/hzxie/dynamic_objects"
