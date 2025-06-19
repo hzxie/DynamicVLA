@@ -4,12 +4,13 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-18 19:16:41
+# @Last Modified at: 2025-06-19 14:33:51
 # @Email:  root@haozhexie.com
 
 import logging
 
 import torch
+
 import utils.datasets
 import utils.distributed
 import utils.helpers
@@ -24,7 +25,10 @@ def test(cfg, test_data_loader=None, policy=None):
             cfg.DATASET.NAME,
             split="test",
             pin_memory=cfg.DATASET.PIN_MEMORY,
-            delta_timestamps=cfg.DATASET.DELTA_TIMESTAMPS,
+            required_features=cfg.DATASET.REQUIRED_FEATURES,
+            delta_timestamps=utils.helpers.get_delta_timestamps(
+                cfg.CONST.POLICY_NAME, cfg.DATASET.DELTA_TIMESTAMPS
+            ),
         )
         test_data_loader = torch.utils.data.DataLoader(
             dataset=test_dataset,
@@ -35,7 +39,9 @@ def test(cfg, test_data_loader=None, policy=None):
         )
     if policy is None:
         policy = utils.helpers.get_policy(
-            cfg.CONST.POLICY_NAME, test_data_loader.dataset.meta
+            cfg.CONST.POLICY_NAME,
+            test_data_loader.dataset.meta,
+            cfg.DATASET.REQUIRED_FEATURES,
         )
         logging.info("Recovering from %s ..." % (cfg.CONST.CKPT))
         policy = policy.from_pretrained(cfg.CONST.CKPT)

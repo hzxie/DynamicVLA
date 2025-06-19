@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-13 11:03:23
+# @Last Modified at: 2025-06-18 19:41:09
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -14,6 +14,7 @@ import pathlib
 import time
 import uuid
 
+import lerobot.common.policies.diffusion.modeling_diffusion
 import lerobot.common.policies.pi0.modeling_pi0
 import lerobot.common.policies.pi0fast.modeling_pi0fast
 import lerobot.configs.types
@@ -80,7 +81,11 @@ def get_vla_model(model_name, pretrained_model):
     if os.path.exists(pretrained_model):
         pretrained_model = pathlib.Path(pretrained_model)
 
-    if model_name == "pi0":
+    if model_name == "diffusion":
+        vla_model = lerobot.common.policies.diffusion.modeling_diffusion.DiffusionPolicy.from_pretrained(
+            pretrained_model
+        )
+    elif model_name == "pi0":
         vla_model = lerobot.common.policies.pi0.modeling_pi0.PI0Policy.from_pretrained(
             pretrained_model
         )

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-18 19:18:09
+# @Last Modified at: 2025-06-19 14:35:35
 # @Email:  root@haozhexie.com
 
 import logging
@@ -12,16 +12,15 @@ import os
 import shutil
 import time
 
+import diffusers.optimization
 import torch
 
 import core.test
-
-# import lerobot.common.datasets.lerobot_dataset
 import utils.average_meter
+import utils.datasets
 import utils.distributed
 import utils.helpers
 import utils.summary_writer
-import utils.datasets
 
 
 def train(cfg):
@@ -35,13 +34,19 @@ def train(cfg):
         cfg.DATASET.NAME,
         split="train",
         pin_memory=cfg.DATASET.PIN_MEMORY,
-        delta_timestamps=cfg.DATASET.DELTA_TIMESTAMPS,
+        required_features=cfg.DATASET.REQUIRED_FEATURES,
+        delta_timestamps=utils.helpers.get_delta_timestamps(
+            cfg.CONST.POLICY_NAME, cfg.DATASET.DELTA_TIMESTAMPS
+        ),
     )
     test_dataset = utils.datasets.get_dataset(
         cfg.DATASET.NAME,
         split="test",
         pin_memory=cfg.DATASET.PIN_MEMORY,
-        delta_timestamps=cfg.DATASET.DELTA_TIMESTAMPS,
+        required_features=cfg.DATASET.REQUIRED_FEATURES,
+        delta_timestamps=utils.helpers.get_delta_timestamps(
+            cfg.CONST.POLICY_NAME, cfg.DATASET.DELTA_TIMESTAMPS
+        ),
     )
     train_sampler = None
     test_sampler = None
@@ -71,7 +76,9 @@ def train(cfg):
     )
 
     # Set up the policy
-    policy = utils.helpers.get_policy(cfg.CONST.POLICY_NAME, train_dataset.meta)
+    policy = utils.helpers.get_policy(
+        cfg.CONST.POLICY_NAME, train_dataset.meta, cfg.DATASET.REQUIRED_FEATURES
+    )
     if utils.distributed.is_master():
         logging.info(
             "#Parameters: %s/%s"
@@ -98,12 +105,19 @@ def train(cfg):
         )
 
     # Set up the optimizer
+    n_batches = len(train_data_loader)
     optimizer = torch.optim.Adam(
         filter(lambda p: p.requires_grad, policy.parameters()),
-        lr=cfg.TRAIN.LR,
-        eps=cfg.TRAIN.EPS,
-        weight_decay=cfg.TRAIN.WEIGHT_DECAY,
-        betas=cfg.TRAIN.BETAS,
+        lr=cfg.TRAIN.OPTIMIZER.LR,
+        eps=cfg.TRAIN.OPTIMIZER.EPS,
+        weight_decay=cfg.TRAIN.OPTIMIZER.WEIGHT_DECAY,
+        betas=cfg.TRAIN.OPTIMIZER.BETAS,
+    )
+    lr_scheduler = diffusers.optimization.get_scheduler(
+        name=cfg.TRAIN.LR_SCHEDULER.NAME,
+        optimizer=optimizer,
+        num_warmup_steps=cfg.TRAIN.LR_SCHEDULER.N_WARMUP_STEPS,
+        num_training_steps=cfg.TRAIN.N_EPOCHS * n_batches,
     )
 
     # Set up folders for logs, snapshot and checkpoints
@@ -117,7 +131,6 @@ def train(cfg):
         # Log current config
         tb_writer.add_config(cfg.TRAIN)
 
-    n_batches = len(train_data_loader)
     for epoch_idx in range(init_epoch, cfg.TRAIN.N_EPOCHS):
         epoch_start_time = time.perf_counter()
         batch_time = utils.average_meter.AverageMeter()
@@ -137,8 +150,10 @@ def train(cfg):
                 k: (v.to(policy.device) if isinstance(v, torch.Tensor) else v)
                 for k, v in batch.items()
             }
+            # print({k: v.shape for k, v in batch.items() if isinstance(v, torch.Tensor)})
             loss, _ = policy.forward(batch)
             loss.backward()
+            lr_scheduler.step()
             optimizer.step()
             optimizer.zero_grad()
             train_losses.update(loss.item())

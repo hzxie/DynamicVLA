@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-17 16:10:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-18 18:51:06
+# @Last Modified at: 2025-06-19 14:32:51
 # @Email:  root@haozhexie.com
 
 import logging
@@ -19,7 +19,6 @@ import numpy as np
 import pyarrow.parquet as pq
 import torch
 import torchcodec.decoders
-
 from tqdm import tqdm
 
 
@@ -27,13 +26,15 @@ def get_dataset(
     dataset_name: str,
     split: str,
     pin_memory: bool,
-    delta_timestamps: dict[str, list[float]],
+    required_features: list[str] | None = None,
+    delta_timestamps: dict[str, list[float]] | None = None,
 ) -> torch.utils.data.Dataset:
     if dataset_name.startswith("lerobot/"):
         return LeRobotDataset(
             dataset_name[8:],  # Remove 'lerobot/' prefix
             split=split,
             pin_memory=pin_memory,
+            required_features=required_features,
             delta_timestamps=delta_timestamps,
         )
     else:
@@ -84,23 +85,25 @@ class LeRobotDataset(torch.utils.data.Dataset):
         root: str | pathlib.Path | None = None,
         split: str = "train",
         pin_memory: bool = False,
+        required_features: list[str] | None = None,
         episodes: list[int] | None = None,
         image_transforms: typing.Callable | None = None,
         delta_timestamps: dict[str, list[float]] | None = None,
         tolerance_s: float = 1e-4,
     ):
         super().__init__()
+        self._memcached = {}
         self.repo_id = repo_id
         self.root = (
             pathlib.Path(root)
             if root
             else lerobot.common.constants.HF_LEROBOT_HOME / repo_id
         )
-        self._memcached = {}
+        self.required_features = required_features
         self.episodes = episodes
         self.image_transforms = image_transforms
-        self.delta_timestamps = delta_timestamps
         self.tolerance_s = tolerance_s
+        self.delta_indices = None
 
         # Load metadata
         self.meta = lerobot.common.datasets.lerobot_dataset.LeRobotDatasetMetadata(
@@ -137,9 +140,28 @@ class LeRobotDataset(torch.utils.data.Dataset):
             self.episode_data_index["to"] - self.episode_data_index["from"]
         )
         # Setup delta indices
-        if self.delta_timestamps is not None:
+        if delta_timestamps is not None:
+            # Resolve delta timestamps for specific features
+            ds_delta_timestamps = {}
+            for key in self.meta.features:
+                if key not in self.required_features:
+                    continue
+                # Ref: lerobot.common.datasets.factory.resolve_delta_timestamps
+                if key == "next.reward" and "reward" in delta_timestamps:
+                    ds_delta_timestamps[key] = [
+                        i / self.meta.fps for i in delta_timestamps["reward"]
+                    ]
+                if key == "action" and "action" in delta_timestamps:
+                    ds_delta_timestamps[key] = [
+                        i / self.meta.fps for i in delta_timestamps["action"]
+                    ]
+                if key.startswith("observation.") and "observation" in delta_timestamps:
+                    ds_delta_timestamps[key] = [
+                        i / self.meta.fps for i in delta_timestamps["observation"]
+                    ]
+
             self.delta_indices = lerobot.common.datasets.utils.get_delta_indices(
-                self.delta_timestamps, self.meta.fps
+                ds_delta_timestamps, self.meta.fps
             )
 
     def __repr__(self) -> str:
@@ -186,8 +208,10 @@ class LeRobotDataset(torch.utils.data.Dataset):
             if ep_idx in self._memcached
             else self._get_episode(ep_idx)
         )
+        item = {
+            k: v[frame_idx] for k, v in episode.items() if k in self.required_features
+        }
 
-        item = {}
         query_indices = None
         if self.delta_indices is not None:
             query_indices, padding = self._get_query_indices(
@@ -206,7 +230,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
                 episode["timestamp"], current_ts, query_indices
             )
             video_frames = self._query_videos(episode, query_timestamps)
-            item = {**video_frames, **item}
+            item = {**item, **video_frames}
 
         if self.image_transforms is not None:
             image_keys = self.meta.camera_keys

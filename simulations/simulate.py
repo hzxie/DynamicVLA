@@ -336,7 +336,8 @@ def _get_container_cfg(table_bbox):
 
 
 def get_state_machine(task, robot, sm_args={}):
-    import state_machines.pick_sm, state_machines.place_sm
+    import state_machines.pick_sm
+    import state_machines.place_sm
 
     STATE_MACHINES = {
         "pick": state_machines.pick_sm.PickStateMachine,
@@ -583,8 +584,8 @@ def _get_curr_env_states(cam_views, curr_state, next_state, is_done):
 
 
 def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
-    import omni.replicator.core as rep
     import configs.robot_cfg
+    import omni.replicator.core as rep
 
     # Create a new environment
     env_cfg = get_env_cfg(
