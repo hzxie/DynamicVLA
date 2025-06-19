@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-19 14:35:35
+# @Last Modified at: 2025-06-19 16:15:46
 # @Email:  root@haozhexie.com
 
 import logging
@@ -92,16 +92,23 @@ def train(cfg):
             )
         )
 
-    # Load the pretrained model if exists
     init_epoch = 0
     if "CKPT" in cfg.CONST:
-        policy = policy.from_pretrained(cfg.CONST.CKPT)
-        # TODO: Load optimizer state
+        logging.info("Loading pretrained model from %s ..." % cfg.CONST.CKPT)
+        # Save the normalizers to enable migration to the new datasets
+        normalizers = {
+            n: getattr(policy, n)
+            for n in ["normalize_inputs", "normalize_targets", "unnormalize_outputs"]
+        }
+        policy = policy.from_pretrained(cfg.CONST.CKPT, config=policy.config)
+        for k, v in normalizers.items():
+            setattr(policy, k, v)
 
     if torch.cuda.is_available():
         policy = torch.nn.parallel.DistributedDataParallel(
             policy.to(local_rank),
             device_ids=[local_rank],
+            find_unused_parameters=True,
         )
 
     # Set up the optimizer
@@ -147,10 +154,17 @@ def train(cfg):
             n_itr = epoch_idx * n_batches + batch_idx
             data_time.update(time.perf_counter() - batch_end_time)
             batch = {
-                k: (v.to(policy.device) if isinstance(v, torch.Tensor) else v)
+                k: (
+                    v.to(policy.device, non_blocking=True)
+                    if isinstance(v, torch.Tensor)
+                    else v
+                )
                 for k, v in batch.items()
             }
-            # print({k: v.shape for k, v in batch.items() if isinstance(v, torch.Tensor)})
+            # Fix: Remove the additional dimension for task
+            if isinstance(batch["task"], list) and isinstance(batch["task"][0], tuple):
+                batch["task"] = batch["task"][0]
+
             loss, _ = policy.forward(batch)
             loss.backward()
             lr_scheduler.step()

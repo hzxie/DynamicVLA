@@ -9,5 +9,5 @@ tensorboard
 torch
 torchvision
 tqdm
-transformers[torch]==4.48.1
+transformers[torch]>=4.50.3
 wandb
