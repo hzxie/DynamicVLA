@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-19 14:33:51
+# @Last Modified at: 2025-06-19 22:16:47
 # @Email:  root@haozhexie.com
 
 import logging
@@ -54,9 +54,19 @@ def test(cfg, test_data_loader=None, policy=None):
     with torch.no_grad():
         for batch_idx, batch in enumerate(test_data_loader):
             batch = {
-                k: (v.to(policy.device) if isinstance(v, torch.Tensor) else v)
+                k: (
+                    v.to(policy.device, non_blocking=True)
+                    if isinstance(v, torch.Tensor)
+                    else v
+                )
                 for k, v in batch.items()
             }
+            # Fix: Remove the additional dimension for task
+            if isinstance(batch["task"], list) and isinstance(
+                batch["task"][0], (tuple, list)
+            ):
+                batch["task"] = batch["task"][0]
+
             loss, _ = policy.forward(batch)
             test_losses.update(loss.item())
             if utils.distributed.is_master():
