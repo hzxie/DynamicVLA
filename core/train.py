@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-19 16:15:46
+# @Last Modified at: 2025-06-19 19:58:07
 # @Email:  root@haozhexie.com
 
 import logging
@@ -100,6 +100,7 @@ def train(cfg):
             n: getattr(policy, n)
             for n in ["normalize_inputs", "normalize_targets", "unnormalize_outputs"]
         }
+        policy.config.device = "cuda:%d" % local_rank
         policy = policy.from_pretrained(cfg.CONST.CKPT, config=policy.config)
         for k, v in normalizers.items():
             setattr(policy, k, v)
@@ -162,7 +163,9 @@ def train(cfg):
                 for k, v in batch.items()
             }
             # Fix: Remove the additional dimension for task
-            if isinstance(batch["task"], list) and isinstance(batch["task"][0], tuple):
+            if isinstance(batch["task"], list) and isinstance(
+                batch["task"][0], (tuple, list)
+            ):
                 batch["task"] = batch["task"][0]
 
             loss, _ = policy.forward(batch)
