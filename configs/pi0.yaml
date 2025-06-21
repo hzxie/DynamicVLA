@@ -29,10 +29,10 @@ TRAIN:
   BATCH_SIZE: 8
   CKPT_SAVE_FREQ: 100
   OPTIMIZER:
-    LR: 1.0e-4
+    LR: 2.5e-5
     EPS: 1.0e-8
-    WEIGHT_DECAY: 1.0e-06
-    BETAS: [0.95, 0.999]
+    WEIGHT_DECAY: 1.0e-10
+    BETAS: [0.9, 0.95]
   LR_SCHEDULER:
     NAME: "cosine"
-    N_WARMUP_STEPS: 500
+    N_WARMUP_STEPS: 1000

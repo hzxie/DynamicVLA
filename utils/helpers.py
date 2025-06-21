@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-19 20:33:54
+# @Last Modified at: 2025-06-21 22:40:13
 # @Email:  root@haozhexie.com
 
 from lerobot.common.datasets.lerobot_dataset import LeRobotDatasetMetadata
@@ -15,6 +15,8 @@ from lerobot.common.policies.pi0.configuration_pi0 import PI0Config
 from lerobot.common.policies.pi0.modeling_pi0 import PI0Policy
 from lerobot.common.policies.pi0fast.configuration_pi0fast import PI0FASTConfig
 from lerobot.common.policies.pi0fast.modeling_pi0fast import PI0FASTPolicy
+from lerobot.common.policies.smolvla.configuration_smolvla import SmolVLAConfig
+from lerobot.common.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 from lerobot.common.policies.pretrained import PreTrainedPolicy
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.types import FeatureType
@@ -87,6 +89,8 @@ def get_policy(
         policy = PI0Policy(policy_cfg, dataset_stats=dataset_metadata.stats)
     elif policy_name == "pi0fast":
         policy = PI0FASTPolicy(policy_cfg, dataset_stats=dataset_metadata.stats)
+    elif policy_name == "smolvla":
+        policy = SmolVLAPolicy(policy_cfg, dataset_stats=dataset_metadata.stats)
     else:
         raise ValueError(f"Unknown policy: {policy_name}")
 
@@ -106,6 +110,10 @@ def get_policy_cfg(
         )
     elif policy_name == "pi0fast":
         policy_cfg = PI0FASTConfig(
+            input_features=input_features, output_features=output_features
+        )
+    elif policy_name == "smolvla":
+        policy_cfg = SmolVLAConfig(
             input_features=input_features, output_features=output_features
         )
     else:

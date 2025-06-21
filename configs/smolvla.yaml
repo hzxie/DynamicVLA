@@ -1,7 +1,7 @@
 CONST:
   EXP_NAME: null
   N_WORKERS: 8
-  POLICY_NAME: "pi0fast"
+  POLICY_NAME: "smolvla"
 
 DATASET:
   NAME: "lerobot/hzxie/dynamic_objects"
@@ -31,7 +31,7 @@ TRAIN:
   OPTIMIZER:
     LR: 1.0e-4
     EPS: 1.0e-8
-    WEIGHT_DECAY: 1.0e-5
+    WEIGHT_DECAY: 1.0e-10
     BETAS: [0.9, 0.95]
   LR_SCHEDULER:
     NAME: "cosine"

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-19 19:58:07
+# @Last Modified at: 2025-06-20 09:13:08
 # @Email:  root@haozhexie.com
 
 import logging
@@ -114,7 +114,7 @@ def train(cfg):
 
     # Set up the optimizer
     n_batches = len(train_data_loader)
-    optimizer = torch.optim.Adam(
+    optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, policy.parameters()),
         lr=cfg.TRAIN.OPTIMIZER.LR,
         eps=cfg.TRAIN.OPTIMIZER.EPS,
