@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-14 09:50:57
+# @Last Modified at: 2025-06-25 14:55:39
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -257,6 +257,11 @@ def _get_object_cfg(
                 tbl_z,
             ]
         )
+        # 50% chance to set a random orientation. Otherwise, use the default orientation.
+        if random.random() < 0.5:
+            object_cfg["quat"] = configs.object_cfg.get_object_init_quat(
+                np.random.uniform(-0.1, 0.1, size=3)
+            )
     else:
         object_cfg["pos"] = np.array(
             [
@@ -885,6 +890,7 @@ def main(simulation_app, args):
 
     # Perform simulations in the environment
     while simulation_app.is_running():
+        seed = args.seed if args.seed is not None else random.randint(0, 65535)
         env_cfg, env_states = simulate(
             sim_cfg,
             {
@@ -900,7 +906,7 @@ def main(simulation_app, args):
                 "debug": args.debug,
                 "disable_sm": args.disable_sm,
                 "path_tracing": args.path_tracing,
-                "seed": args.seed,
+                "seed": seed,
             },
         )
         # Save the simulation data
@@ -913,7 +919,7 @@ def main(simulation_app, args):
                     os.path.join(args.output_dir, "%s.json" % episode_name), "w"
                 ) as fp:
                     _env_cfg = env_cfg.to_dict()
-                    _env_cfg["seed"] = args.seed
+                    _env_cfg["seed"] = seed
                     _env_cfg["final_position"] = get_final_position(
                         args.task, args.robot
                     ).numpy()
@@ -981,7 +987,7 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true", default=False)
     parser.add_argument("--disable_sm", action="store_true", default=False)
     parser.add_argument("--path_tracing", action="store_true", default=False)
-    parser.add_argument("--seed", type=int, default=random.randint(0, 65535))
+    parser.add_argument("--seed", type=int, default=None)
     args = parser.parse_args(script_args)
     # Copy the shared parameters from isaaclab_args to args
     for sp in SHARED_PARAMETERS:

@@ -174,6 +174,9 @@ idea/
 profile_default/
 ipython_config.py
 
+# vim
+*.swp
+
 # User data
 datasets/
 notebooks/
