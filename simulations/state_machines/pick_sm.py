@@ -308,7 +308,10 @@ def get_xy_offset(
     object_xy = wp.vec2(object_pos[0], object_pos[1])
     grasp_xy = wp.vec2(grasp_pos[0], grasp_pos[1])
     line_dir = grasp_xy - object_xy
-    line_dir_normalized = line_dir / wp.length(line_dir)
+    line_length = wp.length(line_dir)
+    if line_length < 1e-4 :
+        return 0.0
+    line_dir_normalized = line_dir / line_length
     obj_to_current = current_xy - object_xy
     projection = wp.dot(obj_to_current, line_dir_normalized)
     closest_point = object_xy + projection * line_dir_normalized
