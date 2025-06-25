@@ -360,7 +360,7 @@ def infer_state_machine(
         des_ee_pose[tid] = wp.transform_multiply(offset[tid], grasp_pose[tid])
         grasp_z_dist = get_z_offset(
             wp.transform_get_translation(ee_pose[tid]),
-            wp.transform_get_translation(object_pose[tid]),
+            wp.transform_get_translation(grasp_pose[tid]),
         )
         grasp_xy_dist = get_xy_offset(
             wp.transform_get_translation(ee_pose[tid]),
@@ -394,7 +394,7 @@ def infer_state_machine(
         des_ee_pose[tid] = grasp_pose[tid]
         dist = get_z_offset(
             wp.transform_get_translation(ee_pose[tid]),
-            wp.transform_get_translation(object_pose[tid]),
+            wp.transform_get_translation(grasp_pose[tid]),
         )
         if dist < grasp_dist_threshold:
             if sm_wait_time[tid] >= PickSmWaitTime.APPROACH_OBJECT:
