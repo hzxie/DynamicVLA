@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-13 14:26:59
+# @Last Modified at: 2025-06-25 13:55:54
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -281,7 +281,7 @@ def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_positi
     # The simulation loop
     while sim_status == 0:
         scene_state = env.unwrapped.scene.state
-        cam_view = sim.get_camera_views(env.unwrapped.scene.sensors, ["rgb", "depth"])
+        cam_view = sim.get_camera_views(env.unwrapped.scene.sensors, ["rgb"])
         rbt_state = sim.get_curr_state(
             ee_state=env.unwrapped.scene["ee_frame"].data,
             robot_joint_pos=scene_state["articulation"]["robot"]["joint_position"],
@@ -304,9 +304,9 @@ def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_positi
                 action, env.unwrapped.num_envs, env.unwrapped.device
             )
             # Delta the end-effector position from the action
-            action[:, :3] += torch.from_numpy(rbt_state["end_effector"]["pos"]).to(
-                action.device
-            )
+            # action[:, :3] += torch.from_numpy(rbt_state["end_effector"]["pos"]).to(
+            #     action.device
+            # )
             last_action = action
 
         # If no action is received, use the previous action to make the
@@ -422,7 +422,9 @@ def main(simulation_app, args):
         if args.save and len(cam_views) > 1:
             episode_name = get_episode_name(os.path.basename(args.env_cfg), sim_status)
             episode_file_path = os.path.join(args.output_dir, episode_name)
-            logging.info("Saving videos to %s" % episode_file_path)
+            logging.info(
+                "Saving videos (%d frames) to %s" % (len(cam_views), episode_file_path)
+            )
             sim.dump_video(
                 sim.get_frames(get_frames(cam_views), state_keys=[]),
                 episode_file_path,

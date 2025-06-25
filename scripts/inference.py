@@ -4,13 +4,14 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-18 19:41:09
+# @Last Modified at: 2025-06-25 12:09:07
 # @Email:  root@haozhexie.com
 
 import argparse
 import logging
 import os
 import pathlib
+import sys
 import time
 import uuid
 
@@ -19,10 +20,16 @@ import lerobot.common.policies.pi0.modeling_pi0
 import lerobot.common.policies.pi0fast.modeling_pi0fast
 import lerobot.configs.types
 import numpy as np
-import scipy.spatial.transform
+
+# import scipy.spatial.transform
 import torch
 import zmq
 import zmq.utils.monitor
+
+sys.path.append(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), os.path.pardir)
+)
+import utils.helpers
 
 
 def is_socket_connected(context, sock, timeout=1000):
@@ -74,54 +81,34 @@ def get_latest_observation(obs_socket):
 
 
 def get_vla_model(model_name, pretrained_model):
-    IMG_SIZE = (3, 224, 224)
-    ACTION_DIM = 7
-    STATE_DIM = 7
-
+    pretrained_cfg = None
     if os.path.exists(pretrained_model):
-        pretrained_model = pathlib.Path(pretrained_model)
+        logging.info("Loading VLA model from local path: %s" % pretrained_model)
+        pretrained_model = pathlib.Path(pretrained_model).expanduser().resolve()
+        pretrained_cfg = pretrained_model / "config.json"
 
-    if model_name == "diffusion":
-        vla_model = lerobot.common.policies.diffusion.modeling_diffusion.DiffusionPolicy.from_pretrained(
-            pretrained_model
-        )
-    elif model_name == "pi0":
-        vla_model = lerobot.common.policies.pi0.modeling_pi0.PI0Policy.from_pretrained(
-            pretrained_model
-        )
-    elif model_name == "pi0fast":
-        vla_model = lerobot.common.policies.pi0fast.modeling_pi0fast.PI0FASTPolicy.from_pretrained(
-            pretrained_model
-        )
-    else:
-        raise ValueError("Unknown model: %s" % model_name)
+    vla_cfg = utils.helpers.get_policy_cfg(model_name, cfg_file=pretrained_cfg)
+    vla_model = utils.helpers.get_policy_class(model_name).from_pretrained(
+        pretrained_model, config=vla_cfg
+    )
+    if torch.cuda.is_available():
+        vla_model = vla_model.cuda()
 
-    # Set up the input and output features
-    vla_model.config.output_features = {
-        "action": lerobot.configs.types.PolicyFeature(
-            type=lerobot.configs.types.FeatureType.ACTION, shape=(ACTION_DIM,)
-        )
-    }
-    vla_model.config.input_features = {
-        "observation.image": lerobot.configs.types.PolicyFeature(
-            type=lerobot.configs.types.FeatureType.VISUAL, shape=IMG_SIZE
-        ),
-        "observation.state": lerobot.configs.types.PolicyFeature(
-            type=lerobot.configs.types.FeatureType.STATE, shape=(STATE_DIM,)
-        ),
-    }
+    vla_model.eval()
     return vla_model
 
 
 def get_transformed_observation(observation, device="cuda"):
-    cam_rgb = observation["observation.image"]["side_cam"]["rgb"].astype(np.float32)
+    cam_rgb = (
+        observation["observation.image"]["side_cam"]["rgb"].astype(np.float32) / 255.0
+    )
     ee_pose = np.concatenate(
         [
             observation["observation.state"]["end_effector"]["pos"],
-            scipy.spatial.transform.Rotation.from_quat(
-                observation["observation.state"]["end_effector"]["quat"]
-            ).as_euler("xyz", degrees=False),
-            observation["observation.state"]["joints"][:, -1:],
+            # scipy.spatial.transform.Rotation.from_quat(
+            observation["observation.state"]["end_effector"]["quat"],
+            # ).as_euler("xyz", degrees=False),
+            # observation["observation.state"]["joints"][:, -1:],
         ],
         axis=-1,
     ).astype(np.float32)
@@ -139,21 +126,25 @@ def get_action(vla_model, observation):
             logging.warning("Ingoring observation without key: %s" % ifk)
             return None
 
+    actions = []
+    observation = get_transformed_observation(observation)
+    # for _ in range(vla_model.config.chunk_size):
     with torch.inference_mode():
-        action = (
-            vla_model.select_action(get_transformed_observation(observation))
-            .cpu()
-            .numpy()
-        )
-        ee_pos = action[:, :3]
-        ee_quat = scipy.spatial.transform.Rotation.from_euler(
-            "xyz", action[:, 3:6], degrees=False
-        ).as_quat()[
-            :, [3, 0, 1, 2]
-        ]  # Convert to quaternion (w, x, y, z) format
-        gripper = action[:, -1:]
+        action = vla_model.select_action(observation).cpu().numpy()
 
-    return np.concatenate([ee_pos, ee_quat, gripper], axis=-1).astype(np.float32)
+    actions.append(action)
+    # ee_pos = action[:, :3]
+    # ee_quat = scipy.spatial.transform.Rotation.from_euler(
+    #     "xyz", action[:, 3:6], degrees=False
+    # ).as_quat()[
+    #     :, [3, 0, 1, 2]
+    # ]  # Convert to quaternion (w, x, y, z) format
+    # gripper = action[:, -1:]
+    # action = np.concatenate([ee_pos, ee_quat, gripper], axis=-1).astype(
+    #     np.float32
+    # )
+
+    return np.concatenate(actions, axis=0).astype(np.float32)
 
 
 def main(vla_model, vla_weights, host, img_port, act_port):
@@ -201,7 +192,7 @@ def main(vla_model, vla_weights, host, img_port, act_port):
         action = get_action(vla_model, observation)
         if action is not None:
             act_socket.send_pyobj(action, flags=zmq.NOBLOCK)
-            logging.info("Sending action: %s" % action)
+            logging.info("Sending action with shape: %s" % (action.shape,))
 
 
 if __name__ == "__main__":

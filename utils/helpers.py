@@ -4,8 +4,13 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-21 22:40:13
+# @Last Modified at: 2025-06-25 10:56:56
 # @Email:  root@haozhexie.com
+
+import json
+import logging
+import os
+import pathlib
 
 from lerobot.common.datasets.lerobot_dataset import LeRobotDatasetMetadata
 from lerobot.common.datasets.utils import dataset_to_policy_features
@@ -19,7 +24,7 @@ from lerobot.common.policies.smolvla.configuration_smolvla import SmolVLAConfig
 from lerobot.common.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 from lerobot.common.policies.pretrained import PreTrainedPolicy
 from lerobot.configs.policies import PreTrainedConfig
-from lerobot.configs.types import FeatureType
+from lerobot.configs.types import FeatureType, PolicyFeature
 
 
 def get_n_parameters(model: PreTrainedPolicy, trainable_only: bool = True) -> int:
@@ -83,23 +88,55 @@ def get_policy(
         output_features=output_features,
     )
 
-    if policy_name == "diffusion":
-        policy = DiffusionPolicy(policy_cfg, dataset_stats=dataset_metadata.stats)
-    elif policy_name == "pi0":
-        policy = PI0Policy(policy_cfg, dataset_stats=dataset_metadata.stats)
-    elif policy_name == "pi0fast":
-        policy = PI0FASTPolicy(policy_cfg, dataset_stats=dataset_metadata.stats)
-    elif policy_name == "smolvla":
-        policy = SmolVLAPolicy(policy_cfg, dataset_stats=dataset_metadata.stats)
+    policy_class = get_policy_class(policy_name)
+    return policy_class(policy_cfg, dataset_stats=dataset_metadata.stats)
+
+
+def get_policy_class(policy_name: str) -> type[PreTrainedPolicy]:
+    policy_classes = {
+        "diffusion": DiffusionPolicy,
+        "pi0": PI0Policy,
+        "pi0fast": PI0FASTPolicy,
+        "smolvla": SmolVLAPolicy,
+    }
+    if policy_name in policy_classes:
+        return policy_classes[policy_name]
     else:
         raise ValueError(f"Unknown policy: {policy_name}")
 
-    return policy
+
+def get_policy_features(features: dict[str, dict]) -> dict[str, FeatureType]:
+    # Ref: lerobot.configs.types
+    FEATURE_TYPES = {
+        "STATE": FeatureType.STATE,
+        "VISUAL": FeatureType.VISUAL,
+        "ENV": FeatureType.ENV,
+        "ACTION": FeatureType.ACTION,
+        "REWARD": FeatureType.REWARD,
+    }
+    return {
+        key: PolicyFeature(type=FEATURE_TYPES.get(ft["type"]), shape=ft.get("shape"))
+        for key, ft in features.items()
+    }
 
 
 def get_policy_cfg(
-    policy_name: str, input_features: dict = {}, output_features: dict = {}
+    policy_name: str,
+    input_features: dict = {},
+    output_features: dict = {},
+    cfg_file: pathlib.Path | str | None = None,
 ) -> PreTrainedConfig:
+    if cfg_file is not None and os.path.exists(cfg_file):
+        with open(cfg_file, "r") as f:
+            cfg_data = json.load(f)
+
+        input_features = get_policy_features(cfg_data.get("input_features"))
+        output_features = get_policy_features(cfg_data.get("output_features"))
+        logging.info(
+            f"Loaded policy configuration from {cfg_file} with input features:"
+            f"{input_features} and output features: {output_features}"
+        )
+
     if policy_name == "diffusion":
         policy_cfg = DiffusionConfig(
             input_features=input_features, output_features=output_features
