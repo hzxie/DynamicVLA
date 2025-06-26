@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-25 14:55:39
+# @Last Modified at: 2025-06-26 20:00:34
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -101,7 +101,6 @@ def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, robot):
 def _set_up_scene_cameras(
     scene_cfg, sim_cfg, robot, robot_pose, side_cam_pose, table_bbox
 ):
-    import configs.robot_cfg
     import configs.scene_cfg
 
     # Set up the top-view camera
@@ -225,6 +224,7 @@ def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir
             robot_pos=robot_pose["pos"],
             moving_time=sim_cfg["scene"]["object"]["moving_time"],
             semantic_tags=[("class", "OBJECT_MAIN")],
+            # static=True,
         ),
     )
     # TODO: Add more objects to the scene
