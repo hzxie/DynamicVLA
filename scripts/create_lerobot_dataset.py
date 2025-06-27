@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-25 19:00:06
+# @Last Modified at: 2025-06-27 14:38:15
 # @Email:  root@haozhexie.com
 #
 # Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/convert_libero_data_to_lerobot.py
@@ -23,6 +23,7 @@ import lerobot.common.datasets.lerobot_dataset
 import lerobot.common.datasets.utils
 import numpy as np
 import scipy.spatial.transform
+import torchcodec.decoders
 from tqdm import tqdm
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
@@ -206,12 +207,21 @@ def get_episode_frames(episode_path, rot_fmt="quat"):
     return frames
 
 
-# def
+def is_video_valid(video_path, video_length):
+    try:
+        video_decoder = torchcodec.decoders.VideoDecoder(
+            video_path,
+            seek_mode="approximate",
+        )
+        video_decoder.get_frames_in_range(0, video_length - 1)
+    except Exception as ex:
+        return False
+
+    return True
 
 
-def main(input_dir, rot_fmt, push_to_hub):
-    REPO_ID = "hzxie/dynamic_objects"
-    OUTPUT_DIR = os.path.join(huggingface_hub.constants.HF_HOME, "lerobot", REPO_ID)
+def main(repo_id, input_dir, rot_fmt, push_to_hub):
+    output_dir = os.path.join(huggingface_hub.constants.HF_HOME, "lerobot", repo_id)
     # Listing all episodes in the input directory
     episodes = sorted([f for f in os.listdir(input_dir) if f.endswith(".h5")])
     if not episodes:
@@ -221,23 +231,23 @@ def main(input_dir, rot_fmt, push_to_hub):
     # Check whether the output directory exists
     overwrite = True
     existing_episodes = []
-    if os.path.exists(OUTPUT_DIR):
+    if os.path.exists(output_dir):
         answer = (
             input(
                 "Output directory %s already exists. Do you want to overwrite? (y/N) "
-                % OUTPUT_DIR
+                % output_dir
             )
             .strip()
             .lower()
         )
         if answer in ["y", "yes"]:
-            shutil.rmtree(OUTPUT_DIR)
+            shutil.rmtree(output_dir)
         else:
             overwrite = False
             existing_episodes = [
                 ep["filename"]
                 for ep in lerobot.common.datasets.utils.load_jsonlines(
-                    pathlib.Path(os.path.join(OUTPUT_DIR, "meta", "camera.jsonl"))
+                    pathlib.Path(os.path.join(output_dir, "meta", "camera.jsonl"))
                 )
             ]
 
@@ -245,16 +255,19 @@ def main(input_dir, rot_fmt, push_to_hub):
     episode_metadata = get_episode_metadata(os.path.join(input_dir, episodes[0]))
     logging.info("Episode metadata: %s" % episode_metadata)
     if overwrite:
-        logging.info("Creating LeRobot dataset from %s to %s" % (input_dir, OUTPUT_DIR))
-        lerobot_dataset = create_lerobot_dataset(REPO_ID, episode_metadata, rot_fmt)
+        logging.info("Creating LeRobot dataset from %s to %s" % (input_dir, output_dir))
+        lerobot_dataset = create_lerobot_dataset(repo_id, episode_metadata, rot_fmt)
         logging.info("Dataset Overview: %s" % lerobot_dataset)
     else:
         lerobot_dataset = lerobot.common.datasets.lerobot_dataset.LeRobotDataset(
-            repo_id=REPO_ID,
-            root=OUTPUT_DIR,
+            repo_id=repo_id,
+            root=output_dir,
         )
 
     ep_idx = len(existing_episodes)
+    # video_features = [
+    #     k for k, v in lerobot_dataset.features.items() if v["dtype"] == "video"
+    # ]
     for e in tqdm(episodes):
         if e.find(episode_metadata["robot_type"]) == -1:
             logging.warning(
@@ -279,10 +292,23 @@ def main(input_dir, rot_fmt, push_to_hub):
             continue
 
         lerobot_dataset.save_episode()
+        # Manually check whether the video is valid
+        # for vf in video_features:
+        #     video_path = os.path.join(
+        #         output_dir,
+        #         "videos",
+        #         "chunk-%03d" % (ep_idx // 1000),
+        #         vf,
+        #         "episode_%06d.mp4" % ep_idx,
+        #     )
+        #     while not is_video_valid(video_path, len(_frames)):
+        #         logging.warning("Failed to decode video %s: %s", video_path, str(ex))
+        #         fix_lerobot_video(video_path, [f[vf] for f in _frames])
+
         # Manually save the camera parameters
         lerobot.common.datasets.utils.append_jsonlines(
             {"episode_idx": ep_idx, "filename": e, "cameras": _metadata["cameras"]},
-            pathlib.Path(os.path.join(OUTPUT_DIR, "meta", "camera.jsonl")),
+            pathlib.Path(os.path.join(output_dir, "meta", "camera.jsonl")),
         )
         ep_idx += 1
 
@@ -302,6 +328,11 @@ if __name__ == "__main__":
     )
     parser = argparse.ArgumentParser(description="Create LeRobot dataset")
     parser.add_argument(
+        "--repo_id",
+        type=str,
+        default="hzxie/dynamic_objects",
+    )
+    parser.add_argument(
         "--dataset_dir",
         type=str,
         required=True,
@@ -317,4 +348,4 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    main(args.dataset_dir, args.rotation, args.push_to_hub)
+    main(args.repo_id, args.dataset_dir, args.rotation, args.push_to_hub)
