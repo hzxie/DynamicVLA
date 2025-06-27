@@ -43,7 +43,13 @@ def get_spawner_cfg(
             usd_path=file_path,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(),
             mass_props=sim_utils.MassPropertiesCfg(mass=mass),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
+            collision_props=sim_utils.CollisionPropertiesCfg(
+                collision_enabled=True,
+                contact_offset=0.001,
+                rest_offset=-0.001,
+                min_torsional_patch_radius=0.008,
+                torsional_patch_radius=0.1,
+            )
         )
     else:
         # spawner_cfg = sim_utils.SphereCfg(
