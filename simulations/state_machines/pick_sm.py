@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-26 19:57:13
+# @Last Modified at: 2025-06-26 20:23:31
 # @Email:  root@haozhexie.com
 
 import collections
@@ -70,7 +70,7 @@ class PickStateMachine:
         final_position: torch.tensor,
         final_quat: torch.tensor,
         reach_dist_thres: float,
-        grasp_dist_thres: float = 0.01,
+        grasp_dist_thres: float = 0.015,
         grasp_pose_thres: float = 15.0,
         object_dist_thres: float = 0.1,
         gripper_length: float = 0.3,
@@ -384,6 +384,7 @@ def infer_state_machine(
     state = sm_state[tid]
     # decide next state
     if state == PickSmState.REST:
+        print("REST")
         gripper_state[tid] = GripperState.OPEN
         des_ee_pose[tid] = final_object_pose[tid]
         dist_object_robot = get_length(wp.transform_get_translation(grasp_pose[tid]))
@@ -465,6 +466,7 @@ def infer_state_machine(
             sm_wait_time[tid] = 0.0
 
     elif state == PickSmState.LIFT_OBJECT:
+        print("LIFT_OBJECT")
         gripper_state[tid] = GripperState.CLOSE
         if sm_wait_time[tid] < PickSmWaitTime.LIFT_OBJECT:
             # lift the object away from the desktop
@@ -480,6 +482,16 @@ def infer_state_machine(
         dist_ee_object = get_length(
             wp.transform_get_translation(ee_pose[tid])
             - wp.transform_get_translation(object_pose[tid])
+        )
+        wp.printf(
+            "TO_TARGET: obj: [%.4f, %.4f, %.4f] ee: [%.4f, %.4f, %.4f], dist: %.4f\n",
+            object_pose[tid][0],
+            object_pose[tid][1],
+            object_pose[tid][2],
+            ee_pose[tid][0],
+            ee_pose[tid][1],
+            ee_pose[tid][2],
+            dist_ee_object,
         )
         if dist_ee_object > object_dist_threshold:
             sm_state[tid] = PickSmState.REST

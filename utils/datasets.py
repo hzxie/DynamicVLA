@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-17 16:10:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-19 14:32:51
+# @Last Modified at: 2025-06-25 19:45:16
 # @Email:  root@haozhexie.com
 
 import logging
@@ -112,9 +112,9 @@ class LeRobotDataset(torch.utils.data.Dataset):
         if self.episodes is None:
             self.episodes = [ep_idx for ep_idx in range(self.meta.total_episodes)]
             if split == "train":
-                self.episodes = self.episodes[:-32]
+                self.episodes = [e for e in self.episodes if e % 1000 != 0]
             elif split == "test":
-                self.episodes = self.episodes[-32:]
+                self.episodes = [e for e in self.episodes if e % 1000 == 0]
             else:
                 raise ValueError(f"Unknown split {split}.")
 

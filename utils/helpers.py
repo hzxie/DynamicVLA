@@ -20,9 +20,9 @@ from lerobot.common.policies.pi0.configuration_pi0 import PI0Config
 from lerobot.common.policies.pi0.modeling_pi0 import PI0Policy
 from lerobot.common.policies.pi0fast.configuration_pi0fast import PI0FASTConfig
 from lerobot.common.policies.pi0fast.modeling_pi0fast import PI0FASTPolicy
+from lerobot.common.policies.pretrained import PreTrainedPolicy
 from lerobot.common.policies.smolvla.configuration_smolvla import SmolVLAConfig
 from lerobot.common.policies.smolvla.modeling_smolvla import SmolVLAPolicy
-from lerobot.common.policies.pretrained import PreTrainedPolicy
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.types import FeatureType, PolicyFeature
 
