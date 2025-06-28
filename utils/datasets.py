@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-17 16:10:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-25 19:45:16
+# @Last Modified at: 2025-06-28 11:35:06
 # @Email:  root@haozhexie.com
 
 import logging
@@ -203,10 +203,12 @@ class LeRobotDataset(torch.utils.data.Dataset):
             idx, self.episode_data_index["from"], self.episode_data_index["to"]
         )
         frame_idx = idx - self.episode_data_index["from"][ep_idx].item()
+
+        g_ep_idx = self.episodes[ep_idx]
         episode = (
-            self._memcached[ep_idx]
-            if ep_idx in self._memcached
-            else self._get_episode(ep_idx)
+            self._memcached[g_ep_idx]
+            if g_ep_idx in self._memcached
+            else self._get_episode(g_ep_idx)
         )
         item = {
             k: v[frame_idx] for k, v in episode.items() if k in self.required_features

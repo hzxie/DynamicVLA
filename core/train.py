@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-20 09:13:08
+# @Last Modified at: 2025-06-28 11:34:10
 # @Email:  root@haozhexie.com
 
 import logging
@@ -67,7 +67,7 @@ def train(cfg):
         persistent_workers=True,
     )
     test_data_loader = torch.utils.data.DataLoader(
-        dataset=train_dataset,
+        dataset=test_dataset,
         batch_size=cfg.TRAIN.BATCH_SIZE,
         num_workers=cfg.CONST.N_WORKERS,
         pin_memory=cfg.DATASET.PIN_MEMORY,
