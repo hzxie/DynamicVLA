@@ -45,10 +45,10 @@ def get_spawner_cfg(
             mass_props=sim_utils.MassPropertiesCfg(mass=mass),
             collision_props=sim_utils.CollisionPropertiesCfg(
                 collision_enabled=True,
-                contact_offset=0.001,
-                rest_offset=-0.001,
-                min_torsional_patch_radius=0.008,
-                torsional_patch_radius=0.1,
+                contact_offset=0.01,
+                rest_offset=0.0,
+                min_torsional_patch_radius=0.01,
+                torsional_patch_radius=0.01,
             )
         )
     else:
