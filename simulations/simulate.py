@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-26 20:00:34
+# @Last Modified at: 2025-06-30 18:23:58
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -12,6 +12,7 @@ import ast
 import json
 import logging
 import os
+import subprocess
 import random
 import uuid
 
@@ -29,7 +30,6 @@ PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.p
 
 def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, robot):
     # The following packages MUST be imported after the simulation app is created
-    import configs.env_cfg
     import configs.scene_cfg
     import isaaclab_tasks
 
@@ -54,6 +54,7 @@ def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, robot):
         usd_file = os.path.join(
             scene_dir,
             random.choice([f for f in os.listdir(scene_dir) if f.endswith(".usd")]),
+            # "5a6ad201-c801-4ea3-bd67-4d7bdff0b77a.usd",
         )
         logging.info("Loading scene from %s", usd_file)
         env_cfg.scene = configs.scene_cfg.set_house_asset(
@@ -66,6 +67,8 @@ def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, robot):
     # Determine the robot pose
     robot_pose = random.choice([a for a in table["anchors"] if a["side"] == "long"])
     side_cam_pose = random.choice([a for a in table["anchors"] if a["side"] == "short"])
+    # robot_pose = [a for a in table["anchors"] if a["side"] == "long"][0]
+    # side_cam_pose = [a for a in table["anchors"] if a["side"] == "short"][0]
     # Set up the robot arm
     env_cfg = configs.env_cfg.set_robot(robot, env_cfg, robot_pose)
     # Set up cameras in the scene
@@ -211,7 +214,7 @@ def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir
     target_category = random.choice(os.listdir(object_dir))
     target_candidates = [
         f
-        for f in os.listdir(os.path.join(object_dir, target_category))
+        for f in sorted(os.listdir(os.path.join(object_dir, target_category)))
         if f.endswith(".usd")
     ]
     target_object = random.choice(target_candidates)
@@ -554,7 +557,7 @@ def _get_semantic_segmentation(rgba_seg_maps, semantic_tags):
 
 
 def is_final_position_reached(object_pos, ee_pos, final_pos):
-    DIST_THRESHOLD = 0.02
+    DIST_THRESHOLD = 0.05
 
     ee_offset = (ee_pos - final_pos).abs().sum(dim=1)
     obj_offset = (object_pos - final_pos).abs().sum(dim=1)
@@ -596,6 +599,9 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
     import configs.robot_cfg
     import omni.replicator.core as rep
 
+    random.seed(debug_cfg["seed"])
+    np.random.seed(debug_cfg["seed"])
+    torch.manual_seed(debug_cfg["seed"])
     # Create a new environment
     env_cfg = get_env_cfg(
         dir_cfg["scene_dir"],
@@ -608,9 +614,6 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
     # Reset environment at start
     # env.reset()
     env.reset(seed=debug_cfg["seed"])
-    random.seed(debug_cfg["seed"])
-    np.random.seed(debug_cfg["seed"])
-    torch.manual_seed(debug_cfg["seed"])
 
     # Enable Path Tracing
     if debug_cfg["path_tracing"]:
@@ -630,10 +633,10 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
             "gripper_length": configs.robot_cfg.get_gripper_length(task_cfg["robot"]),
         },
     )
-    
+
     # adjust object height
     root_state = env.unwrapped.scene["object"].data.default_root_state.clone()
-    object_size  = _get_object_size("/World/envs/env_0/Object", env.unwrapped.device)
+    object_size = _get_object_size("/World/envs/env_0/Object", env.unwrapped.device)
     root_state[:, 2] += object_size[:, 2] / 2
     env.unwrapped.scene["object"].write_root_pose_to_sim(root_state[:, :7])
 
@@ -892,6 +895,22 @@ def dump_video(frames, output_path, fps=24):
         video.write(frame)
 
     video.release()
+    # Make it compatible with browser-based video players
+    fixed_output_path = output_path.replace(".mp4", "_fixed.mp4")
+    subprocess.call(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            output_path,
+            "-vcodec",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            fixed_output_path,
+        ]
+    )
+    os.rename(fixed_output_path, output_path)
 
 
 def main(simulation_app, args):

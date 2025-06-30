@@ -73,9 +73,6 @@ def main(repo_id, h5_dir):
                 videos, desc="Checking videos in %s/%s" % (vc, vf), leave=False
             ):
                 episode_index = int(v.rsplit("_")[-1][:-4])
-                if episode_index not in [1523, 3979, 6586, 6669, 9085, 9627]:
-                    continue
-
                 video_path = os.path.join(output_dir, "videos", vc, vf, v)
                 video_length = lerobot_dataset.meta.episodes[episode_index]["length"]
                 try:

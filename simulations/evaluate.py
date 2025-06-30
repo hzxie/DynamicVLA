@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-25 13:55:54
+# @Last Modified at: 2025-06-30 18:30:54
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -47,7 +47,7 @@ def get_task_instruction(env_cfg_file_path):
 
 
 def get_test_env(
-    env_cfg,
+    cfg,
     num_envs,
     scene_dir,
     object_dir,
@@ -58,10 +58,6 @@ def get_test_env(
     path_tracing,
 ):
     import omni.replicator.core as rep
-
-    # Load the environment configuration
-    with open(env_cfg, "r") as fp:
-        cfg = json.load(fp)
 
     # Create the environment
     env_cfg = _get_env_cfg(cfg, num_envs, scene_dir, object_dir, device, disable_fabric)
@@ -231,10 +227,6 @@ def _set_up_scene_objects(scene_cfg, cfg, object_dir):
 
 
 def get_final_position(env_cfg, device="cpu"):
-    # Load the environment configuration
-    with open(env_cfg, "r") as fp:
-        env_cfg = json.load(fp)
-
     if "final_position" in env_cfg:
         final_position = env_cfg["final_position"]
     else:
@@ -280,26 +272,32 @@ def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_positi
 
     # The simulation loop
     while sim_status == 0:
-        scene_state = env.unwrapped.scene.state
+        # scene_state = env.unwrapped.scene.state
         cam_view = sim.get_camera_views(env.unwrapped.scene.sensors, ["rgb"])
-        rbt_state = sim.get_curr_state(
+        curr_state = sim.get_curr_state(
             ee_state=env.unwrapped.scene["ee_frame"].data,
-            robot_joint_pos=scene_state["articulation"]["robot"]["joint_position"],
+            # robot_joint_pos=scene_state["articulation"]["robot"]["joint_position"],
+            object_state=env.unwrapped.scene["object"].data,
             env_origins=env.unwrapped.scene.env_origins + robot_origin,
             robot_quat=robot_quat,
-            device="cpu",
+            device=env.unwrapped.device,
         )
         cam_views.append(cam_view)
         obs_socket.send_pyobj(
             {
-                "observation.state": rbt_state,
+                "observation.state": {
+                    "end_effector": {
+                        k: v.cpu().numpy()
+                        for k, v in curr_state["end_effector"].items()
+                    }
+                },
                 "observation.image": cam_view,
             }
         )
 
         action = get_latest_action(act_socket)
         if action is not None:
-            logging.debug("Received action: %s" % action)
+            logging.debug("Received action with shape: %s" % (action.shape,))
             action = _get_action_tensor(
                 action, env.unwrapped.num_envs, env.unwrapped.device
             )
@@ -312,14 +310,6 @@ def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_positi
         # If no action is received, use the previous action to make the
         # simulation continuous
         if last_action is None:
-            curr_state = sim.get_curr_state(
-                ee_state=env.unwrapped.scene["ee_frame"].data,
-                robot_joint_pos=scene_state["articulation"]["robot"]["joint_position"],
-                object_state=env.unwrapped.scene["object"].data,
-                env_origins=env.unwrapped.scene.env_origins + robot_origin,
-                robot_quat=robot_quat,
-                device=env.unwrapped.device,
-            )
             last_action = torch.cat(
                 [
                     curr_state["end_effector"]["pos"],
@@ -378,9 +368,12 @@ def main(simulation_app, args):
 
     # Set up test environment
     logging.info("Recovering test environment from %s" % args.env_cfg)
+    with open(args.env_cfg, "r") as fp:
+        env_cfg = json.load(fp)
+
     instruction = get_task_instruction(args.env_cfg)
     env = get_test_env(
-        args.env_cfg,
+        env_cfg,
         args.num_envs,
         args.scene_dir,
         args.object_dir,
@@ -390,7 +383,7 @@ def main(simulation_app, args):
         args.disable_fabric,
         args.path_tracing,
     )
-    env.reset()
+    env.reset(seed=env_cfg["seed"])
 
     robot_origin = (
         torch.from_numpy(np.array(env.unwrapped.cfg.scene.robot.init_state.pos))
@@ -404,7 +397,7 @@ def main(simulation_app, args):
         .float()
         .to(env.unwrapped.device)
     )
-    final_position = get_final_position(args.env_cfg, env.unwrapped.device)
+    final_position = get_final_position(env_cfg, env.unwrapped.device)
 
     # Simulation loop
     while simulation_app.is_running():
@@ -414,7 +407,7 @@ def main(simulation_app, args):
             env, obs_socket, act_socket, robot_origin, robot_quat, final_position
         )
         logging.info("Resetting environment with code: %d" % sim_status)
-        env.reset()
+        env.reset(seed=env_cfg["seed"])
         # Clear the action socket
         get_latest_action(act_socket)
         # Save the frames if needed
@@ -429,6 +422,9 @@ def main(simulation_app, args):
                 sim.get_frames(get_frames(cam_views), state_keys=[]),
                 episode_file_path,
             )
+            import pdb
+
+            pdb.set_trace()
 
 
 if __name__ == "__main__":

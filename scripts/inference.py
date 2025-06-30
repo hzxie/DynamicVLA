@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-25 12:09:07
+# @Last Modified at: 2025-06-30 15:13:02
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -192,7 +192,7 @@ def main(vla_model, vla_weights, host, img_port, act_port):
         action = get_action(vla_model, observation)
         if action is not None:
             act_socket.send_pyobj(action, flags=zmq.NOBLOCK)
-            logging.info("Sending action with shape: %s" % (action.shape,))
+            logging.info("Sending action: %s" % (action,))
 
 
 if __name__ == "__main__":
