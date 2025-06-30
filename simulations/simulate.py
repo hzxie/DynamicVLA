@@ -247,7 +247,7 @@ def _get_object_cfg(
 
     PADDING = 0.02
     object_cfg = {}
-    tbl_z = table_bbox.max[2]
+    tbl_z = table_bbox.max[2] + PADDING
     if static:
         object_range_min_0 = table_bbox.min[0] * 3 / 4 + table_bbox.max[0] / 4
         object_range_max_0 = table_bbox.min[0] / 4 + table_bbox.max[0] * 3 / 4
@@ -383,10 +383,6 @@ def _get_object_size(object_path, device="cpu"):
     return torch.tensor(
         [[size[0], size[1], size[2]]], dtype=torch.float32, device=device
     )
-
-
-def _adjust_object_height(object_path):
-    pass
 
 
 def get_final_position(task, robot, device="cpu"):
@@ -612,7 +608,6 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
     )
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=debug_cfg["seed"])
     # Reset environment at start
-    # env.reset()
     env.reset(seed=debug_cfg["seed"])
 
     # Enable Path Tracing
