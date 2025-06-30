@@ -35,13 +35,7 @@ FRANKA_PANDA_CFG = ArticulationCfg(
             solver_position_iteration_count=8,
             solver_velocity_iteration_count=0,
         ),
-        collision_props=sim_utils.CollisionPropertiesCfg(
-            collision_enabled=True,
-            contact_offset=0.01,
-            rest_offset=0.0,
-            min_torsional_patch_radius=0.01,
-            torsional_patch_radius=0.01,
-        )
+        # collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         joint_pos={
