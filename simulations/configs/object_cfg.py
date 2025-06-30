@@ -36,19 +36,26 @@ def get_object_cfg(
 
 
 def get_spawner_cfg(
-    file_path: str = None, mass: int = 0.5, semantic_tags=None
+    file_path: str = None, mass: int = 0.05, semantic_tags=None
 ) -> SpawnerCfg:
     if file_path is not None:
         spawner_cfg = UsdFileCfg(
             usd_path=file_path,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                solver_position_iteration_count=16,
+                solver_velocity_iteration_count=1,
+                max_angular_velocity=1000.0,
+                max_linear_velocity=1000.0,
+                max_depenetration_velocity=5.0,
+                disable_gravity=False
+            ),
             mass_props=sim_utils.MassPropertiesCfg(mass=mass),
             collision_props=sim_utils.CollisionPropertiesCfg(
                 collision_enabled=True,
-                contact_offset=0.001,
-                rest_offset=-0.001,
-                min_torsional_patch_radius=0.008,
-                torsional_patch_radius=0.1,
+                contact_offset=0.01,
+                rest_offset=0.0,
+                min_torsional_patch_radius=0.01,
+                torsional_patch_radius=0.01,
             )
         )
     else:
