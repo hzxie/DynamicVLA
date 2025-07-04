@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-27 14:38:15
+# @Last Modified at: 2025-07-04 19:44:10
 # @Email:  root@haozhexie.com
 #
 # Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/convert_libero_data_to_lerobot.py
@@ -118,12 +118,11 @@ def create_lerobot_dataset(repo_id, metadata, rot_fmt="quat"):
         },
     }
     for c in metadata["cameras"]:
-        # for m in c["data_types"]:
         # TODO: Only RGB is supported in LeRobotDataset (wait for upstream support)
-        for m in ["rgb"]:
+        for m in ["rgb"]:  # c["data_types"]
             # Shorten the name for semantic segmentation
             m = "seg" if m == "semantic_segmentation" else m
-            features["observation.image"] = {
+            features["observation.images.%s" % c["name"]] = {
                 "dtype": "video",
                 "names": ["height", "width", "channel"],
                 "shape": (c["height"], c["width"], 3 if m == "rgb" else 1),
@@ -196,11 +195,12 @@ def get_episode_frames(episode_path, rot_fmt="quat"):
         }
         # Add camera frames
         for k, v in env_states.items():
-            # if k.find("_cam_") == -1:
             # TODO: Only RGB is supported in LeRobotDataset (wait for upstream support)
-            if k.find("side_cam_rgb") == -1:
+            if not k.endswith("_cam_rgb"):
                 continue
-            _frame["observation.image"] = v[i]
+
+            cam_name = k[:-4]  # Remove the "_rgb" suffix
+            _frame["observation.images.%s" % cam_name] = v[i]
 
         frames.append(_frame)
 
