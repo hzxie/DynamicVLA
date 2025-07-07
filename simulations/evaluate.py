@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-30 18:30:54
+# @Last Modified at: 2025-06-30 20:39:08
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -66,9 +66,6 @@ def get_test_env(
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=cfg["seed"])
     # Reset environment at start
     env.reset(seed=cfg["seed"])
-    random.seed(cfg["seed"])
-    np.random.seed(cfg["seed"])
-    torch.manual_seed(cfg["seed"])
 
     # Enable Path Tracing
     if path_tracing:
@@ -371,6 +368,12 @@ def main(simulation_app, args):
     with open(args.env_cfg, "r") as fp:
         env_cfg = json.load(fp)
 
+    # Fix random seed for reproducibility
+    random.seed(env_cfg["seed"])
+    np.random.seed(env_cfg["seed"])
+    torch.manual_seed(env_cfg["seed"])
+
+    # Set up the instruction and environment
     instruction = get_task_instruction(args.env_cfg)
     env = get_test_env(
         env_cfg,

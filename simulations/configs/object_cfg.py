@@ -49,7 +49,7 @@ def get_spawner_cfg(
                 rest_offset=-0.001,
                 min_torsional_patch_radius=0.008,
                 torsional_patch_radius=0.1,
-            )
+            ),
         )
     else:
         # spawner_cfg = sim_utils.SphereCfg(

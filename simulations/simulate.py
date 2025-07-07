@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-30 18:23:58
+# @Last Modified at: 2025-07-01 19:59:12
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -211,44 +211,76 @@ def _get_light_cfg(light_cfg):
 def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir):
     import configs.scene_cfg
 
-    target_category = random.choice(os.listdir(object_dir))
-    target_candidates = [
-        f
-        for f in sorted(os.listdir(os.path.join(object_dir, target_category)))
-        if f.endswith(".usd")
-    ]
-    target_object = random.choice(target_candidates)
-    logging.info("Using target object: %s" % target_object)
+    target_object_usd = _get_object_usd_path(
+        object_dir, sim_cfg["scene"]["target_object"]["categories"]
+    )
+    logging.info("Using target object: %s" % os.path.basename(target_object_usd))
     scene_cfg = configs.scene_cfg.set_target_object(
         scene_cfg,
         _get_object_cfg(
             table_bbox,
-            file_path=os.path.join(object_dir, target_category, target_object),
+            file_path=target_object_usd,
             robot_pos=robot_pose["pos"],
-            moving_time=sim_cfg["scene"]["object"]["moving_time"],
+            moving_time=_get_moving_time(
+                sim_cfg["scene"]["target_object"]["moving_time"]
+            ),
             semantic_tags=[("class", "OBJECT_MAIN")],
-            # static=True,
         ),
     )
-    # TODO: Add more objects to the scene
-    # scene_cfg = configs.scene_cfg.add_object_to_scene(scene_cfg)
+    # Add more objects to the scene
+    for oi in range(sim_cfg["scene"]["other_objects"]["n_objects"]):
+        bg_object_usd = _get_object_usd_path(
+            object_dir, sim_cfg["scene"]["other_objects"]["categories"]
+        )
+        scene_cfg = configs.scene_cfg.add_object_to_scene(
+            scene_cfg,
+            "object_%03d" % (oi + 1),
+            _get_object_cfg(
+                table_bbox,
+                file_path=bg_object_usd,
+                robot_pos=robot_pose["pos"],
+                moving_time=None,  # TODO
+                semantic_tags=[("class", "OBJECT_BG")],
+            ),
+        )
+
     return scene_cfg
+
+
+def _get_object_usd_path(object_dir, categories):
+    if categories is None or len(categories) == 0:
+        category = random.choice(os.listdir(object_dir))
+    else:
+        category = random.choice(categories)
+
+    object_usd = [
+        f
+        for f in sorted(os.listdir(os.path.join(object_dir, category)))
+        if f.endswith(".usd")
+    ]
+    return os.path.join(object_dir, category, random.choice(object_usd))
+
+
+def _get_moving_time(moving_time_range):
+    if moving_time_range is None or len(moving_time_range) < 2:
+        return None
+
+    return random.uniform(*moving_time_range)
 
 
 def _get_object_cfg(
     table_bbox,
     file_path=None,
     robot_pos=None,
-    static=False,
-    moving_time=[1, 2],
+    moving_time=None,
     semantic_tags=None,
 ):
     import configs.object_cfg
 
     PADDING = 0.02
     object_cfg = {}
-    tbl_z = table_bbox.max[2]
-    if static:
+    tbl_z = table_bbox.max[2] + PADDING
+    if moving_time is None:
         object_range_min_0 = table_bbox.min[0] * 3 / 4 + table_bbox.max[0] / 4
         object_range_max_0 = table_bbox.min[0] / 4 + table_bbox.max[0] * 3 / 4
         object_range_min_1 = table_bbox.min[1] * 3 / 4 + table_bbox.max[1] / 4
@@ -286,8 +318,7 @@ def _get_object_cfg(
         rnd_pos = tbl_ctr + rnd_rto * (robot_pos - tbl_ctr)
         rnd_pos[2] = tbl_z
         # Determine the linear velocity of the object
-        rnd_tme = random.uniform(*moving_time)
-        object_cfg["lin_vel"] = (rnd_pos - object_cfg["pos"]) / rnd_tme
+        object_cfg["lin_vel"] = (rnd_pos - object_cfg["pos"]) / moving_time
         object_cfg["quat"] = configs.object_cfg.get_object_init_quat(
             object_cfg["lin_vel"]
         )
@@ -383,10 +414,6 @@ def _get_object_size(object_path, device="cpu"):
     return torch.tensor(
         [[size[0], size[1], size[2]]], dtype=torch.float32, device=device
     )
-
-
-def _adjust_object_height(object_path):
-    pass
 
 
 def get_final_position(task, robot, device="cpu"):
@@ -599,9 +626,6 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
     import configs.robot_cfg
     import omni.replicator.core as rep
 
-    random.seed(debug_cfg["seed"])
-    np.random.seed(debug_cfg["seed"])
-    torch.manual_seed(debug_cfg["seed"])
     # Create a new environment
     env_cfg = get_env_cfg(
         dir_cfg["scene_dir"],
@@ -612,7 +636,6 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
     )
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=debug_cfg["seed"])
     # Reset environment at start
-    # env.reset()
     env.reset(seed=debug_cfg["seed"])
 
     # Enable Path Tracing
@@ -918,8 +941,14 @@ def main(simulation_app, args):
         sim_cfg = yaml.load(fp, Loader=yaml.FullLoader)
 
     # Perform simulations in the environment
+    seed = args.seed if args.seed is not None else random.randint(0, 65535)
     while simulation_app.is_running():
-        seed = args.seed if args.seed is not None else random.randint(0, 65535)
+        seed += 1
+        logging.info("Running simulation with seed: %d" % seed)
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+
         env_cfg, env_states = simulate(
             sim_cfg,
             {

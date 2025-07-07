@@ -3,10 +3,16 @@ scene:
     max_children: 3
     max_height: 1.5
     min_wh_sum: 2
-  object:
+  target_object:
+    categories:
+      - can
     moving_time:
       - 0.5
       - 2
+  other_objects:
+    n_objects: 0
+    categories:
+      - apple
 
 camera:
   width: 480
