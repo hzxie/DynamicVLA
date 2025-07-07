@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-30 15:13:02
+# @Last Modified at: 2025-07-07 18:11:06
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -99,9 +99,11 @@ def get_vla_model(model_name, pretrained_model):
 
 
 def get_transformed_observation(observation, device="cuda"):
-    cam_rgb = (
-        observation["observation.image"]["side_cam"]["rgb"].astype(np.float32) / 255.0
-    )
+    images = {
+        k: v.astype(np.float32)
+        for k, v in observation.items()
+        if k.startswith("observation.images.")
+    }
     ee_pose = np.concatenate(
         [
             observation["observation.state"]["end_effector"]["pos"],
@@ -114,7 +116,10 @@ def get_transformed_observation(observation, device="cuda"):
     ).astype(np.float32)
 
     return {
-        "observation.image": torch.from_numpy(cam_rgb).permute(0, 3, 1, 2).to(device),
+        **{
+            k: torch.from_numpy(v).permute(0, 3, 1, 2).to(device)
+            for k, v in images.items()
+        },
         "observation.state": torch.from_numpy(ee_pose).to(device),
         "task": [observation["task"]],
     }

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-30 20:39:08
+# @Last Modified at: 2025-07-08 11:08:42
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -75,8 +75,6 @@ def get_test_env(
 
 
 def _get_env_cfg(cfg, num_envs, scene_dir, object_dir, device, disable_fabric):
-    import configs.env_cfg
-    import configs.robot_cfg
     import configs.scene_cfg
     import isaaclab_tasks
 
@@ -288,7 +286,7 @@ def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_positi
                         for k, v in curr_state["end_effector"].items()
                     }
                 },
-                "observation.image": cam_view,
+                **{"observation.images.%s" % k: v["rgb"] for k, v in cam_view.items()},
             }
         )
 
@@ -425,9 +423,7 @@ def main(simulation_app, args):
                 sim.get_frames(get_frames(cam_views), state_keys=[]),
                 episode_file_path,
             )
-            import pdb
-
-            pdb.set_trace()
+            breakpoint()
 
 
 if __name__ == "__main__":
