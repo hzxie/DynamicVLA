@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-01 19:59:12
+# @Last Modified at: 2025-07-07 20:05:12
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -662,6 +662,14 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
     object_size = _get_object_size("/World/envs/env_0/Object", env.unwrapped.device)
     root_state[:, 2] += object_size[:, 2] / 2
     env.unwrapped.scene["object"].write_root_pose_to_sim(root_state[:, :7])
+
+    # adjust object physical material
+    materials = env.unwrapped.scene["object"].root_physx_view.get_material_properties()
+    materials[..., 0] = 0.9  # Static friction.
+    materials[..., 1] = 0.1  # Dynamic friction.
+    materials[..., 1] = 1.0  # Restitution
+    env_ids = torch.arange(env.unwrapped.num_envs)
+    env.unwrapped.scene["object"].root_physx_view.set_material_properties(materials, env_ids)
 
     # Simulation loop
     env_states = [{} for _ in range(env.unwrapped.num_envs)]
