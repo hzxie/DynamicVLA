@@ -6,9 +6,7 @@ scene:
   target_object:
     categories:
       - can
-    moving_time:
-      - 0.5
-      - 2
+    moving_time: [0.05, 2]
   other_objects:
     n_objects: 0
     categories:
@@ -30,19 +28,9 @@ camera:
     - semantic_segmentation
 
 lighting:
-  temperature:
-    - 5000
-    - 7500
-  intensity: 
-    - 350
-    - 650
+  temperature: [5000, 7500]
+  intensity: [350, 650]
   position:
-    x:
-      - -20
-      - 20
-    y:
-      - -20
-      - 20
-    z:
-      - 10
-      - 20
+    x: [-20, 20]
+    y: [-20, 20]
+    z: [10, 20]

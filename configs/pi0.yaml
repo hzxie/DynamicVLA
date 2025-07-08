@@ -8,7 +8,8 @@ DATASET:
   PIN_MEMORY: false
   DELTA_TIMESTAMPS:
   REQUIRED_FEATURES:
-    - "observation.image"
+    - "observation.images.gripper_cam"
+    - "observation.images.side_cam"
     - "observation.state"
     - "action"
 
@@ -36,3 +37,9 @@ TRAIN:
   LR_SCHEDULER:
     NAME: "cosine"
     N_WARMUP_STEPS: 1000
+  IMAGE_TRANSFORMS:
+    BRIGHTNESS: [0.8, 1.2]
+    CONTRAST: [0.8, 1.2]
+    SATURATION: [0.5, 1.5]
+    HUE: [-0.05, 0.05]
+    SHARPNESS: [0.5, 1.5]

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-17 16:10:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-28 11:35:06
+# @Last Modified at: 2025-07-08 10:58:34
 # @Email:  root@haozhexie.com
 
 import logging
@@ -19,6 +19,8 @@ import numpy as np
 import pyarrow.parquet as pq
 import torch
 import torchcodec.decoders
+import torchvision.transforms.v2
+import torchvision.transforms.v2.functional as F
 from tqdm import tqdm
 
 
@@ -27,6 +29,7 @@ def get_dataset(
     split: str,
     pin_memory: bool,
     required_features: list[str] | None = None,
+    image_transforms: typing.Callable | None = None,
     delta_timestamps: dict[str, list[float]] | None = None,
 ) -> torch.utils.data.Dataset:
     if dataset_name.startswith("lerobot/"):
@@ -35,10 +38,48 @@ def get_dataset(
             split=split,
             pin_memory=pin_memory,
             required_features=required_features,
+            image_transforms=image_transforms,
             delta_timestamps=delta_timestamps,
         )
     else:
         raise ValueError(f"Unknown dataset {dataset_name}")
+
+
+class ImageTransforms:
+    def __init__(self, cfg):
+        self.brightness = cfg.get("BRIGHTNESS")
+        self.contrast = cfg.get("CONTRAST")
+        self.saturation = cfg.get("SATURATION")
+        self.hue = cfg.get("HUE")
+        self.sharpness = cfg.get("SHARPNESS")
+
+    def __call__(self, item, camera_keys: list[str]) -> dict:
+        transform_args = torchvision.transforms.v2.ColorJitter.get_params(
+            brightness=self.brightness if self.brightness else None,
+            contrast=self.contrast if self.contrast else None,
+            saturation=self.saturation if self.saturation else None,
+            hue=self.hue if self.hue else None,
+        )
+        for k, v in item.items():
+            if k not in camera_keys:
+                continue
+
+            item[k] = self._apply_transforms(v, transform_args)
+
+        return item
+
+    def _apply_transforms(self, image, transform_args):
+        for tr_idx in transform_args[0]:
+            if tr_idx == 0 and transform_args[1] is not None:
+                image = F.adjust_brightness(image, transform_args[1])
+            elif tr_idx == 1 and transform_args[2] is not None:
+                image = F.adjust_contrast(image, transform_args[2])
+            elif tr_idx == 2 and transform_args[3] is not None:
+                image = F.adjust_saturation(image, transform_args[3])
+            elif tr_idx == 3 and transform_args[4] is not None:
+                image = F.adjust_hue(image, transform_args[4])
+
+        return image
 
 
 class LeRobotDataset(torch.utils.data.Dataset):
@@ -235,9 +276,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
             item = {**item, **video_frames}
 
         if self.image_transforms is not None:
-            image_keys = self.meta.camera_keys
-            for cam in image_keys:
-                item[cam] = self.image_transforms(item[cam])
+            item = self.image_transforms(item, self.meta.camera_keys)
 
         # Add task as a string
         task_idx = episode["task_index"][frame_idx].item()
