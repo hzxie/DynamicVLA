@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-04 19:44:10
+# @Last Modified at: 2025-07-08 14:02:28
 # @Email:  root@haozhexie.com
 #
 # Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/convert_libero_data_to_lerobot.py
@@ -151,6 +151,15 @@ def get_task_instruction(episode_file_name):
     )
 
 
+def _get_delta_action(curr_action, curr_state):
+    return np.concatenate(
+        [
+            curr_action[:6] - curr_state[:6],
+            curr_action[6:],
+        ]
+    )
+
+
 def _get_rotation_vector(quat, format="quat"):
     if format == "quat":
         return quat
@@ -162,7 +171,7 @@ def _get_rotation_vector(quat, format="quat"):
         raise ValueError("Unsupported format: %s. Use 'quat' or 'euler'." % format)
 
 
-def get_episode_frames(episode_path, rot_fmt="quat"):
+def get_episode_frames(episode_path, rot_fmt="quat", use_delta_action=False):
     with h5py.File(episode_path, "r") as f:
         env_states = {k: f[k][()] for k in f.keys()}
 
@@ -193,7 +202,11 @@ def get_episode_frames(episode_path, rot_fmt="quat"):
                 axis=-1,
             ).astype(np.float32),
         }
-        # Add camera frames
+        if use_delta_action:
+            _frame["action"] = _get_delta_action(
+                _frame["action"], _frame["observation.state"]
+            )
+
         for k, v in env_states.items():
             # TODO: Only RGB is supported in LeRobotDataset (wait for upstream support)
             if not k.endswith("_cam_rgb"):
@@ -220,7 +233,7 @@ def is_video_valid(video_path, video_length):
     return True
 
 
-def main(repo_id, input_dir, rot_fmt, push_to_hub):
+def main(repo_id, input_dir, rot_fmt, use_delta_action, push_to_hub):
     output_dir = os.path.join(huggingface_hub.constants.HF_HOME, "lerobot", repo_id)
     # Listing all episodes in the input directory
     episodes = sorted([f for f in os.listdir(input_dir) if f.endswith(".h5")])
@@ -265,9 +278,6 @@ def main(repo_id, input_dir, rot_fmt, push_to_hub):
         )
 
     ep_idx = len(existing_episodes)
-    # video_features = [
-    #     k for k, v in lerobot_dataset.features.items() if v["dtype"] == "video"
-    # ]
     for e in tqdm(episodes):
         if e.find(episode_metadata["robot_type"]) == -1:
             logging.warning(
@@ -283,7 +293,9 @@ def main(repo_id, input_dir, rot_fmt, push_to_hub):
 
         try:
             _metadata = get_episode_metadata(os.path.join(input_dir, e))
-            _frames = get_episode_frames(os.path.join(input_dir, e), rot_fmt)
+            _frames = get_episode_frames(
+                os.path.join(input_dir, e), rot_fmt, use_delta_action
+            )
             _task = get_task_instruction(os.path.basename(e))
             for f in _frames:
                 lerobot_dataset.add_frame(f, _task)
@@ -292,18 +304,6 @@ def main(repo_id, input_dir, rot_fmt, push_to_hub):
             continue
 
         lerobot_dataset.save_episode()
-        # Manually check whether the video is valid
-        # for vf in video_features:
-        #     video_path = os.path.join(
-        #         output_dir,
-        #         "videos",
-        #         "chunk-%03d" % (ep_idx // 1000),
-        #         vf,
-        #         "episode_%06d.mp4" % ep_idx,
-        #     )
-        #     while not is_video_valid(video_path, len(_frames)):
-        #         logging.warning("Failed to decode video %s: %s", video_path, str(ex))
-        #         fix_lerobot_video(video_path, [f[vf] for f in _frames])
 
         # Manually save the camera parameters
         lerobot.common.datasets.utils.append_jsonlines(
@@ -343,9 +343,13 @@ if __name__ == "__main__":
         default="quat",
     )
     parser.add_argument(
+        "--delta",
+        action="store_true",
+    )
+    parser.add_argument(
         "--push_to_hub",
         action="store_true",
     )
     args = parser.parse_args()
 
-    main(args.repo_id, args.dataset_dir, args.rotation, args.push_to_hub)
+    main(args.repo_id, args.dataset_dir, args.rotation, args.delta, args.push_to_hub)
