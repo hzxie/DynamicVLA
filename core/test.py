@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-08 18:59:43
+# @Last Modified at: 2025-07-09 19:29:51
 # @Email:  root@haozhexie.com
 
 import logging
@@ -46,6 +46,7 @@ def test(cfg, test_data_loader=None, policy=None):
         policy = policy.from_pretrained(cfg.CONST.CKPT)
         policy.device = policy.config.device
 
+    l1_loss = torch.nn.L1Loss()
     policy.eval()
     n_samples = len(test_data_loader)
     test_losses = utils.average_meter.AverageMeter()
@@ -65,8 +66,13 @@ def test(cfg, test_data_loader=None, policy=None):
             ):
                 batch["task"] = batch["task"][0]
 
-            loss, _ = policy.forward(batch)
-            test_losses.update(loss.item())
+            actions = []
+            for _ in range(policy.config.n_action_steps):
+                actions.append(policy.select_action(batch))
+
+            test_losses.update(
+                l1_loss(torch.vstack(actions).unsqueeze(0), batch["action"]).item()
+            )
             if utils.distributed.is_master():
                 logging.info(
                     "Test[%d/%d] Losses = %.4f"
