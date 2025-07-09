@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-19 22:16:47
+# @Last Modified at: 2025-07-08 18:59:43
 # @Email:  root@haozhexie.com
 
 import logging
@@ -19,7 +19,6 @@ import utils.helpers
 def test(cfg, test_data_loader=None, policy=None):
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
-    local_rank = utils.distributed.get_rank()
     if test_data_loader is None:
         test_dataset = utils.datasets.get_dataset(
             cfg.DATASET.NAME,
@@ -45,8 +44,7 @@ def test(cfg, test_data_loader=None, policy=None):
         )
         logging.info("Recovering from %s ..." % (cfg.CONST.CKPT))
         policy = policy.from_pretrained(cfg.CONST.CKPT)
-        if torch.cuda.is_available():
-            policy = torch.nn.DataParallel(policy).cuda()
+        policy.device = policy.config.device
 
     policy.eval()
     n_samples = len(test_data_loader)
