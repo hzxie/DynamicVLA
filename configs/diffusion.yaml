@@ -4,7 +4,7 @@ CONST:
   POLICY_NAME: "diffusion"
 
 DATASET:
-  NAME: "lerobot/hzxie/dynamic_objects"
+  NAME: "lerobot/hzxie/dynamic-objects"
   PIN_MEMORY: false
   DELTA_TIMESTAMPS:
   REQUIRED_FEATURES:

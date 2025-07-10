@@ -1,10 +1,11 @@
+# transformers: 4.50.3
 CONST:
   EXP_NAME: null
   N_WORKERS: 8
   POLICY_NAME: "pi0fast"
 
 DATASET:
-  NAME: "lerobot/hzxie/dynamic_objects"
+  NAME: "lerobot/hzxie/dynamic-objects"
   PIN_MEMORY: false
   DELTA_TIMESTAMPS:
   REQUIRED_FEATURES:
