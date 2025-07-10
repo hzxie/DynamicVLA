@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-09 19:29:51
+# @Last Modified at: 2025-07-09 21:58:11
 # @Email:  root@haozhexie.com
 
 import logging
@@ -44,7 +44,10 @@ def test(cfg, test_data_loader=None, policy=None):
         )
         logging.info("Recovering from %s ..." % (cfg.CONST.CKPT))
         policy = policy.from_pretrained(cfg.CONST.CKPT)
-        policy.device = policy.config.device
+        if torch.cuda.is_available():
+            policy = torch.nn.DataParallel(policy).cuda()
+
+        policy.device = policy.module.config.device
 
     l1_loss = torch.nn.L1Loss()
     policy.eval()
@@ -67,11 +70,11 @@ def test(cfg, test_data_loader=None, policy=None):
                 batch["task"] = batch["task"][0]
 
             actions = []
-            for _ in range(policy.config.n_action_steps):
-                actions.append(policy.select_action(batch))
+            for _ in range(policy.module.config.chunk_size):
+                actions.append(policy.module.select_action(batch).unsqueeze(1))
 
             test_losses.update(
-                l1_loss(torch.vstack(actions).unsqueeze(0), batch["action"]).item()
+                l1_loss(torch.concat(actions, dim=1), batch["action"]).item()
             )
             if utils.distributed.is_master():
                 logging.info(
