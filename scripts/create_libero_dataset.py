@@ -4,7 +4,7 @@
 # @Author: Physical Intelligence Team
 # @Date:   2025-07-11 14:06:55
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-11 14:26:26
+# @Last Modified at: 2025-07-11 14:42:08
 # @Email:  root@haozhexie.com
 
 """
@@ -31,7 +31,7 @@ import math
 import os
 import shutil
 
-import huggingface_hub.constants
+import lerobot.common.constants
 import lerobot.common.datasets.lerobot_dataset
 import numpy as np
 import tensorflow_datasets as tfds
@@ -39,7 +39,7 @@ import tyro
 from tqdm import tqdm
 
 # Name of the output dataset, also used for the Hugging Face Hub
-REPO_NAME ="hzxie/libero"  
+REPO_NAME = "hzxie/libero"
 # For simplicity we will combine multiple Libero datasets into one training dataset
 RAW_DATASET_NAMES = [
     "libero_10_no_noops",
@@ -65,8 +65,8 @@ def quat_to_axis_angle(quat):
 
 
 def main(data_dir: str, *, push_to_hub: bool = False):
+    output_path = lerobot.common.constants.HF_LEROBOT_HOME / REPO_NAME
     # Clean up any existing dataset in the output directory
-    output_path = os.path.join(huggingface_hub.constants.HF_HOME, "lerobot", REPO_NAME)
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
 
@@ -122,7 +122,7 @@ def main(data_dir: str, *, push_to_hub: bool = False):
                         ),
                         "action": step["action"],
                     },
-                    task=step["language_instruction"].decode()
+                    task=step["language_instruction"].decode(),
                 )
             dataset.save_episode()
 

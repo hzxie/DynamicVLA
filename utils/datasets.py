@@ -4,9 +4,10 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-17 16:10:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-08 10:58:34
+# @Last Modified at: 2025-07-11 19:02:49
 # @Email:  root@haozhexie.com
 
+import io
 import logging
 import pathlib
 import typing
@@ -19,6 +20,7 @@ import numpy as np
 import pyarrow.parquet as pq
 import torch
 import torchcodec.decoders
+import torchvision.io
 import torchvision.transforms.v2
 import torchvision.transforms.v2.functional as F
 from tqdm import tqdm
@@ -226,7 +228,10 @@ class LeRobotDataset(torch.utils.data.Dataset):
             self.root / self.meta.get_data_file_path(ep_idx)
         ).to_pandas()
         for col in data_frame.columns:
-            episode[col] = torch.tensor(np.stack(data_frame[col].values))
+            if col in self.meta.image_keys:
+                episode[col] = data_frame[col].values
+            else:
+                episode[col] = torch.tensor(np.stack(data_frame[col].values))
 
         # Load video data
         for video_key in self.meta.video_keys:
@@ -266,6 +271,12 @@ class LeRobotDataset(torch.utils.data.Dataset):
             item = {**item, **padding}
             for key, val in query_result.items():
                 item[key] = val
+
+        if len(self.meta.image_keys) > 0:
+            for key in self.meta.image_keys:
+                item[key] = torchvision.io.decode_image(
+                    torch.frombuffer(episode[key][frame_idx]["bytes"], dtype=torch.uint8)
+                ).float() / 255.
 
         if len(self.meta.video_keys) > 0:
             current_ts = episode["timestamp"][frame_idx].item()
@@ -395,6 +406,6 @@ class LeRobotDataset(torch.utils.data.Dataset):
         # closest_ts = loaded_ts[argmin_]
 
         # convert to float32 in [0,1] range (channel first)
-        closest_frames = closest_frames.type(torch.float32) / 255
+        closest_frames = closest_frames.type(torch.float32) / 255.
         assert len(timestamps) == len(closest_frames)
         return closest_frames

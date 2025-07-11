@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-08 14:02:28
+# @Last Modified at: 2025-07-11 14:56:02
 # @Email:  root@haozhexie.com
 #
 # Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/convert_libero_data_to_lerobot.py
@@ -18,7 +18,7 @@ import shutil
 import sys
 
 import h5py
-import huggingface_hub.constants
+import lerobot.common.constants
 import lerobot.common.datasets.lerobot_dataset
 import lerobot.common.datasets.utils
 import numpy as np
@@ -234,7 +234,7 @@ def is_video_valid(video_path, video_length):
 
 
 def main(repo_id, input_dir, rot_fmt, use_delta_action, push_to_hub):
-    output_dir = os.path.join(huggingface_hub.constants.HF_HOME, "lerobot", repo_id)
+    output_dir = lerobot.common.constants.HF_LEROBOT_HOME / repo_id
     # Listing all episodes in the input directory
     episodes = sorted([f for f in os.listdir(input_dir) if f.endswith(".h5")])
     if not episodes:
@@ -330,7 +330,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--repo_id",
         type=str,
-        default="hzxie/dynamic_objects",
+        default="hzxie/dynamic-objects",
     )
     parser.add_argument(
         "--dataset_dir",

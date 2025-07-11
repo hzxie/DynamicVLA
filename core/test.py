@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-09 21:58:11
+# @Last Modified at: 2025-07-11 18:44:44
 # @Email:  root@haozhexie.com
 
 import logging
@@ -71,10 +71,10 @@ def test(cfg, test_data_loader=None, policy=None):
 
             actions = []
             for _ in range(policy.module.config.chunk_size):
-                actions.append(policy.module.select_action(batch).unsqueeze(1))
+                actions.append(policy.module.select_action(batch))
 
             test_losses.update(
-                l1_loss(torch.concat(actions, dim=1), batch["action"]).item()
+                l1_loss(torch.stack(actions, dim=1), batch["action"]).item()
             )
             if utils.distributed.is_master():
                 logging.info(
