@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-08 11:02:53
+# @Last Modified at: 2025-07-11 20:33:16
 # @Email:  root@haozhexie.com
 
 import logging
@@ -34,6 +34,7 @@ def train(cfg):
         cfg.DATASET.NAME,
         split="train",
         pin_memory=cfg.DATASET.PIN_MEMORY,
+        delta_action=cfg.DATASET.USE_DELTA_ACTION,
         required_features=cfg.DATASET.REQUIRED_FEATURES,
         image_transforms=utils.datasets.ImageTransforms(cfg.TRAIN.IMAGE_TRANSFORMS),
         delta_timestamps=utils.helpers.get_delta_timestamps(
@@ -44,6 +45,7 @@ def train(cfg):
         cfg.DATASET.NAME,
         split="test",
         pin_memory=cfg.DATASET.PIN_MEMORY,
+        delta_action=cfg.DATASET.USE_DELTA_ACTION,
         required_features=cfg.DATASET.REQUIRED_FEATURES,
         delta_timestamps=utils.helpers.get_delta_timestamps(
             cfg.CONST.POLICY_NAME, cfg.DATASET.DELTA_TIMESTAMPS

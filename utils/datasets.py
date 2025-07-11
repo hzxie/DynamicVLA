@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-17 16:10:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-11 19:02:49
+# @Last Modified at: 2025-07-11 20:32:36
 # @Email:  root@haozhexie.com
 
 import io
@@ -30,6 +30,7 @@ def get_dataset(
     dataset_name: str,
     split: str,
     pin_memory: bool,
+    delta_action: bool,
     required_features: list[str] | None = None,
     image_transforms: typing.Callable | None = None,
     delta_timestamps: dict[str, list[float]] | None = None,
@@ -39,6 +40,7 @@ def get_dataset(
             dataset_name[8:],  # Remove 'lerobot/' prefix
             split=split,
             pin_memory=pin_memory,
+            delta_action=delta_action,
             required_features=required_features,
             image_transforms=image_transforms,
             delta_timestamps=delta_timestamps,
@@ -128,6 +130,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         root: str | pathlib.Path | None = None,
         split: str = "train",
         pin_memory: bool = False,
+        delta_action: bool = True,
         required_features: list[str] | None = None,
         episodes: list[int] | None = None,
         image_transforms: typing.Callable | None = None,
@@ -142,6 +145,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
             if root
             else lerobot.common.constants.HF_LEROBOT_HOME / repo_id
         )
+        self.delta_action = delta_action
         self.required_features = required_features
         self.episodes = episodes
         self.image_transforms = image_transforms
@@ -288,6 +292,11 @@ class LeRobotDataset(torch.utils.data.Dataset):
 
         if self.image_transforms is not None:
             item = self.image_transforms(item, self.meta.camera_keys)
+
+        if self.delta_action:
+            act_dim = item["action"].shape[-1] - 1
+            # Only delta the XYZ and rotation components of the action
+            item["action"][:, :act_dim] -= item["observation.state"][:, :act_dim]
 
         # Add task as a string
         task_idx = episode["task_index"][frame_idx].item()

@@ -7,6 +7,7 @@ CONST:
 DATASET:
   NAME: "lerobot/hzxie/dynamic-objects"
   PIN_MEMORY: false
+  USE_DELTA_ACTION: false
   DELTA_TIMESTAMPS:
   REQUIRED_FEATURES:
     - "observation.images.gripper_cam"
