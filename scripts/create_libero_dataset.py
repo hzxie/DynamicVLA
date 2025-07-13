@@ -4,7 +4,7 @@
 # @Author: Physical Intelligence Team
 # @Date:   2025-07-11 14:06:55
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-11 14:42:08
+# @Last Modified at: 2025-07-13 21:11:51
 # @Email:  root@haozhexie.com
 
 """
@@ -27,13 +27,13 @@ The resulting dataset will get saved to the $LEROBOT_HOME directory.
 Running this conversion script will take approximately 30 minutes.
 """
 
-import math
 import os
 import shutil
 
 import lerobot.common.constants
 import lerobot.common.datasets.lerobot_dataset
 import numpy as np
+import scipy.spatial.transform
 import tensorflow_datasets as tfds
 import tyro
 from tqdm import tqdm
@@ -47,21 +47,6 @@ RAW_DATASET_NAMES = [
     "libero_object_no_noops",
     "libero_spatial_no_noops",
 ]
-
-
-def quat_to_axis_angle(quat):
-    # Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/main.py#L199
-    if quat[3] > 1.0:
-        quat[3] = 1.0
-    elif quat[3] < -1.0:
-        quat[3] = -1.0
-
-    den = np.sqrt(1.0 - quat[3] * quat[3])
-    if math.isclose(den, 0.0):
-        # This is (close to) a zero degree rotation, immediately return
-        return np.zeros(3)
-
-    return (quat[:3] * 2.0 * math.acos(quat[3])) / den
 
 
 def main(data_dir: str, *, push_to_hub: bool = False):
@@ -116,10 +101,12 @@ def main(data_dir: str, *, push_to_hub: bool = False):
                         "observation.state": np.concatenate(
                             [
                                 step["observation"]["state"][:3],
-                                quat_to_axis_angle(step["observation"]["state"][3:7]),
+                                scipy.spatial.transform.Rotation.from_quat(
+                                    step["observation"]["state"][3:7]
+                                ).as_rotvec(),
                                 step["observation"]["state"][-1:],
                             ]
-                        ),
+                        ).astype(np.float32),
                         "action": step["action"],
                     },
                     task=step["language_instruction"].decode(),

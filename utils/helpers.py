@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-25 10:56:56
+# @Last Modified at: 2025-07-13 22:20:14
 # @Email:  root@haozhexie.com
 
 import json
@@ -12,6 +12,7 @@ import logging
 import os
 import pathlib
 
+import numpy as np
 from lerobot.common.datasets.lerobot_dataset import LeRobotDatasetMetadata
 from lerobot.common.datasets.utils import dataset_to_policy_features
 from lerobot.common.policies.diffusion.configuration_diffusion import DiffusionConfig
@@ -89,7 +90,24 @@ def get_policy(
     )
 
     policy_class = get_policy_class(policy_name)
-    return policy_class(policy_cfg, dataset_stats=dataset_metadata.stats)
+    return policy_class(
+        policy_cfg, dataset_stats=fix_0std_dataset_stats(dataset_metadata.stats)
+    )
+
+
+def fix_0std_dataset_stats(
+    dataset_stats: dict[str, dict[str, np.array]],
+) -> dict[str, dict[str, np.array]]:
+    for k, v in dataset_stats.items():
+        for mean, (idx, std) in zip(v["mean"], enumerate(v["std"])):
+            if abs(mean) < 1e-6 and abs(std) < 1e-6:
+                logging.warning(
+                    f"Dataset stats for {k} has zero mean and std. "
+                    f"Setting std to 1.0 for index {idx}."
+                )
+                v["std"][idx] = 1.0
+
+    return dataset_stats
 
 
 def get_policy_class(policy_name: str) -> type[PreTrainedPolicy]:

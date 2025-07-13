@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-11 14:56:02
+# @Last Modified at: 2025-07-13 21:10:08
 # @Email:  root@haozhexie.com
 #
 # Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/convert_libero_data_to_lerobot.py
@@ -80,7 +80,7 @@ def _get_fields(prefixes, rot_fmt="quat"):
             fields.append(p + "qx")
             fields.append(p + "qy")
             fields.append(p + "qz")
-        elif p.find("_rot_") != -1 and rot_fmt == "euler":
+        elif p.find("_rot_") != -1 and rot_fmt in ["euler", "rotvec"]:
             fields.append(p + "x")
             fields.append(p + "y")
             fields.append(p + "z")
@@ -164,11 +164,17 @@ def _get_rotation_vector(quat, format="quat"):
     if format == "quat":
         return quat
     elif format == "euler":
-        return scipy.spatial.transform.Rotation.from_quat(quat).as_euler(
-            "xyz", degrees=False
-        )
+        return scipy.spatial.transform.Rotation.from_quat(
+            quat, scalar_first=True
+        ).as_euler("xyz", degrees=False)
+    elif format == "rotvec":
+        return scipy.spatial.transform.Rotation.from_quat(
+            quat, scalar_first=True
+        ).as_rotvec()
     else:
-        raise ValueError("Unsupported format: %s. Use 'quat' or 'euler'." % format)
+        raise ValueError(
+            "Unsupported format: %s. Use 'quat', 'euler', or 'rotvec'." % format
+        )
 
 
 def get_episode_frames(episode_path, rot_fmt="quat", use_delta_action=False):
