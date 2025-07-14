@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-13 22:20:14
+# @Last Modified at: 2025-07-14 19:15:35
 # @Email:  root@haozhexie.com
 
 import json
@@ -13,6 +13,7 @@ import os
 import pathlib
 
 import numpy as np
+import scipy.spatial.transform
 from lerobot.common.datasets.lerobot_dataset import LeRobotDatasetMetadata
 from lerobot.common.datasets.utils import dataset_to_policy_features
 from lerobot.common.policies.diffusion.configuration_diffusion import DiffusionConfig
@@ -45,6 +46,50 @@ def get_formatted_big_number(num: int, precision: int = 0) -> str:
         num /= divisor
 
     return num
+
+
+def get_rotation_vector(quat, format="quat", scalar_first=True):
+    if format == "quat":
+        return quat.astype(np.float32)
+    elif format == "euler":
+        return (
+            scipy.spatial.transform.Rotation.from_quat(quat, scalar_first=scalar_first)
+            .as_euler("xyz", degrees=False)
+            .astype(np.float32)
+        )
+    elif format == "rotvec":
+        return (
+            scipy.spatial.transform.Rotation.from_quat(quat, scalar_first=scalar_first)
+            .as_rotvec()
+            .astype(np.float32)
+        )
+    else:
+        raise ValueError(
+            "Unsupported format: %s. Use 'quat', 'euler', or 'rotvec'." % format
+        )
+
+
+def get_quaternion(rotation_vector, format="rotvec", scalar_first=True):
+    if format == "rotvec":
+        return (
+            scipy.spatial.transform.Rotation.from_rotvec(rotation_vector)
+            .as_quat(scalar_first=scalar_first)
+            .astype(np.float32)
+        )
+    elif format == "euler":
+        return (
+            scipy.spatial.transform.Rotation.from_euler(
+                "xyz", rotation_vector, degrees=False
+            )
+            .as_quat(scalar_first=scalar_first)
+            .astype(np.float32)
+        )
+    elif format == "quat":
+        return rotation_vector.astype(np.float32)
+    else:
+        raise ValueError(
+            "Unsupported format: %s. Use 'rotvec', 'euler', or 'quat'." % format
+        )
 
 
 def get_delta_timestamps(

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-07 18:11:06
+# @Last Modified at: 2025-07-14 21:57:17
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -15,13 +15,7 @@ import sys
 import time
 import uuid
 
-import lerobot.common.policies.diffusion.modeling_diffusion
-import lerobot.common.policies.pi0.modeling_pi0
-import lerobot.common.policies.pi0fast.modeling_pi0fast
-import lerobot.configs.types
 import numpy as np
-
-# import scipy.spatial.transform
 import torch
 import zmq
 import zmq.utils.monitor
@@ -98,19 +92,18 @@ def get_vla_model(model_name, pretrained_model):
     return vla_model
 
 
-def get_transformed_observation(observation, device="cuda"):
+def get_transformed_observation(observation, rotation, device="cuda"):
     images = {
-        k: v.astype(np.float32)
+        k: v.astype(np.float32) / 255.0
         for k, v in observation.items()
         if k.startswith("observation.images.")
     }
     ee_pose = np.concatenate(
         [
             observation["observation.state"]["end_effector"]["pos"],
-            # scipy.spatial.transform.Rotation.from_quat(
-            observation["observation.state"]["end_effector"]["quat"],
-            # ).as_euler("xyz", degrees=False),
-            # observation["observation.state"]["joints"][:, -1:],
+            utils.helpers.get_rotation_vector(
+                observation["observation.state"]["end_effector"]["quat"], rotation
+            ),
         ],
         axis=-1,
     ).astype(np.float32)
@@ -125,34 +118,34 @@ def get_transformed_observation(observation, device="cuda"):
     }
 
 
-def get_action(vla_model, observation):
+def get_action(vla_model, observation, rotation, use_delta_action):
+    _count = getattr(get_action, "count", 0)
+    _state = getattr(get_action, "state", None)
     for ifk in vla_model.config.input_features.keys():
         if ifk not in observation:
             logging.warning("Ingoring observation without key: %s" % ifk)
             return None
 
-    actions = []
-    observation = get_transformed_observation(observation)
-    # for _ in range(vla_model.config.chunk_size):
-    with torch.inference_mode():
-        action = vla_model.select_action(observation).cpu().numpy()
+    observation = get_transformed_observation(observation, rotation)
+    # Update the state every chunk_size steps
+    if _count % vla_model.config.chunk_size == 0:
+        _state = observation["observation.state"]
 
-    actions.append(action)
-    # ee_pos = action[:, :3]
-    # ee_quat = scipy.spatial.transform.Rotation.from_euler(
-    #     "xyz", action[:, 3:6], degrees=False
-    # ).as_quat()[
-    #     :, [3, 0, 1, 2]
-    # ]  # Convert to quaternion (w, x, y, z) format
-    # gripper = action[:, -1:]
-    # action = np.concatenate([ee_pos, ee_quat, gripper], axis=-1).astype(
-    #     np.float32
-    # )
+    action = vla_model.select_action(observation).cpu().numpy()
+    ee_pos = action[:, :3]
+    ee_quat = utils.helpers.get_quaternion(action[:, 3:-1], rotation)
+    gripper = action[:, -1:]
 
-    return np.concatenate(actions, axis=0).astype(np.float32)
+    action = np.concatenate([ee_pos, ee_quat, gripper], axis=-1)
+    if use_delta_action:
+        action_dim = action.shape[-1] - 1
+        action[:, :action_dim] += _state[:, :action_dim]
+
+    setattr(get_action, "count", _count + 1)
+    return action
 
 
-def main(vla_model, vla_weights, host, img_port, act_port):
+def main(vla_model, vla_weights, rotation, use_delta_action, host, img_port, act_port):
     # Initialize the VLA model
     logging.info("Loading VLA model: %s with weights: %s" % (vla_model, vla_weights))
     vla_model = get_vla_model(model_name=vla_model, pretrained_model=vla_weights)
@@ -194,10 +187,10 @@ def main(vla_model, vla_weights, host, img_port, act_port):
             continue
 
         assert "task" in observation, "Observation must contain 'task' key"
-        action = get_action(vla_model, observation)
+        action = get_action(vla_model, observation, rotation, use_delta_action)
         if action is not None:
             act_socket.send_pyobj(action, flags=zmq.NOBLOCK)
-            logging.info("Sending action: %s" % (action,))
+            logging.debug("Sending action: %s" % (np.round(action, 2),))
 
 
 if __name__ == "__main__":
@@ -218,10 +211,27 @@ if __name__ == "__main__":
         "--model", type=str, required=True, help="The name of VLA model to use"
     )
     parser.add_argument(
+        "--rotation",
+        type=str,
+        default="quat",
+    )
+    parser.add_argument(
+        "--delta",
+        action="store_true",
+    )
+    parser.add_argument(
         "--weights",
         type=str,
         required=True,
         help="The path to the pretrained VLA model",
     )
     args = parser.parse_args()
-    main(args.model, args.weights, args.host, args.img_port, args.act_port)
+    main(
+        args.model,
+        args.weights,
+        args.rotation,
+        args.delta,
+        args.host,
+        args.img_port,
+        args.act_port,
+    )
