@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-13 21:10:08
+# @Last Modified at: 2025-07-14 21:19:07
 # @Email:  root@haozhexie.com
 #
 # Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/convert_libero_data_to_lerobot.py
@@ -17,12 +17,12 @@ import pathlib
 import shutil
 import sys
 
+import cv2
 import h5py
 import lerobot.common.constants
 import lerobot.common.datasets.lerobot_dataset
 import lerobot.common.datasets.utils
 import numpy as np
-import scipy.spatial.transform
 import torchcodec.decoders
 from tqdm import tqdm
 
@@ -30,9 +30,10 @@ PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.p
 sys.path.append(PROJECT_HOME)
 
 import utils.instruction_generator
+import utils.helpers
 
 
-def _get_cameras(scene_cfg):
+def _get_cameras(scene_cfg, img_size=None):
     cameras = []
     for k, v in scene_cfg.items():
         if not k.endswith("_cam"):
@@ -41,8 +42,8 @@ def _get_cameras(scene_cfg):
         cameras.append(
             {
                 "name": k,
-                "width": v["width"],
-                "height": v["height"],
+                "width": v["width"] if img_size is None else img_size,
+                "height": v["height"] if img_size is None else img_size,
                 "offset": v["offset"],
                 "data_types": v["data_types"],
                 "focal": v["spawn"]["focal_length"],
@@ -52,7 +53,7 @@ def _get_cameras(scene_cfg):
     return cameras
 
 
-def get_episode_metadata(episode_path):
+def get_episode_metadata(episode_path, img_size=None):
     episode_dir = os.path.dirname(episode_path)
     episode_file = os.path.basename(episode_path)
     episode_name = os.path.splitext(episode_file)[0]
@@ -64,7 +65,7 @@ def get_episode_metadata(episode_path):
     return {
         "robot_type": tokens[1],
         "fps": round(1 / env_cfg["sim"]["dt"]),
-        "cameras": _get_cameras(env_cfg["scene"]),
+        "cameras": _get_cameras(env_cfg["scene"], img_size),
     }
 
 
@@ -157,27 +158,10 @@ def _get_delta_action(curr_action, curr_state):
             curr_action[:6] - curr_state[:6],
             curr_action[6:],
         ]
-    )
+    ).astype(np.float32)
 
 
-def _get_rotation_vector(quat, format="quat"):
-    if format == "quat":
-        return quat
-    elif format == "euler":
-        return scipy.spatial.transform.Rotation.from_quat(
-            quat, scalar_first=True
-        ).as_euler("xyz", degrees=False)
-    elif format == "rotvec":
-        return scipy.spatial.transform.Rotation.from_quat(
-            quat, scalar_first=True
-        ).as_rotvec()
-    else:
-        raise ValueError(
-            "Unsupported format: %s. Use 'quat', 'euler', or 'rotvec'." % format
-        )
-
-
-def get_episode_frames(episode_path, rot_fmt="quat", use_delta_action=False):
+def get_episode_frames(episode_path, rot_fmt="quat", img_size=False):
     with h5py.File(episode_path, "r") as f:
         env_states = {k: f[k][()] for k in f.keys()}
 
@@ -187,31 +171,33 @@ def get_episode_frames(episode_path, rot_fmt="quat", use_delta_action=False):
             "action": np.concatenate(
                 [
                     env_states["action"][i][:3],
-                    _get_rotation_vector(env_states["action"][i][3:-1], rot_fmt),
+                    utils.helpers.get_rotation_vector(
+                        env_states["action"][i][3:-1], rot_fmt
+                    ),
                     env_states["action"][i][-1:],
                 ],
                 axis=-1,
-            ).astype(np.float32),
+            ),
             "observation.state": np.concatenate(
                 [
                     env_states["ee_pos"][i],
-                    _get_rotation_vector(env_states["ee_quat"][i], rot_fmt),
+                    utils.helpers.get_rotation_vector(
+                        env_states["ee_quat"][i], rot_fmt
+                    ),
                 ],
                 axis=-1,
-            ).astype(np.float32),
+            ),
             "observation.environment_state": np.concatenate(
                 [
                     env_states["object_pos"][i],
-                    _get_rotation_vector(env_states["object_quat"][i], rot_fmt),
+                    utils.helpers.get_rotation_vector(
+                        env_states["object_quat"][i], rot_fmt
+                    ),
                     env_states["object_vel"][i],
                 ],
                 axis=-1,
-            ).astype(np.float32),
+            ),
         }
-        if use_delta_action:
-            _frame["action"] = _get_delta_action(
-                _frame["action"], _frame["observation.state"]
-            )
 
         for k, v in env_states.items():
             # TODO: Only RGB is supported in LeRobotDataset (wait for upstream support)
@@ -219,7 +205,14 @@ def get_episode_frames(episode_path, rot_fmt="quat", use_delta_action=False):
                 continue
 
             cam_name = k[:-4]  # Remove the "_rgb" suffix
-            _frame["observation.images.%s" % cam_name] = v[i]
+            image = v[i]
+            if img_size is not None:
+                image = cv2.resize(
+                    image,
+                    (img_size, img_size),
+                    interpolation=cv2.INTER_LINEAR,
+                )
+            _frame["observation.images.%s" % cam_name] = image
 
         frames.append(_frame)
 
@@ -239,10 +232,10 @@ def is_video_valid(video_path, video_length):
     return True
 
 
-def main(repo_id, input_dir, rot_fmt, use_delta_action, push_to_hub):
+def main(repo_id, input_dir, rot_fmt, img_size, push_to_hub):
     output_dir = lerobot.common.constants.HF_LEROBOT_HOME / repo_id
     # Listing all episodes in the input directory
-    episodes = sorted([f for f in os.listdir(input_dir) if f.endswith(".h5")])
+    episodes = sorted([f for f in os.listdir(input_dir) if f.endswith(".h5")])[:5000]
     if not episodes:
         logging.error("No episodes found in the input directory: %s" % input_dir)
         sys.exit(2)
@@ -271,7 +264,9 @@ def main(repo_id, input_dir, rot_fmt, use_delta_action, push_to_hub):
             ]
 
     # Creating the dataset in LeRobot format
-    episode_metadata = get_episode_metadata(os.path.join(input_dir, episodes[0]))
+    episode_metadata = get_episode_metadata(
+        os.path.join(input_dir, episodes[0]), img_size
+    )
     logging.info("Episode metadata: %s" % episode_metadata)
     if overwrite:
         logging.info("Creating LeRobot dataset from %s to %s" % (input_dir, output_dir))
@@ -299,9 +294,7 @@ def main(repo_id, input_dir, rot_fmt, use_delta_action, push_to_hub):
 
         try:
             _metadata = get_episode_metadata(os.path.join(input_dir, e))
-            _frames = get_episode_frames(
-                os.path.join(input_dir, e), rot_fmt, use_delta_action
-            )
+            _frames = get_episode_frames(os.path.join(input_dir, e), rot_fmt, img_size)
             _task = get_task_instruction(os.path.basename(e))
             for f in _frames:
                 lerobot_dataset.add_frame(f, _task)
@@ -349,8 +342,9 @@ if __name__ == "__main__":
         default="quat",
     )
     parser.add_argument(
-        "--delta",
-        action="store_true",
+        "--img_size",
+        type=int,
+        default=None,
     )
     parser.add_argument(
         "--push_to_hub",
@@ -358,4 +352,4 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    main(args.repo_id, args.dataset_dir, args.rotation, args.delta, args.push_to_hub)
+    main(args.repo_id, args.dataset_dir, args.rotation, args.img_size, args.push_to_hub)
