@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-25 18:53:11
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-27 14:42:49
+# @Last Modified at: 2025-07-15 20:31:00
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -80,7 +80,7 @@ def main(repo_id, h5_dir):
                         video_path,
                         seek_mode="approximate",
                     )
-                    video_decoder.get_frames_in_range(0, video_length - 1)
+                    video_decoder.get_frames_in_range(0, video_length)
                 except Exception as e:
                     logging.warning(
                         "Failed to decode video %s in chunk %s/%s: %s",
