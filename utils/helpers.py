@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-14 19:15:35
+# @Last Modified at: 2025-07-15 12:35:38
 # @Email:  root@haozhexie.com
 
 import json
@@ -115,6 +115,7 @@ def get_delta_timestamps(
 def get_policy(
     policy_name: str,
     dataset_metadata: LeRobotDatasetMetadata,
+    img_size: tuple[int, int] | None = None,
     required_features: list[str] | None = None,
 ) -> PreTrainedPolicy:
     features = dataset_to_policy_features(dataset_metadata.features)
@@ -132,6 +133,7 @@ def get_policy(
         policy_name,
         input_features=input_features,
         output_features=output_features,
+        img_size=img_size,
     )
 
     policy_class = get_policy_class(policy_name)
@@ -187,6 +189,7 @@ def get_policy_cfg(
     policy_name: str,
     input_features: dict = {},
     output_features: dict = {},
+    img_size: tuple[int, int] | None = None,
     cfg_file: pathlib.Path | str | None = None,
 ) -> PreTrainedConfig:
     if cfg_file is not None and os.path.exists(cfg_file):
@@ -199,6 +202,14 @@ def get_policy_cfg(
             f"Loaded policy configuration from {cfg_file} with input features:"
             f"{input_features} and output features: {output_features}"
         )
+
+    if img_size is not None:
+        for feature in input_features.values():
+            if feature.type == FeatureType.VISUAL:
+                feature.shape = (feature.shape[0], img_size[0], img_size[1])
+        for feature in output_features.values():
+            if feature.type == FeatureType.VISUAL:
+                feature.shape = (feature.shape[0], img_size[0], img_size[1])
 
     if policy_name == "diffusion":
         policy_cfg = DiffusionConfig(

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-17 16:10:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-11 20:32:36
+# @Last Modified at: 2025-07-15 11:26:05
 # @Email:  root@haozhexie.com
 
 import io
@@ -50,7 +50,8 @@ def get_dataset(
 
 
 class ImageTransforms:
-    def __init__(self, cfg):
+    def __init__(self, img_size=None, cfg={}):
+        self.img_size = img_size
         self.brightness = cfg.get("BRIGHTNESS")
         self.contrast = cfg.get("CONTRAST")
         self.saturation = cfg.get("SATURATION")
@@ -73,6 +74,9 @@ class ImageTransforms:
         return item
 
     def _apply_transforms(self, image, transform_args):
+        if self.img_size is not None:
+            image = F.resize(image, self.img_size)
+
         for tr_idx in transform_args[0]:
             if tr_idx == 0 and transform_args[1] is not None:
                 image = F.adjust_brightness(image, transform_args[1])
@@ -278,9 +282,14 @@ class LeRobotDataset(torch.utils.data.Dataset):
 
         if len(self.meta.image_keys) > 0:
             for key in self.meta.image_keys:
-                item[key] = torchvision.io.decode_image(
-                    torch.frombuffer(episode[key][frame_idx]["bytes"], dtype=torch.uint8)
-                ).float() / 255.
+                item[key] = (
+                    torchvision.io.decode_image(
+                        torch.frombuffer(
+                            episode[key][frame_idx]["bytes"], dtype=torch.uint8
+                        )
+                    ).float()
+                    / 255.0
+                )
 
         if len(self.meta.video_keys) > 0:
             current_ts = episode["timestamp"][frame_idx].item()
@@ -415,6 +424,6 @@ class LeRobotDataset(torch.utils.data.Dataset):
         # closest_ts = loaded_ts[argmin_]
 
         # convert to float32 in [0,1] range (channel first)
-        closest_frames = closest_frames.type(torch.float32) / 255.
+        closest_frames = closest_frames.type(torch.float32) / 255.0
         assert len(timestamps) == len(closest_frames)
         return closest_frames

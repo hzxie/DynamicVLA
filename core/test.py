@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-11 18:44:44
+# @Last Modified at: 2025-07-15 11:27:46
 # @Email:  root@haozhexie.com
 
 import logging
@@ -24,7 +24,9 @@ def test(cfg, test_data_loader=None, policy=None):
             cfg.DATASET.NAME,
             split="test",
             pin_memory=cfg.DATASET.PIN_MEMORY,
+            delta_action=cfg.DATASET.USE_DELTA_ACTION,
             required_features=cfg.DATASET.REQUIRED_FEATURES,
+            image_transforms=utils.datasets.ImageTransforms(cfg.DATASET.IMG_SIZE),
             delta_timestamps=utils.helpers.get_delta_timestamps(
                 cfg.CONST.POLICY_NAME, cfg.DATASET.DELTA_TIMESTAMPS
             ),
@@ -40,6 +42,7 @@ def test(cfg, test_data_loader=None, policy=None):
         policy = utils.helpers.get_policy(
             cfg.CONST.POLICY_NAME,
             test_data_loader.dataset.meta,
+            cfg.DATASET.IMG_SIZE,
             cfg.DATASET.REQUIRED_FEATURES,
         )
         logging.info("Recovering from %s ..." % (cfg.CONST.CKPT))
