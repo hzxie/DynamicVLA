@@ -4,7 +4,7 @@
 # @Author: Physical Intelligence Team
 # @Date:   2025-07-11 14:06:55
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-13 21:11:51
+# @Last Modified at: 2025-07-16 12:34:58
 # @Email:  root@haozhexie.com
 
 """
@@ -32,8 +32,6 @@ import shutil
 
 import lerobot.common.constants
 import lerobot.common.datasets.lerobot_dataset
-import numpy as np
-import scipy.spatial.transform
 import tensorflow_datasets as tfds
 import tyro
 from tqdm import tqdm
@@ -75,7 +73,7 @@ def main(data_dir: str, *, push_to_hub: bool = False):
             },
             "observation.state": {
                 "dtype": "float32",
-                "shape": (7,),
+                "shape": (8,),
                 "names": ["state"],
             },
             "action": {
@@ -98,15 +96,7 @@ def main(data_dir: str, *, push_to_hub: bool = False):
                     {
                         "observation.images.base": step["observation"]["image"],
                         "observation.images.wrist": step["observation"]["wrist_image"],
-                        "observation.state": np.concatenate(
-                            [
-                                step["observation"]["state"][:3],
-                                scipy.spatial.transform.Rotation.from_quat(
-                                    step["observation"]["state"][3:7]
-                                ).as_rotvec(),
-                                step["observation"]["state"][-1:],
-                            ]
-                        ).astype(np.float32),
+                        "observation.state": step["observation"]["state"],
                         "action": step["action"],
                     },
                     task=step["language_instruction"].decode(),

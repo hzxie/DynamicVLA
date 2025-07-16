@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-15 12:35:38
+# @Last Modified at: 2025-07-16 17:35:11
 # @Email:  root@haozhexie.com
 
 import json
@@ -12,6 +12,7 @@ import logging
 import os
 import pathlib
 
+import av
 import numpy as np
 import scipy.spatial.transform
 from lerobot.common.datasets.lerobot_dataset import LeRobotDatasetMetadata
@@ -27,6 +28,7 @@ from lerobot.common.policies.smolvla.configuration_smolvla import SmolVLAConfig
 from lerobot.common.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.types import FeatureType, PolicyFeature
+from PIL import Image
 
 
 def get_n_parameters(model: PreTrainedPolicy, trainable_only: bool = True) -> int:
@@ -231,3 +233,27 @@ def get_policy_cfg(
         raise ValueError(f"Unknown policy: {policy_name}")
 
     return policy_cfg
+
+
+def dump_video(frames, output_path, fps=24):
+    if len(frames) == 0:
+        return
+
+    # Ref: lerobot.common.datasets.video_utils.encode_video_frames
+    with av.open(str(output_path), "w") as output:
+        output_stream = output.add_stream(
+            "libsvtav1", fps, options={"g": "2", "crf": "30"}
+        )
+        output_stream.pix_fmt = "yuv420p"
+        output_stream.width = frames[0].shape[1]
+        output_stream.height = frames[0].shape[0]
+        # Loop through input frames and encode them
+        for frame in frames:
+            input_frame = av.VideoFrame.from_image(Image.fromarray(frame))
+            packet = output_stream.encode(input_frame)
+            if packet:
+                output.mux(packet)
+        # Flush the encoder
+        packet = output_stream.encode()
+        if packet:
+            output.mux(packet)

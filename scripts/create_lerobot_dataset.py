@@ -28,8 +28,8 @@ from tqdm import tqdm
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 sys.path.append(PROJECT_HOME)
 
-import utils.instruction_generator
 import utils.helpers
+import utils.instruction_generator
 
 
 def _get_cameras(scene_cfg):

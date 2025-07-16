@@ -1,6 +1,7 @@
 easydict
 h5py
-opencv-python
+numpy==1.26.4
+opencv-python-headless<4.12
 pynvml
 pytest
 PyYAML

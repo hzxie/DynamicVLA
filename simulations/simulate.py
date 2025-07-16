@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-07 20:05:12
+# @Last Modified at: 2025-07-16 20:55:09
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -12,10 +12,11 @@ import ast
 import json
 import logging
 import os
-import subprocess
 import random
+import sys
 import uuid
 
+import av
 import cv2
 import gymnasium as gym
 import h5py
@@ -24,6 +25,7 @@ import numpy as np
 import scipy.spatial.transform
 import torch
 import yaml
+from PIL import Image
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 
@@ -669,7 +671,9 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
     materials[..., 1] = 0.1  # Dynamic friction.
     materials[..., 1] = 1.0  # Restitution
     env_ids = torch.arange(env.unwrapped.num_envs)
-    env.unwrapped.scene["object"].root_physx_view.set_material_properties(materials, env_ids)
+    env.unwrapped.scene["object"].root_physx_view.set_material_properties(
+        materials, env_ids
+    )
 
     # Simulation loop
     env_states = [{} for _ in range(env.unwrapped.num_envs)]
@@ -854,7 +858,7 @@ def get_frames(
                 {k: env_state[k][frame_idx] for k in state_keys if k in env_state},
             )
 
-        frames[frame_idx] = frame[..., ::-1]
+        frames[frame_idx] = frame
 
     return frames
 
@@ -915,33 +919,28 @@ def _get_state_text(state):
 
 
 def dump_video(frames, output_path, fps=24):
+    # Mirrored from utils.helpers.dump_video (to prevent install LeRobot dependency)
     if len(frames) == 0:
         return
 
-    width, height = frames[0].shape[1], frames[0].shape[0]
-    video = cv2.VideoWriter(
-        output_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
-    )
-    for frame in frames:
-        video.write(frame)
-
-    video.release()
-    # Make it compatible with browser-based video players
-    fixed_output_path = output_path.replace(".mp4", "_fixed.mp4")
-    subprocess.call(
-        [
-            "ffmpeg",
-            "-y",
-            "-i",
-            output_path,
-            "-vcodec",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            fixed_output_path,
-        ]
-    )
-    os.rename(fixed_output_path, output_path)
+    # Ref: lerobot.common.datasets.video_utils.encode_video_frames
+    with av.open(str(output_path), "w") as output:
+        output_stream = output.add_stream(
+            "libsvtav1", fps, options={"g": "2", "crf": "30"}
+        )
+        output_stream.pix_fmt = "yuv420p"
+        output_stream.width = frames[0].shape[1]
+        output_stream.height = frames[0].shape[0]
+        # Loop through input frames and encode them
+        for frame in frames:
+            input_frame = av.VideoFrame.from_image(Image.fromarray(frame))
+            packet = output_stream.encode(input_frame)
+            if packet:
+                output.mux(packet)
+        # Flush the encoder
+        packet = output_stream.encode()
+        if packet:
+            output.mux(packet)
 
 
 def main(simulation_app, args):

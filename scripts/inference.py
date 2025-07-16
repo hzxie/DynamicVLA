@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-14 21:57:17
+# @Last Modified at: 2025-07-16 22:00:52
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -98,12 +98,12 @@ def get_transformed_observation(observation, rotation, device="cuda"):
         for k, v in observation.items()
         if k.startswith("observation.images.")
     }
+    ee_pose = observation["observation.state"]["end_effector"]
     ee_pose = np.concatenate(
         [
-            observation["observation.state"]["end_effector"]["pos"],
-            utils.helpers.get_rotation_vector(
-                observation["observation.state"]["end_effector"]["quat"], rotation
-            ),
+            ee_pose["pos"],
+            utils.helpers.get_rotation_vector(ee_pose["quat"], rotation),
+            (ee_pose["gripper"] if "gripper" in ee_pose else np.empty((1, 0))),
         ],
         axis=-1,
     ).astype(np.float32)
@@ -129,18 +129,18 @@ def get_action(vla_model, observation, rotation, use_delta_action):
     observation = get_transformed_observation(observation, rotation)
     # Update the state every chunk_size steps
     if _count % vla_model.config.chunk_size == 0:
-        _state = observation["observation.state"]
+        _state = observation["observation.state"].cpu().numpy()
+        setattr(get_action, "state", _state)
 
     action = vla_model.select_action(observation).cpu().numpy()
-    ee_pos = action[:, :3]
-    ee_quat = utils.helpers.get_quaternion(action[:, 3:-1], rotation)
-    gripper = action[:, -1:]
-
-    action = np.concatenate([ee_pos, ee_quat, gripper], axis=-1)
     if use_delta_action:
         action_dim = action.shape[-1] - 1
         action[:, :action_dim] += _state[:, :action_dim]
 
+    ee_pos = action[:, :3]
+    ee_quat = utils.helpers.get_quaternion(action[:, 3:-1], rotation)
+    gripper = action[:, -1:]
+    action = np.concatenate([ee_pos, ee_quat, gripper], axis=-1)
     setattr(get_action, "count", _count + 1)
     return action
 
@@ -180,7 +180,9 @@ def main(vla_model, vla_weights, rotation, use_delta_action, host, img_port, act
         if "task" in observation:
             instruction = observation["task"]
             logging.info("Received new task: %s" % instruction)
-            vla_model.reset()  # Reset the model with the new instruction
+            # Reset the model with the new instruction
+            vla_model.reset()
+            setattr(get_action, "count", 0)
         elif instruction is not None:
             observation["task"] = instruction
         else:

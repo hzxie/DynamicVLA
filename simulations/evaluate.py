@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-08 11:08:42
+# @Last Modified at: 2025-07-16 20:30:41
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -22,6 +22,7 @@ import torch
 import zmq
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
+sys.path.append(PROJECT_HOME)
 sys.path.append(os.path.dirname(__file__))
 
 import simulations.simulate as sim
@@ -462,7 +463,8 @@ if __name__ == "__main__":
         "--object_dir", default=os.path.join(PROJECT_HOME, os.pardir, "objects")
     )
     parser.add_argument(
-        "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "datasets")
+        "--output_dir",
+        default=os.path.join(PROJECT_HOME, "runs", "evaluation"),
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument(
