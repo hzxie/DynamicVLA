@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-15 11:05:56
+# @Last Modified at: 2025-07-16 22:06:18
 # @Email:  root@haozhexie.com
 #
 # Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/convert_libero_data_to_lerobot.py
@@ -219,6 +219,7 @@ def is_video_valid(video_path, video_length):
         )
         video_decoder.get_frames_in_range(0, video_length - 1)
     except Exception as ex:
+        logging.error("Video %s is invalid: %s" % (video_path, str(ex)))
         return False
 
     return True

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-11 14:31:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-16 19:17:50
+# @Last Modified at: 2025-07-16 22:05:40
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/main.py
 #
@@ -19,7 +19,6 @@ import sys
 
 import cv2
 import numpy as np
-import torch
 from libero.libero import benchmark as libero_benchmark
 from libero.libero import envs as libero_envs
 from libero.libero import get_libero_path

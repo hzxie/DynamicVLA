@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-16 20:55:09
+# @Last Modified at: 2025-07-16 22:05:13
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -13,7 +13,6 @@ import json
 import logging
 import os
 import random
-import sys
 import uuid
 
 import av
