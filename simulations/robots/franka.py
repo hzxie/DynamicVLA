@@ -41,7 +41,7 @@ FRANKA_PANDA_CFG = ArticulationCfg(
             rest_offset=0.0,
             min_torsional_patch_radius=0.01,
             torsional_patch_radius=0.01,
-        )
+        ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         joint_pos={

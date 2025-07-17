@@ -47,7 +47,7 @@ def get_spawner_cfg(
                 max_angular_velocity=1000.0,
                 max_linear_velocity=1000.0,
                 max_depenetration_velocity=5.0,
-                disable_gravity=False
+                disable_gravity=False,
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=mass),
             collision_props=sim_utils.CollisionPropertiesCfg(
@@ -56,7 +56,7 @@ def get_spawner_cfg(
                 rest_offset=0.0,
                 min_torsional_patch_radius=0.01,
                 torsional_patch_radius=0.01,
-            )
+            ),
         )
     else:
         # spawner_cfg = sim_utils.SphereCfg(

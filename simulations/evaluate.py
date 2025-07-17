@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-16 20:30:41
+# @Last Modified at: 2025-07-17 19:38:30
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -306,10 +306,12 @@ def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_positi
         # If no action is received, use the previous action to make the
         # simulation continuous
         if last_action is None:
+            robot_name = "franka"  # TODO: get robot name from env
             last_action = torch.cat(
                 [
-                    curr_state["end_effector"]["pos"],
-                    curr_state["end_effector"]["quat"],
+                    sim.get_rest_pose(robot_name, env.unwrapped.device).repeat(
+                        env.unwrapped.num_envs, 1
+                    ),
                     torch.ones(env.unwrapped.num_envs, 1, device=env.unwrapped.device),
                 ],
                 dim=1,

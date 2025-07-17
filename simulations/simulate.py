@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-16 22:05:13
+# @Last Modified at: 2025-07-17 19:33:39
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -387,9 +387,12 @@ def get_state_machine(task, robot, sm_args={}):
         raise ValueError("Unknown task: %s." % task)
 
     # Set the final position and quaternion for different tasks and robots
+    rest_pose = get_rest_pose(robot, sm_args.get("device"))
     final_position = get_final_position(task, robot, sm_args.get("device"))
     final_quat = _get_final_quat(task, robot, sm_args.get("device"))
     reach_dist_thres = _get_reach_dist_threshold(robot)
+    if rest_pose is not None:
+        sm_args["rest_pose"] = rest_pose
     if final_position is not None:
         sm_args["final_position"] = final_position
     if final_quat is not None:
@@ -415,6 +418,20 @@ def _get_object_size(object_path, device="cpu"):
     return torch.tensor(
         [[size[0], size[1], size[2]]], dtype=torch.float32, device=device
     )
+
+
+def get_rest_pose(robot, device="cpu"):
+    # NOTE: Quaternion in wxyz format
+    if robot == "franka":
+        return torch.tensor(
+            [[0.465906, 0.0, 0.382970, 0.008583, 0.921765, 0.020404, 0.387116]],
+            dtype=torch.float32,
+            device=device,
+        )
+    elif robot == "piper":
+        raise NotImplementedError
+    else:
+        raise ValueError("Unknown robot: %s." % robot)
 
 
 def get_final_position(task, robot, device="cpu"):

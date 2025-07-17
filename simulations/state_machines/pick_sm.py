@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-26 20:23:31
+# @Last Modified at: 2025-07-17 19:36:31
 # @Email:  root@haozhexie.com
 
 import collections
@@ -38,10 +38,10 @@ class PickSmState:
 class PickSmWaitTime:
     """Additional wait times (in s) for states for before switching."""
 
-    REST = wp.constant(0.1)
+    REST = wp.constant(0.08)
     APPROACH_ABOVE_OBJECT = wp.constant(0.4)
-    APPROACH_OBJECT = wp.constant(0.5)
-    GRASP_OBJECT = wp.constant(0.3)
+    APPROACH_OBJECT = wp.constant(0.48)
+    GRASP_OBJECT = wp.constant(0.32)
     LIFT_OBJECT = wp.constant(0.2)
     TO_TARGET = wp.constant(0.6)
 
@@ -67,6 +67,7 @@ class PickStateMachine:
         dt: float,
         num_envs: int,
         object_size: torch.tensor,
+        rest_pose: torch.tensor,
         final_position: torch.tensor,
         final_quat: torch.tensor,
         reach_dist_thres: float,
@@ -91,6 +92,7 @@ class PickStateMachine:
         self.device = device
         self.object_size = object_size
         # initialize state machine
+        self.rest_pose = rest_pose[:, [0, 1, 2, 4, 5, 6, 3]].repeat(num_envs, 1)
         self.sm_dt = torch.full((num_envs,), dt, device=device)
         self.sm_state = torch.full((num_envs,), 0, dtype=torch.int32, device=device)
         self.sm_wait_time = torch.zeros((num_envs,), device=device)
@@ -127,6 +129,7 @@ class PickStateMachine:
         self.des_ee_pose_wp = wp.from_torch(self.des_ee_pose, wp.transform)
         self.des_gripper_state_wp = wp.from_torch(self.des_gripper_state, wp.float32)
         self.offset_wp = wp.from_torch(self.offset, wp.transform)
+        self.rest_pose_wp = wp.from_torch(self.rest_pose, wp.transform)
 
     def reset_idx(self, env_ids: collections.abc.Sequence[int] = None):
         if env_ids is None:
@@ -154,14 +157,14 @@ class PickStateMachine:
 
         # Plan B: Try to grasp the center of the object
         grasp_position_z = torch.where(
-            object_height > OBJECT_HEIGHT_DISPLACEMENT * 2, 
-            grasp_position_z - OBJECT_HEIGHT_DISPLACEMENT, 
-            grasp_position_z
+            object_height > OBJECT_HEIGHT_DISPLACEMENT * 2,
+            grasp_position_z - OBJECT_HEIGHT_DISPLACEMENT,
+            grasp_position_z,
         )
         grasp_position_z = torch.where(
-            object_height > self.gripper_length * 2, 
-            object_height - self.gripper_length, 
-            grasp_position_z
+            object_height > self.gripper_length * 2,
+            object_height - self.gripper_length,
+            grasp_position_z,
         )
 
         # ensure grasping height higher than table
@@ -289,6 +292,7 @@ class PickStateMachine:
                 object_pose_wp,
                 object_vel_wp,
                 ee_pose_wp,
+                self.rest_pose_wp,
                 final_object_pose_wp,
                 pose_angle_wp,
                 self.des_ee_pose_wp,
@@ -323,6 +327,7 @@ def get_length(vec: wp.vec3) -> float:
 def get_offset(vec1: wp.vec3, vec2: wp.vec3) -> wp.vec3:
     return wp.abs(vec1 - vec2)
 
+
 @wp.func
 def get_z_offset(vec1: wp.vec3, vec2: wp.vec3) -> float:
     return wp.abs(vec1[2] - vec2[2])
@@ -348,14 +353,14 @@ def print_debug_information(
     grasp_pose: wp.transform,
 ):
     wp.printf(
-        "offset = [%.4f, %.4f, %.4f] / %.4f, ",
+        "Offset = [%.4f, %.4f, %.4f] / %.4f, ",
         offset_object_ee[0],
         offset_object_ee[1],
         offset_object_ee[2],
         get_length(offset_object_ee),
     )
     wp.printf(
-        "object pos [%.4f %.4f %.4f] vel [%.4f %.4f %.4f], ",
+        "Object Pos [%.4f %.4f %.4f] Vel [%.4f %.4f %.4f], ",
         object_pose[0],
         object_pose[1],
         object_pose[2],
@@ -364,13 +369,13 @@ def print_debug_information(
         object_vel[2],
     )
     wp.printf(
-        "ee pos [%.4f %.4f %.4f], ",
+        "EEF Pos [%.4f %.4f %.4f], ",
         ee_pose[0],
         ee_pose[1],
         ee_pose[2],
     )
     wp.printf(
-        "grasp_pos [%.4f %.4f %.4f], ",
+        "Grasp Pos [%.4f %.4f %.4f], ",
         grasp_pose[0],
         grasp_pose[1],
         grasp_pose[2],
@@ -386,6 +391,7 @@ def infer_state_machine(
     object_pose: wp.array(dtype=wp.transform),
     object_vel: wp.array(dtype=wp.vec3),
     ee_pose: wp.array(dtype=wp.transform),
+    rest_pose: wp.array(dtype=wp.transform),
     final_object_pose: wp.array(dtype=wp.transform),
     pose_angle: wp.array(dtype=float),
     des_ee_pose: wp.array(dtype=wp.transform),
@@ -402,9 +408,18 @@ def infer_state_machine(
     state = sm_state[tid]
     # decide next state
     if state == PickSmState.REST:
-        print("REST")
+        wp.printf(
+            "REST EEF Pose [%.4f %.4f %.4f %.4f %.4f %.4f %.4f]\n",
+            ee_pose[tid][0],
+            ee_pose[tid][1],
+            ee_pose[tid][2],
+            ee_pose[tid][3],
+            ee_pose[tid][4],
+            ee_pose[tid][5],
+            ee_pose[tid][6],
+        )
         gripper_state[tid] = GripperState.OPEN
-        des_ee_pose[tid] = final_object_pose[tid]
+        des_ee_pose[tid] = rest_pose[tid]
         dist_object_robot = get_length(wp.transform_get_translation(grasp_pose[tid]))
         if (
             sm_wait_time[tid] >= PickSmWaitTime.REST
@@ -432,7 +447,7 @@ def infer_state_machine(
             object_pose[tid],
             object_vel[tid],
             ee_pose[tid],
-            grasp_pose[tid]
+            grasp_pose[tid],
         )
         wp.printf(
             "thres: [%.4f, %.4f, %.4f]\n",
@@ -459,7 +474,7 @@ def infer_state_machine(
         des_ee_pose[tid] = grasp_pose[tid]
 
         # Debug information
-        wp.printf("APPROACH_OBJECT\n")
+        print("APPROACH_OBJECT")
         if sm_wait_time[tid] >= PickSmWaitTime.APPROACH_OBJECT:
             sm_state[tid] = PickSmState.GRASP_OBJECT
             sm_wait_time[tid] = 0.0
