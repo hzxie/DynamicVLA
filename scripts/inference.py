@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-16 22:00:52
+# @Last Modified at: 2025-07-17 19:51:36
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -17,6 +17,7 @@ import uuid
 
 import numpy as np
 import torch
+import torchvision.transforms.v2.functional as F
 import zmq
 import zmq.utils.monitor
 
@@ -92,11 +93,11 @@ def get_vla_model(model_name, pretrained_model):
     return vla_model
 
 
-def get_transformed_observation(observation, rotation, device="cuda"):
+def get_transformed_observation(observation, rotation, feat_cfg, device="cuda"):
     images = {
         k: v.astype(np.float32) / 255.0
         for k, v in observation.items()
-        if k.startswith("observation.images.")
+        if k.startswith("observation.images.") and k in feat_cfg
     }
     ee_pose = observation["observation.state"]["end_effector"]
     ee_pose = np.concatenate(
@@ -110,7 +111,10 @@ def get_transformed_observation(observation, rotation, device="cuda"):
 
     return {
         **{
-            k: torch.from_numpy(v).permute(0, 3, 1, 2).to(device)
+            k: F.resize(
+                torch.from_numpy(v).permute(0, 3, 1, 2).to(device),
+                feat_cfg[k].shape[-2:],
+            )
             for k, v in images.items()
         },
         "observation.state": torch.from_numpy(ee_pose).to(device),
@@ -126,11 +130,18 @@ def get_action(vla_model, observation, rotation, use_delta_action):
             logging.warning("Ingoring observation without key: %s" % ifk)
             return None
 
-    observation = get_transformed_observation(observation, rotation)
+    observation = get_transformed_observation(
+        observation, rotation, vla_model.config.input_features
+    )
     # Update the state every chunk_size steps
     if _count % vla_model.config.chunk_size == 0:
         _state = observation["observation.state"].cpu().numpy()
         setattr(get_action, "state", _state)
+
+    setattr(get_action, "count", _count + 1)
+    # Skip the first few steps to allow model to warm up
+    if _count < 5:
+        return None
 
     action = vla_model.select_action(observation).cpu().numpy()
     if use_delta_action:
@@ -141,7 +152,6 @@ def get_action(vla_model, observation, rotation, use_delta_action):
     ee_quat = utils.helpers.get_quaternion(action[:, 3:-1], rotation)
     gripper = action[:, -1:]
     action = np.concatenate([ee_pos, ee_quat, gripper], axis=-1)
-    setattr(get_action, "count", _count + 1)
     return action
 
 

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-16 17:35:11
+# @Last Modified at: 2025-07-17 14:17:29
 # @Email:  root@haozhexie.com
 
 import json
@@ -13,6 +13,7 @@ import os
 import pathlib
 
 import av
+import math
 import numpy as np
 import scipy.spatial.transform
 from lerobot.common.datasets.lerobot_dataset import LeRobotDatasetMetadata
@@ -50,6 +51,27 @@ def get_formatted_big_number(num: int, precision: int = 0) -> str:
     return num
 
 
+def get_axis_angle_from_quaternion(quat, scalar_first=True):
+    # Ref: https://github.com/ARISE-Initiative/robosuite/blob/eafb81f54ffc104f905ee48a16bb15f059176ad3/robosuite/utils/transform_utils.py#L490C1-L512C55
+    assert quat.ndim == 2 and quat.shape[1] == 4
+    if scalar_first:
+        quat = quat[:, [1, 2, 3, 0]]  # wxyz to xyzw
+
+    # Clamp w (quat[:, 3]) to [-1.0, 1.0]
+    w = np.clip(quat[:, 3], -1.0, 1.0)
+    den = np.sqrt(1.0 - w * w)
+
+    # Angle part in radians
+    angles = 2.0 * np.arccos(w)
+    # Avoid division by zero
+    zero_mask = den < 1e-8
+
+    # Normalize axis and multiply by angle
+    axis = np.zeros_like(quat[:, :3])
+    axis[~zero_mask] = quat[~zero_mask, :3] / den[~zero_mask, np.newaxis]
+    return axis * angles[:, np.newaxis]
+
+
 def get_rotation_vector(quat, format="quat", scalar_first=True):
     if format == "quat":
         return quat.astype(np.float32)
@@ -60,11 +82,13 @@ def get_rotation_vector(quat, format="quat", scalar_first=True):
             .astype(np.float32)
         )
     elif format == "rotvec":
-        return (
-            scipy.spatial.transform.Rotation.from_quat(quat, scalar_first=scalar_first)
-            .as_rotvec()
-            .astype(np.float32)
-        )
+        # return (
+        #     scipy.spatial.transform.Rotation.from_quat(quat, scalar_first=scalar_first)
+        #     .as_rotvec()
+        #     .astype(np.float32)
+        # )
+        # This implementation is aligned with LIBERO dataset
+        return get_axis_angle_from_quaternion(quat, scalar_first).astype(np.float32)
     else:
         raise ValueError(
             "Unsupported format: %s. Use 'quat', 'euler', or 'rotvec'." % format
@@ -118,6 +142,7 @@ def get_policy(
     policy_name: str,
     dataset_metadata: LeRobotDatasetMetadata,
     img_size: tuple[int, int] | None = None,
+    chunk_size: int | None = None,
     required_features: list[str] | None = None,
 ) -> PreTrainedPolicy:
     features = dataset_to_policy_features(dataset_metadata.features)
@@ -135,6 +160,7 @@ def get_policy(
         policy_name,
         input_features=input_features,
         output_features=output_features,
+        chunk_size=chunk_size,
         img_size=img_size,
     )
 
@@ -192,6 +218,7 @@ def get_policy_cfg(
     input_features: dict = {},
     output_features: dict = {},
     img_size: tuple[int, int] | None = None,
+    chunk_size: int | None = None,
     cfg_file: pathlib.Path | str | None = None,
 ) -> PreTrainedConfig:
     if cfg_file is not None and os.path.exists(cfg_file):
@@ -231,6 +258,12 @@ def get_policy_cfg(
         )
     else:
         raise ValueError(f"Unknown policy: {policy_name}")
+
+    if chunk_size is not None:
+        logging.info(
+            "Setting chunk size to %d for policy %s." % (chunk_size, policy_name)
+        )
+        policy_cfg.chunk_size = chunk_size
 
     return policy_cfg
 

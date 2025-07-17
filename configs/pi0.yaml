@@ -2,7 +2,6 @@
 CONST:
   EXP_NAME: null
   N_WORKERS: 8
-  POLICY_NAME: "pi0"
 
 DATASET:
   NAME: "lerobot/hzxie/dynamic-objects"
@@ -15,6 +14,10 @@ DATASET:
     - "observation.images.side_cam"
     - "observation.state"
     - "action"
+
+POLICY:
+  NAME: "pi0"
+  CHUNK_SIZE: 
 
 DIR:
   OUTPUT: "./runs"
