@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-17 14:14:57
+# @Last Modified at: 2025-07-18 10:37:47
 # @Email:  root@haozhexie.com
 
 import logging
@@ -28,7 +28,7 @@ def test(cfg, test_data_loader=None, policy=None):
             required_features=cfg.DATASET.REQUIRED_FEATURES,
             image_transforms=utils.datasets.ImageTransforms(cfg.DATASET.IMG_SIZE),
             delta_timestamps=utils.helpers.get_delta_timestamps(
-                cfg.POLICY.NAME, cfg.DATASET.DELTA_TIMESTAMPS
+                cfg.POLICY.NAME, cfg.POLICY.CHUNK_SIZE, cfg.DATASET.DELTA_TIMESTAMPS
             ),
         )
         test_data_loader = torch.utils.data.DataLoader(

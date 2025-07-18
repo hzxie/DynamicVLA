@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-17 19:38:30
+# @Last Modified at: 2025-07-18 10:55:01
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -262,6 +262,8 @@ def _get_action_tensor(action, num_envs, device):
 
 
 def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_position):
+    import configs.robot_cfg
+
     sim_status = 0
     last_action = None
     cam_views = []
@@ -306,7 +308,9 @@ def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_positi
         # If no action is received, use the previous action to make the
         # simulation continuous
         if last_action is None:
-            robot_name = "franka"  # TODO: get robot name from env
+            robot_name = configs.robot_cfg.get_robot_name(
+                env.unwrapped.scene["robot"].cfg.spawn.usd_path
+            )
             last_action = torch.cat(
                 [
                     sim.get_rest_pose(robot_name, env.unwrapped.device).repeat(

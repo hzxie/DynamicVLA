@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-16 22:06:18
+# @Last Modified at: 2025-07-18 16:02:53
 # @Email:  root@haozhexie.com
 #
 # Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/convert_libero_data_to_lerobot.py
@@ -228,7 +228,7 @@ def is_video_valid(video_path, video_length):
 def main(repo_id, input_dir, rot_fmt, push_to_hub):
     output_dir = lerobot.common.constants.HF_LEROBOT_HOME / repo_id
     # Listing all episodes in the input directory
-    episodes = sorted([f for f in os.listdir(input_dir) if f.endswith(".h5")])[:5000]
+    episodes = sorted([f for f in os.listdir(input_dir) if f.endswith(".h5")])
     if not episodes:
         logging.error("No episodes found in the input directory: %s" % input_dir)
         sys.exit(2)

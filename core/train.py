@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-17 19:54:02
+# @Last Modified at: 2025-07-18 10:37:38
 # @Email:  root@haozhexie.com
 
 import logging
@@ -40,7 +40,7 @@ def train(cfg):
             cfg.DATASET.IMG_SIZE, cfg.TRAIN.IMAGE_TRANSFORMS
         ),
         delta_timestamps=utils.helpers.get_delta_timestamps(
-            cfg.POLICY.NAME, cfg.DATASET.DELTA_TIMESTAMPS
+            cfg.POLICY.NAME, cfg.POLICY.CHUNK_SIZE, cfg.DATASET.DELTA_TIMESTAMPS
         ),
     )
     test_dataset = utils.datasets.get_dataset(
@@ -51,7 +51,7 @@ def train(cfg):
         required_features=cfg.DATASET.REQUIRED_FEATURES,
         image_transforms=utils.datasets.ImageTransforms(cfg.DATASET.IMG_SIZE),
         delta_timestamps=utils.helpers.get_delta_timestamps(
-            cfg.POLICY.NAME, cfg.DATASET.DELTA_TIMESTAMPS
+            cfg.POLICY.NAME, cfg.POLICY.CHUNK_SIZE, cfg.DATASET.DELTA_TIMESTAMPS
         ),
     )
     train_sampler = None

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-17 14:17:29
+# @Last Modified at: 2025-07-18 10:46:23
 # @Email:  root@haozhexie.com
 
 import json
@@ -13,9 +13,9 @@ import os
 import pathlib
 
 import av
-import math
 import numpy as np
 import scipy.spatial.transform
+import torch
 from lerobot.common.datasets.lerobot_dataset import LeRobotDatasetMetadata
 from lerobot.common.datasets.utils import dataset_to_policy_features
 from lerobot.common.policies.diffusion.configuration_diffusion import DiffusionConfig
@@ -119,10 +119,12 @@ def get_quaternion(rotation_vector, format="rotvec", scalar_first=True):
 
 
 def get_delta_timestamps(
-    policy_name: str, dataset_cfg: dict[str, list[float]] | None = None
+    policy_name: str,
+    chunk_size: int | None = None,
+    dataset_cfg: dict[str, list[float]] | None = None,
 ) -> dict[str, list] | None:
-    # Ref: lerobot.common.datasets.factory.resolve_delta_timestamps
-    policy_cfg = get_policy_cfg(policy_name)
+    # Ref: lerobot.common.datasets.factorfvy.resolve_delta_timestamps
+    policy_cfg = get_policy_cfg(policy_name, chunk_size=chunk_size)
     delta_timestamps = {}
     if policy_cfg.reward_delta_indices is not None:
         delta_timestamps["reward"] = policy_cfg.reward_delta_indices
@@ -240,21 +242,30 @@ def get_policy_cfg(
             if feature.type == FeatureType.VISUAL:
                 feature.shape = (feature.shape[0], img_size[0], img_size[1])
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     if policy_name == "diffusion":
         policy_cfg = DiffusionConfig(
-            input_features=input_features, output_features=output_features
+            input_features=input_features,
+            output_features=output_features,
+            device=device,
         )
     elif policy_name == "pi0":
         policy_cfg = PI0Config(
-            input_features=input_features, output_features=output_features
+            input_features=input_features,
+            output_features=output_features,
+            device=device,
         )
     elif policy_name == "pi0fast":
         policy_cfg = PI0FASTConfig(
-            input_features=input_features, output_features=output_features
+            input_features=input_features,
+            output_features=output_features,
+            device=device,
         )
     elif policy_name == "smolvla":
         policy_cfg = SmolVLAConfig(
-            input_features=input_features, output_features=output_features
+            input_features=input_features,
+            output_features=output_features,
+            device=device,
         )
     else:
         raise ValueError(f"Unknown policy: {policy_name}")
