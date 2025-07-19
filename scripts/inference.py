@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-17 19:51:36
+# @Last Modified at: 2025-07-19 22:30:45
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -123,12 +123,18 @@ def get_transformed_observation(observation, rotation, feat_cfg, device="cuda"):
 
 
 def get_action(vla_model, observation, rotation, use_delta_action):
-    _count = getattr(get_action, "count", 0)
+    N_DUMMY_STEPS = 3
+    _count = getattr(get_action, "count", -N_DUMMY_STEPS)
     _state = getattr(get_action, "state", None)
     for ifk in vla_model.config.input_features.keys():
         if ifk not in observation:
             logging.warning("Ingoring observation without key: %s" % ifk)
             return None
+
+    setattr(get_action, "count", _count + 1)
+    # Skip the first few steps to allow model to warm up
+    if _count < 0:
+        return None
 
     observation = get_transformed_observation(
         observation, rotation, vla_model.config.input_features
@@ -137,11 +143,10 @@ def get_action(vla_model, observation, rotation, use_delta_action):
     if _count % vla_model.config.chunk_size == 0:
         _state = observation["observation.state"].cpu().numpy()
         setattr(get_action, "state", _state)
-
-    setattr(get_action, "count", _count + 1)
-    # Skip the first few steps to allow model to warm up
-    if _count < 5:
-        return None
+        # For Debugging
+        # states = getattr(get_action, "states", [])
+        # states.append(_state)
+        # setattr(get_action, "states", states)
 
     action = vla_model.select_action(observation).cpu().numpy()
     if use_delta_action:
@@ -188,11 +193,17 @@ def main(vla_model, vla_weights, rotation, use_delta_action, host, img_port, act
 
         # Determine the instruction from the observation
         if "task" in observation:
+            # For Debugging
+            # states = getattr(get_action, "states", [])
+            # if states:
+            #     np.save("runs/evaluation/states.npy", np.concatenate(states, axis=0))
             instruction = observation["task"]
             logging.info("Received new task: %s" % instruction)
             # Reset the model with the new instruction
+            action = None
             vla_model.reset()
-            setattr(get_action, "count", 0)
+            if hasattr(get_action, "count"):
+                delattr(get_action, "count")
         elif instruction is not None:
             observation["task"] = instruction
         else:
