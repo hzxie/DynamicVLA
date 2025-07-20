@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-18 10:55:01
+# @Last Modified at: 2025-07-20 16:31:03
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -67,6 +67,12 @@ def get_test_env(
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=cfg["seed"])
     # Reset environment at start
     env.reset(seed=cfg["seed"])
+    # Increase the fictional frictions of the object
+    sim.set_object_material(
+        env.unwrapped.scene["object"],
+        sim.get_object_size("/World/envs/env_0/Object", env.unwrapped.device),
+        n_envs=env.unwrapped.num_envs,
+    )
 
     # Enable Path Tracing
     if path_tracing:

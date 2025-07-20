@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-18 10:46:23
+# @Last Modified at: 2025-07-20 10:41:16
 # @Email:  root@haozhexie.com
 
 import json
@@ -51,7 +51,38 @@ def get_formatted_big_number(num: int, precision: int = 0) -> str:
     return num
 
 
-def get_axis_angle_from_quaternion(quat, scalar_first=True):
+def get_rotation_vector(quat, format="quat", scalar_first=True):
+    if format == "quat":
+        return quat.astype(np.float32)
+    elif format == "euler":
+        return _get_euler_angle_from_quaternion(quat, scalar_first).astype(np.float32)
+    elif format == "rotvec":
+        # return (
+        #     scipy.spatial.transform.Rotation.from_quat(quat, scalar_first=scalar_first)
+        #     .as_rotvec()
+        #     .astype(np.float32)
+        # )
+        # This implementation is aligned with LIBERO dataset
+        return _get_axis_angle_from_quaternion(quat, scalar_first).astype(np.float32)
+    else:
+        raise ValueError(
+            "Unsupported format: %s. Use 'quat', 'euler', or 'rotvec'." % format
+        )
+
+
+def _get_euler_angle_from_quaternion(quat, scalar_first=True):
+    euler_angles = (
+        scipy.spatial.transform.Rotation.from_quat(quat, scalar_first=scalar_first)
+        .as_euler("xyz", degrees=False)
+        .astype(np.float32)
+    )
+    # Make euler angles in the range [0, 2 * pi) for rX and rZ -> Make the values continuous
+    euler_angles[..., [0, 2]] = np.mod(euler_angles[..., [0, 2]], 2 * np.pi)
+
+    return euler_angles
+
+
+def _get_axis_angle_from_quaternion(quat, scalar_first=True):
     # Ref: https://github.com/ARISE-Initiative/robosuite/blob/eafb81f54ffc104f905ee48a16bb15f059176ad3/robosuite/utils/transform_utils.py#L490C1-L512C55
     assert quat.ndim == 2 and quat.shape[1] == 4
     if scalar_first:
@@ -70,29 +101,6 @@ def get_axis_angle_from_quaternion(quat, scalar_first=True):
     axis = np.zeros_like(quat[:, :3])
     axis[~zero_mask] = quat[~zero_mask, :3] / den[~zero_mask, np.newaxis]
     return axis * angles[:, np.newaxis]
-
-
-def get_rotation_vector(quat, format="quat", scalar_first=True):
-    if format == "quat":
-        return quat.astype(np.float32)
-    elif format == "euler":
-        return (
-            scipy.spatial.transform.Rotation.from_quat(quat, scalar_first=scalar_first)
-            .as_euler("xyz", degrees=False)
-            .astype(np.float32)
-        )
-    elif format == "rotvec":
-        # return (
-        #     scipy.spatial.transform.Rotation.from_quat(quat, scalar_first=scalar_first)
-        #     .as_rotvec()
-        #     .astype(np.float32)
-        # )
-        # This implementation is aligned with LIBERO dataset
-        return get_axis_angle_from_quaternion(quat, scalar_first).astype(np.float32)
-    else:
-        raise ValueError(
-            "Unsupported format: %s. Use 'quat', 'euler', or 'rotvec'." % format
-        )
 
 
 def get_quaternion(rotation_vector, format="rotvec", scalar_first=True):

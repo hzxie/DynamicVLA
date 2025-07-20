@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-19 22:30:45
+# @Last Modified at: 2025-07-20 16:59:13
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -123,7 +123,7 @@ def get_transformed_observation(observation, rotation, feat_cfg, device="cuda"):
 
 
 def get_action(vla_model, observation, rotation, use_delta_action):
-    N_DUMMY_STEPS = 3
+    N_DUMMY_STEPS = 5
     _count = getattr(get_action, "count", -N_DUMMY_STEPS)
     _state = getattr(get_action, "state", None)
     for ifk in vla_model.config.input_features.keys():

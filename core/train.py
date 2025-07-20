@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-18 10:37:38
+# @Last Modified at: 2025-07-19 00:55:41
 # @Email:  root@haozhexie.com
 
 import logging
@@ -89,8 +89,10 @@ def train(cfg):
         cfg.POLICY.CHUNK_SIZE,
         cfg.DATASET.REQUIRED_FEATURES,
     )
-    logging.info("Using policy: %s with config %s" % (cfg.POLICY.NAME, policy.config))
     if utils.distributed.is_master():
+        logging.info(
+            "Using policy: %s with config %s" % (cfg.POLICY.NAME, policy.config)
+        )
         logging.info(
             "#Parameters: %s/%s"
             % (

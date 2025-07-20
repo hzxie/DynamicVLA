@@ -6,7 +6,7 @@ scene:
   target_object:
     categories:
       - can
-    moving_time: [0.05, 2]
+    moving_time: 
   other_objects:
     n_objects: 0
     categories:

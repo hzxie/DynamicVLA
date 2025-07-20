@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-17 19:33:39
+# @Last Modified at: 2025-07-20 17:00:42
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -403,7 +403,7 @@ def get_state_machine(task, robot, sm_args={}):
     return STATE_MACHINES[task](**sm_args)
 
 
-def _get_object_size(object_path, device="cpu"):
+def get_object_size(object_path, device="cpu"):
     import omni.usd
     import pxr
 
@@ -425,6 +425,7 @@ def get_rest_pose(robot, device="cpu"):
     if robot == "franka":
         return torch.tensor(
             [[0.465906, 0.0, 0.382970, 0.008583, 0.921765, 0.020404, 0.387116]],
+            # [[0.3, 0.0, 0.3, 0.0, 0.0, 1.0, 0.0]],
             dtype=torch.float32,
             device=device,
         )
@@ -489,6 +490,22 @@ def _get_reach_dist_threshold(robot):
         return REACHABLE_RANGE[robot]
     else:
         raise ValueError("Unknown robot: %s." % robot)
+
+
+def set_object_material(target_object, object_size, n_envs=1):
+    # adjust object initial height
+    root_state = target_object.data.default_root_state.clone()
+    root_state[:, 2] += object_size[:, 2] / 2
+    target_object.write_root_pose_to_sim(root_state[:, :7])
+
+    # adjust object physical material
+    materials = target_object.root_physx_view.get_material_properties()
+    materials[..., 0] = 0.9  # Static friction.
+    # materials[..., 1] = 0.1  # Dynamic friction.
+    materials[..., 1] = 1.0  # Restitution
+    target_object.root_physx_view.set_material_properties(
+        materials, torch.arange(n_envs)
+    )
 
 
 def get_curr_state(
@@ -661,6 +678,7 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
         rep.settings.set_render_pathtraced()
 
     # Initialize the state machine
+    object_size = get_object_size("/World/envs/env_0/Object", env.unwrapped.device)
     state_machine = get_state_machine(
         task_cfg["task_name"],
         task_cfg["robot"],
@@ -668,27 +686,14 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
             "dt": env_cfg.sim.dt * env_cfg.decimation,
             "num_envs": env.unwrapped.num_envs,
             "device": env.unwrapped.device,
-            "object_size": _get_object_size(
-                "/World/envs/env_0/Object", env.unwrapped.device
-            ),
+            "object_size": object_size,
             "gripper_length": configs.robot_cfg.get_gripper_length(task_cfg["robot"]),
         },
     )
 
-    # adjust object height
-    root_state = env.unwrapped.scene["object"].data.default_root_state.clone()
-    object_size = _get_object_size("/World/envs/env_0/Object", env.unwrapped.device)
-    root_state[:, 2] += object_size[:, 2] / 2
-    env.unwrapped.scene["object"].write_root_pose_to_sim(root_state[:, :7])
-
-    # adjust object physical material
-    materials = env.unwrapped.scene["object"].root_physx_view.get_material_properties()
-    materials[..., 0] = 0.9  # Static friction.
-    materials[..., 1] = 0.1  # Dynamic friction.
-    materials[..., 1] = 1.0  # Restitution
-    env_ids = torch.arange(env.unwrapped.num_envs)
-    env.unwrapped.scene["object"].root_physx_view.set_material_properties(
-        materials, env_ids
+    # Increase the fictional frictions of the object
+    set_object_material(
+        env.unwrapped.scene["object"], object_size, n_envs=env.unwrapped.num_envs
     )
 
     # Simulation loop
