@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-20 10:41:16
+# @Last Modified at: 2025-07-22 21:11:13
 # @Email:  root@haozhexie.com
 
 import json
@@ -103,23 +103,23 @@ def _get_axis_angle_from_quaternion(quat, scalar_first=True):
     return axis * angles[:, np.newaxis]
 
 
-def get_quaternion(rotation_vector, format="rotvec", scalar_first=True):
+def get_quaternion(rotation, format="rotvec", scalar_first=True):
     if format == "rotvec":
         return (
-            scipy.spatial.transform.Rotation.from_rotvec(rotation_vector)
+            scipy.spatial.transform.Rotation.from_rotvec(rotation)
             .as_quat(scalar_first=scalar_first)
             .astype(np.float32)
         )
     elif format == "euler":
+        # Align with the convention in _get_euler_angle_from_quaternion (inverse)
+        rotation[..., [0, 2]] = (rotation[..., [0, 2]] + np.pi) % (2 * np.pi) - np.pi
         return (
-            scipy.spatial.transform.Rotation.from_euler(
-                "xyz", rotation_vector, degrees=False
-            )
+            scipy.spatial.transform.Rotation.from_euler("xyz", rotation, degrees=False)
             .as_quat(scalar_first=scalar_first)
             .astype(np.float32)
         )
     elif format == "quat":
-        return rotation_vector.astype(np.float32)
+        return rotation.astype(np.float32)
     else:
         raise ValueError(
             "Unsupported format: %s. Use 'rotvec', 'euler', or 'quat'." % format

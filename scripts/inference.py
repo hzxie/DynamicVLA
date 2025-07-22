@@ -4,13 +4,15 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-20 16:59:13
+# @Last Modified at: 2025-07-22 20:15:13
 # @Email:  root@haozhexie.com
 
 import argparse
+import datetime
 import logging
 import os
 import pathlib
+import pickle
 import sys
 import time
 import uuid
@@ -122,7 +124,7 @@ def get_transformed_observation(observation, rotation, feat_cfg, device="cuda"):
     }
 
 
-def get_action(vla_model, observation, rotation, use_delta_action):
+def get_action(vla_model, observation, rotation, use_delta_action, debug=False):
     N_DUMMY_STEPS = 5
     _count = getattr(get_action, "count", -N_DUMMY_STEPS)
     _state = getattr(get_action, "state", None)
@@ -143,10 +145,10 @@ def get_action(vla_model, observation, rotation, use_delta_action):
     if _count % vla_model.config.chunk_size == 0:
         _state = observation["observation.state"].cpu().numpy()
         setattr(get_action, "state", _state)
-        # For Debugging
-        # states = getattr(get_action, "states", [])
-        # states.append(_state)
-        # setattr(get_action, "states", states)
+        if debug:
+            states = getattr(get_action, "states", [])
+            states.append(_state)
+            setattr(get_action, "states", states)
 
     action = vla_model.select_action(observation).cpu().numpy()
     if use_delta_action:
@@ -160,7 +162,26 @@ def get_action(vla_model, observation, rotation, use_delta_action):
     return action
 
 
-def main(vla_model, vla_weights, rotation, use_delta_action, host, img_port, act_port):
+def dump_vla_states(vla_name, states, actions, output_dir):
+    output_path = os.path.join(
+        output_dir,
+        "%s-%s.pkl" % (vla_name, datetime.datetime.now().strftime("%m%d-%H%M%S")),
+    )
+    with open(output_path, "wb") as fp:
+        pickle.dump({"state": states, "action": actions}, fp)
+
+
+def main(
+    vla_model,
+    vla_weights,
+    rotation,
+    use_delta_action,
+    host,
+    img_port,
+    act_port,
+    n_total_tests,
+    output_dir,
+):
     # Initialize the VLA model
     logging.info("Loading VLA model: %s with weights: %s" % (vla_model, vla_weights))
     vla_model = get_vla_model(model_name=vla_model, pretrained_model=vla_weights)
@@ -185,22 +206,36 @@ def main(vla_model, vla_weights, rotation, use_delta_action, host, img_port, act
             time.sleep(5)
 
     logging.info("Starting evaluation the VLA model ...")
+    n_tests = 0
+    actions = []
     instruction = None
     while True:
+        if n_tests > n_total_tests:
+            logging.info("Reached the maximum number of tests: %d" % n_total_tests)
+            break
+
         observation = get_latest_observation(obs_socket)
         if observation is None:
             continue
 
         # Determine the instruction from the observation
         if "task" in observation:
-            # For Debugging
-            # states = getattr(get_action, "states", [])
-            # if states:
-            #     np.save("runs/evaluation/states.npy", np.concatenate(states, axis=0))
+            n_tests += 1
             instruction = observation["task"]
-            logging.info("Received new task: %s" % instruction)
+            logging.info("[Test%02d] Received new task: %s" % (n_tests, instruction))
+            print(n_tests, len(actions), len(getattr(get_action, "states", [])))
+            # Save the debug states/actions
+            if output_dir and actions:
+                dump_vla_states(
+                    os.path.basename(vla_weights),
+                    getattr(get_action, "states", []),
+                    actions,
+                    output_dir,
+                )
+                setattr(get_action, "states", [])
             # Reset the model with the new instruction
             action = None
+            actions = []
             vla_model.reset()
             if hasattr(get_action, "count"):
                 delattr(get_action, "count")
@@ -210,10 +245,13 @@ def main(vla_model, vla_weights, rotation, use_delta_action, host, img_port, act
             continue
 
         assert "task" in observation, "Observation must contain 'task' key"
-        action = get_action(vla_model, observation, rotation, use_delta_action)
+        action = get_action(
+            vla_model, observation, rotation, use_delta_action, output_dir is not None
+        )
         if action is not None:
             act_socket.send_pyobj(action, flags=zmq.NOBLOCK)
             logging.debug("Sending action: %s" % (np.round(action, 2),))
+            actions.append(action)
 
 
 if __name__ == "__main__":
@@ -231,22 +269,39 @@ if __name__ == "__main__":
         "--act_port", default=3188, type=int, help="Port for action stream"
     )
     parser.add_argument(
-        "--model", type=str, required=True, help="The name of VLA model to use"
+        "-m", "--model", type=str, required=True, help="The name of VLA model to use"
     )
     parser.add_argument(
+        "-r",
         "--rotation",
         type=str,
         default="quat",
     )
     parser.add_argument(
+        "-d",
         "--delta",
         action="store_true",
     )
     parser.add_argument(
+        "-p",
         "--weights",
         type=str,
         required=True,
         help="The path to the pretrained VLA model",
+    )
+    parser.add_argument(
+        "-n",
+        "--n_tests",
+        type=int,
+        default=10,
+        help="The number of tests to run",
+    )
+    parser.add_argument(
+        "-o",
+        "--output_dir",
+        type=str,
+        default=None,
+        help="The directory to save the VLA's output",
     )
     args = parser.parse_args()
     main(
@@ -257,4 +312,6 @@ if __name__ == "__main__":
         args.host,
         args.img_port,
         args.act_port,
+        args.n_tests,
+        args.output_dir,
     )
