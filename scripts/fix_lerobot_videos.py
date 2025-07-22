@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-25 18:53:11
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-15 20:31:00
+# @Last Modified at: 2025-07-23 06:44:51
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -15,18 +15,18 @@ import pathlib
 import av
 import h5py
 import huggingface_hub.constants
-import lerobot.common.datasets.lerobot_dataset
-import lerobot.common.datasets.utils
+import lerobot.datasets.lerobot_dataset
+import lerobot.datasets.utils
 import torchcodec.decoders
 from PIL import Image
 from tqdm import tqdm
 
 
 def fix_lerobot_video(episode_index, video_path, video_length, h5_dir, lerobot_dir):
-    episode_info = lerobot.common.datasets.utils.load_json(
+    episode_info = lerobot.datasets.utils.load_json(
         pathlib.Path(os.path.join(lerobot_dir, "meta", "info.json"))
     )
-    episode_meta = lerobot.common.datasets.utils.load_jsonlines(
+    episode_meta = lerobot.datasets.utils.load_jsonlines(
         pathlib.Path(os.path.join(lerobot_dir, "meta", "camera.jsonl"))
     )
     episode_meta = next(em for em in episode_meta if em["episode_idx"] == episode_index)
@@ -35,7 +35,7 @@ def fix_lerobot_video(episode_index, video_path, video_length, h5_dir, lerobot_d
 
     CAM_KEY = "side_cam_rgb"
     assert env_states[CAM_KEY].shape[0] == video_length
-    # Ref: lerobot.common.datasets.video_utils.encode_video_frames
+    # Ref: lerobot.datasets.video_utils.encode_video_frames
     with av.open(str(video_path), "w") as output:
         output_stream = output.add_stream(
             "libsvtav1", episode_info["fps"], options={"g": "2", "crf": "30"}
@@ -57,7 +57,7 @@ def fix_lerobot_video(episode_index, video_path, video_length, h5_dir, lerobot_d
 
 def main(repo_id, h5_dir):
     output_dir = os.path.join(huggingface_hub.constants.HF_HOME, "lerobot", repo_id)
-    lerobot_dataset = lerobot.common.datasets.lerobot_dataset.LeRobotDataset(
+    lerobot_dataset = lerobot.datasets.lerobot_dataset.LeRobotDataset(
         repo_id=repo_id,
         root=output_dir,
     )

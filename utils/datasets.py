@@ -4,17 +4,17 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-17 16:10:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-16 11:45:27
+# @Last Modified at: 2025-07-23 06:45:09
 # @Email:  root@haozhexie.com
 
 import logging
 import pathlib
 import typing
 
-import lerobot.common.constants
-import lerobot.common.datasets.compute_stats
-import lerobot.common.datasets.lerobot_dataset
-import lerobot.common.datasets.utils
+import lerobot.constants
+import lerobot.datasets.compute_stats
+import lerobot.datasets.lerobot_dataset
+import lerobot.datasets.utils
 import numpy as np
 import pyarrow.parquet as pq
 import torch
@@ -146,7 +146,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self.root = (
             pathlib.Path(root)
             if root
-            else lerobot.common.constants.HF_LEROBOT_HOME / repo_id
+            else lerobot.constants.HF_LEROBOT_HOME / repo_id
         )
         self.delta_action = delta_action
         self.required_features = required_features
@@ -156,7 +156,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self.delta_indices = None
 
         # Load metadata
-        self.meta = lerobot.common.datasets.lerobot_dataset.LeRobotDatasetMetadata(
+        self.meta = lerobot.datasets.lerobot_dataset.LeRobotDatasetMetadata(
             self.repo_id, self.root
         )
         if self.episodes is None:
@@ -179,11 +179,11 @@ class LeRobotDataset(torch.utils.data.Dataset):
             }
 
         # Compute dataset stats
-        self.stats = lerobot.common.datasets.compute_stats.aggregate_stats(
+        self.stats = lerobot.datasets.compute_stats.aggregate_stats(
             [self.meta.episodes_stats[ep_idx] for ep_idx in self.episodes]
         )
         # Load data indices
-        self.episode_data_index = lerobot.common.datasets.utils.get_episode_data_index(
+        self.episode_data_index = lerobot.datasets.utils.get_episode_data_index(
             self.meta.episodes, self.episodes
         )
         self.episode_data_index["length"] = (
@@ -196,7 +196,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
             for key in self.meta.features:
                 if key not in self.required_features:
                     continue
-                # Ref: lerobot.common.datasets.factory.resolve_delta_timestamps
+                # Ref: lerobot.datasets.factory.resolve_delta_timestamps
                 if key == "next.reward" and "reward" in delta_timestamps:
                     ds_delta_timestamps[key] = [
                         i / self.meta.fps for i in delta_timestamps["reward"]
@@ -210,7 +210,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
                         i / self.meta.fps for i in delta_timestamps["observation"]
                     ]
 
-            self.delta_indices = lerobot.common.datasets.utils.get_delta_indices(
+            self.delta_indices = lerobot.datasets.utils.get_delta_indices(
                 ds_delta_timestamps, self.meta.fps
             )
 
@@ -333,7 +333,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         ep_length: int,
         delta_indices: dict[str, list[int]],
     ) -> tuple[dict[str, list[int | bool]]]:
-        # Ref: lerobot.common.datasets.lerobot_dataset._get_query_indices
+        # Ref: lerobot.datasets.lerobot_dataset._get_query_indices
         query_indices = {
             key: [max(0, min(ep_length - 1, frame_idx + delta)) for delta in delta_idx]
             for key, delta_idx in delta_indices.items()
@@ -366,7 +366,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         current_ts: float,
         query_indices: dict[str, list[int]] | None = None,
     ) -> dict[str, list[float]]:
-        # Ref: lerobot.common.datasets.lerobot_dataset._get_query_timestamps
+        # Ref: lerobot.datasets.lerobot_dataset._get_query_timestamps
         query_timestamps = {}
         for key in self.meta.video_keys:
             if query_indices is not None and key in query_indices:
@@ -381,7 +381,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         episode: dict[str, torch.Tensor | bytes],
         query_timestamps: dict[str, list[float]],
     ) -> dict[str, torch.Tensor]:
-        # Ref: lerobot.common.datasets.lerobot_dataset._query_videos
+        # Ref: lerobot.datasets.lerobot_dataset._query_videos
         videos = {}
         for video_key, query_ts in query_timestamps.items():
             video_decoder = torchcodec.decoders.VideoDecoder(
@@ -397,7 +397,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
     def _get_video_frames(
         self, video_decoder: torchcodec.decoders.VideoDecoder, timestamps: list[float]
     ) -> torch.Tensor:
-        # Ref: lerobot.common.datasets.video_utils.decode_video_frames_torchcodec
+        # Ref: lerobot.datasets.video_utils.decode_video_frames_torchcodec
         loaded_frames = []
         loaded_ts = []
         # convert timestamps to frame indices

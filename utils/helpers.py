@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-22 21:11:13
+# @Last Modified at: 2025-07-23 06:44:51
 # @Email:  root@haozhexie.com
 
 import json
@@ -16,17 +16,17 @@ import av
 import numpy as np
 import scipy.spatial.transform
 import torch
-from lerobot.common.datasets.lerobot_dataset import LeRobotDatasetMetadata
-from lerobot.common.datasets.utils import dataset_to_policy_features
-from lerobot.common.policies.diffusion.configuration_diffusion import DiffusionConfig
-from lerobot.common.policies.diffusion.modeling_diffusion import DiffusionPolicy
-from lerobot.common.policies.pi0.configuration_pi0 import PI0Config
-from lerobot.common.policies.pi0.modeling_pi0 import PI0Policy
-from lerobot.common.policies.pi0fast.configuration_pi0fast import PI0FASTConfig
-from lerobot.common.policies.pi0fast.modeling_pi0fast import PI0FASTPolicy
-from lerobot.common.policies.pretrained import PreTrainedPolicy
-from lerobot.common.policies.smolvla.configuration_smolvla import SmolVLAConfig
-from lerobot.common.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
+from lerobot.datasets.utils import dataset_to_policy_features
+from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
+from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+from lerobot.policies.pi0.configuration_pi0 import PI0Config
+from lerobot.policies.pi0.modeling_pi0 import PI0Policy
+from lerobot.policies.pi0fast.configuration_pi0fast import PI0FASTConfig
+from lerobot.policies.pi0fast.modeling_pi0fast import PI0FASTPolicy
+from lerobot.policies.pretrained import PreTrainedPolicy
+from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
+from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.types import FeatureType, PolicyFeature
 from PIL import Image
@@ -131,7 +131,7 @@ def get_delta_timestamps(
     chunk_size: int | None = None,
     dataset_cfg: dict[str, list[float]] | None = None,
 ) -> dict[str, list] | None:
-    # Ref: lerobot.common.datasets.factorfvy.resolve_delta_timestamps
+    # Ref: lerobot.datasets.factorfvy.resolve_delta_timestamps
     policy_cfg = get_policy_cfg(policy_name, chunk_size=chunk_size)
     delta_timestamps = {}
     if policy_cfg.reward_delta_indices is not None:
@@ -291,7 +291,7 @@ def dump_video(frames, output_path, fps=24):
     if len(frames) == 0:
         return
 
-    # Ref: lerobot.common.datasets.video_utils.encode_video_frames
+    # Ref: lerobot.datasets.video_utils.encode_video_frames
     with av.open(str(output_path), "w") as output:
         output_stream = output.add_stream(
             "libsvtav1", fps, options={"g": "2", "crf": "30"}

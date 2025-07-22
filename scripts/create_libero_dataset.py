@@ -4,7 +4,7 @@
 # @Author: Physical Intelligence Team
 # @Date:   2025-07-11 14:06:55
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-16 12:34:58
+# @Last Modified at: 2025-07-23 06:44:51
 # @Email:  root@haozhexie.com
 
 """
@@ -30,8 +30,8 @@ Running this conversion script will take approximately 30 minutes.
 import os
 import shutil
 
-import lerobot.common.constants
-import lerobot.common.datasets.lerobot_dataset
+import lerobot.constants
+import lerobot.datasets.lerobot_dataset
 import tensorflow_datasets as tfds
 import tyro
 from tqdm import tqdm
@@ -48,7 +48,7 @@ RAW_DATASET_NAMES = [
 
 
 def main(data_dir: str, *, push_to_hub: bool = False):
-    output_path = lerobot.common.constants.HF_LEROBOT_HOME / REPO_NAME
+    output_path = lerobot.constants.HF_LEROBOT_HOME / REPO_NAME
     # Clean up any existing dataset in the output directory
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
@@ -56,7 +56,7 @@ def main(data_dir: str, *, push_to_hub: bool = False):
     # Create LeRobot dataset, define features to store
     # OpenPi assumes that proprio is stored in `state` and actions in `action`
     # LeRobot assumes that dtype of image data is `image`
-    dataset = lerobot.common.datasets.lerobot_dataset.LeRobotDataset.create(
+    dataset = lerobot.datasets.lerobot_dataset.LeRobotDataset.create(
         repo_id=REPO_NAME,
         robot_type="panda",
         fps=10,

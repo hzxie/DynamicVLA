@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-18 16:02:53
+# @Last Modified at: 2025-07-23 06:44:51
 # @Email:  root@haozhexie.com
 #
 # Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/convert_libero_data_to_lerobot.py
@@ -18,9 +18,9 @@ import shutil
 import sys
 
 import h5py
-import lerobot.common.constants
-import lerobot.common.datasets.lerobot_dataset
-import lerobot.common.datasets.utils
+import lerobot.constants
+import lerobot.datasets.lerobot_dataset
+import lerobot.datasets.utils
 import numpy as np
 import torchcodec.decoders
 from tqdm import tqdm
@@ -135,7 +135,7 @@ def create_lerobot_dataset(repo_id, metadata, rot_fmt="quat"):
                 },
             }
 
-    return lerobot.common.datasets.lerobot_dataset.LeRobotDataset.create(
+    return lerobot.datasets.lerobot_dataset.LeRobotDataset.create(
         repo_id=repo_id,
         robot_type=metadata["robot_type"],
         fps=metadata["fps"],
@@ -149,15 +149,6 @@ def get_task_instruction(episode_file_name):
     return utils.instruction_generator.InstructionGenerator.generate_instruction(
         filename=episode_file_name
     )
-
-
-def _get_delta_action(curr_action, curr_state):
-    return np.concatenate(
-        [
-            curr_action[:6] - curr_state[:6],
-            curr_action[6:],
-        ]
-    ).astype(np.float32)
 
 
 def get_episode_frames(episode_path, rot_fmt="quat"):
@@ -226,7 +217,7 @@ def is_video_valid(video_path, video_length):
 
 
 def main(repo_id, input_dir, rot_fmt, push_to_hub):
-    output_dir = lerobot.common.constants.HF_LEROBOT_HOME / repo_id
+    output_dir = lerobot.constants.HF_LEROBOT_HOME / repo_id
     # Listing all episodes in the input directory
     episodes = sorted([f for f in os.listdir(input_dir) if f.endswith(".h5")])
     if not episodes:
@@ -251,7 +242,7 @@ def main(repo_id, input_dir, rot_fmt, push_to_hub):
             overwrite = False
             existing_episodes = [
                 ep["filename"]
-                for ep in lerobot.common.datasets.utils.load_jsonlines(
+                for ep in lerobot.datasets.utils.load_jsonlines(
                     pathlib.Path(os.path.join(output_dir, "meta", "camera.jsonl"))
                 )
             ]
@@ -264,7 +255,7 @@ def main(repo_id, input_dir, rot_fmt, push_to_hub):
         lerobot_dataset = create_lerobot_dataset(repo_id, episode_metadata, rot_fmt)
         logging.info("Dataset Overview: %s" % lerobot_dataset)
     else:
-        lerobot_dataset = lerobot.common.datasets.lerobot_dataset.LeRobotDataset(
+        lerobot_dataset = lerobot.datasets.lerobot_dataset.LeRobotDataset(
             repo_id=repo_id,
             root=output_dir,
         )
@@ -296,7 +287,7 @@ def main(repo_id, input_dir, rot_fmt, push_to_hub):
         lerobot_dataset.save_episode()
 
         # Manually save the camera parameters
-        lerobot.common.datasets.utils.append_jsonlines(
+        lerobot.datasets.utils.append_jsonlines(
             {"episode_idx": ep_idx, "filename": e, "cameras": _metadata["cameras"]},
             pathlib.Path(os.path.join(output_dir, "meta", "camera.jsonl")),
         )

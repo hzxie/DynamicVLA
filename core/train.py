@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-19 00:55:41
+# @Last Modified at: 2025-07-23 06:44:51
 # @Email:  root@haozhexie.com
 
 import logging
@@ -29,7 +29,7 @@ def train(cfg):
     local_rank = utils.distributed.get_rank()
 
     # Set up datasets
-    # train_dataset = lerobot.common.datasets.lerobot_dataset.LeRobotDataset(
+    # train_dataset = lerobot.datasets.lerobot_dataset.LeRobotDataset(
     train_dataset = utils.datasets.get_dataset(
         cfg.DATASET.NAME,
         split="train",
