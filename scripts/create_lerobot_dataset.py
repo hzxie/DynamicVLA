@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-23 06:44:51
+# @Last Modified at: 2025-07-26 11:56:38
 # @Email:  root@haozhexie.com
 #
 # Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/convert_libero_data_to_lerobot.py
@@ -151,7 +151,7 @@ def get_task_instruction(episode_file_name):
     )
 
 
-def get_episode_frames(episode_path, rot_fmt="quat"):
+def get_episode_frames(episode_path, rot_fmt="quat", override_action=False):
     with h5py.File(episode_path, "r") as f:
         env_states = {k: f[k][()] for k in f.keys()}
 
@@ -188,7 +188,6 @@ def get_episode_frames(episode_path, rot_fmt="quat"):
                 axis=-1,
             ),
         }
-
         for k, v in env_states.items():
             # TODO: Only RGB is supported in LeRobotDataset (wait for upstream support)
             if not k.endswith("_cam_rgb"):
@@ -198,6 +197,17 @@ def get_episode_frames(episode_path, rot_fmt="quat"):
             _frame["observation.images.%s" % cam_name] = v[i]
 
         frames.append(_frame)
+
+    if override_action:
+        for i in range(len(frames) - 1):
+            frames[i]["action"] = np.concatenate(
+                [
+                    frames[i + 1]["observation.state"],
+                    frames[i]["action"][-1:],
+                ],
+                axis=-1
+            )
+        frames = frames[:-1]
 
     return frames
 
@@ -216,7 +226,7 @@ def is_video_valid(video_path, video_length):
     return True
 
 
-def main(repo_id, input_dir, rot_fmt, push_to_hub):
+def main(repo_id, input_dir, rot_fmt, override_action, push_to_hub):
     output_dir = lerobot.constants.HF_LEROBOT_HOME / repo_id
     # Listing all episodes in the input directory
     episodes = sorted([f for f in os.listdir(input_dir) if f.endswith(".h5")])
@@ -276,7 +286,7 @@ def main(repo_id, input_dir, rot_fmt, push_to_hub):
 
         try:
             _metadata = get_episode_metadata(os.path.join(input_dir, e))
-            _frames = get_episode_frames(os.path.join(input_dir, e), rot_fmt)
+            _frames = get_episode_frames(os.path.join(input_dir, e), rot_fmt, override_action)
             _task = get_task_instruction(os.path.basename(e))
             for f in _frames:
                 lerobot_dataset.add_frame(f, _task)
@@ -321,7 +331,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--rotation",
         type=str,
-        default="quat",
+        default="euler",
+    )
+    parser.add_argument(
+        "--override-action",
+        action="store_true",
     )
     parser.add_argument(
         "--push_to_hub",
@@ -329,4 +343,10 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    main(args.repo_id, args.dataset_dir, args.rotation, args.push_to_hub)
+    main(
+        args.repo_id,
+        args.dataset_dir,
+        args.rotation,
+        args.override_action,
+        args.push_to_hub,
+    )

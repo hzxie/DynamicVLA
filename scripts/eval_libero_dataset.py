@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-11 14:31:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-16 22:05:40
+# @Last Modified at: 2025-07-24 12:38:51
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/main.py
 #
@@ -15,6 +15,7 @@ import argparse
 import datetime
 import logging
 import os
+import pickle
 import sys
 
 import cv2
@@ -100,7 +101,9 @@ def get_action(vla_model, observation, use_delta_action):
             logging.warning("Ingoring observation without key: %s" % ifk)
             return None
 
-    observation = inference.get_transformed_observation(observation, rotation="rotvec")
+    observation = inference.get_transformed_observation(
+        observation, "rotvec", vla_model.config.input_features
+    )
     # Update the state every chunk_size steps
     if _count % vla_model.config.chunk_size == 0:
         _state = observation["observation.state"].cpu().numpy()
@@ -115,15 +118,16 @@ def get_action(vla_model, observation, use_delta_action):
     return action
 
 
-def get_episode_name(env_name, done):
-    return "%s_%s_%s.mp4" % (
+def get_episode_name(env_name, task_id, done):
+    return "%s-%02d-%s-%s.mp4" % (
         env_name,
-        datetime.datetime.now().strftime("%m%d_%H%M%S"),
+        task_id,
+        datetime.datetime.now().strftime("%m%d-%H%M%S"),
         "SUCCESS" if done else "FAIL",
     )
 
 
-def main(vla_model, vla_weights, env_name, task_id, output_dir, seed=42):
+def main(vla_model, vla_weights, env_name, task_id, output_dir, seed, debug):
     # Initialize the VLA model
     logging.info("Loading VLA model: %s with weights: %s" % (vla_model, vla_weights))
     vla_model = inference.get_vla_model(
@@ -136,7 +140,7 @@ def main(vla_model, vla_weights, env_name, task_id, output_dir, seed=42):
     )
 
     # Initialize the LIBERO environment
-    logging.info("Initializing LIBERO environment")
+    logging.info("Initializing LIBERO environment [Name=%s, Task ID=%d] ...")
     env, task_instruction = get_libero_env(env_name, task_id, seed)
 
     # Run the evaluation loop
@@ -147,6 +151,7 @@ def main(vla_model, vla_weights, env_name, task_id, output_dir, seed=42):
     logging.info("Starting evaluation the VLA model ...")
     done = False
     frames = []
+    actions = []
     for step_idx in range(N_MAX_STEPS):
         if step_idx < N_WAIT_STEPS:
             obs, _, done, _ = env.step(DUMMY_ACTION)
@@ -157,6 +162,7 @@ def main(vla_model, vla_weights, env_name, task_id, output_dir, seed=42):
             get_observation(vla_model.config.input_features, obs, task_instruction),
             use_delta_action=True,
         )
+        actions.append(action)
         obs, _, done, _ = env.step(action.squeeze(0))
         frames.append(obs["agentview_image"][::-1, ::-1])
         if done:
@@ -165,8 +171,24 @@ def main(vla_model, vla_weights, env_name, task_id, output_dir, seed=42):
 
     env.close()
     utils.helpers.dump_video(
-        frames, os.path.join(output_dir, get_episode_name(env_name, done))
+        frames, os.path.join(output_dir, get_episode_name(env_name, task_id, done))
     )
+    if debug:
+        output_path = os.path.join(
+            output_dir,
+            "%s-%02d-%s.pkl"
+            % (env_name, task_id, datetime.datetime.now().strftime("%m%d-%H%M%S")),
+        )
+        with open(output_path, "wb") as fp:
+            pickle.dump(
+                {
+                    "env": env_name,
+                    "task": task_id,
+                    "inst": task_instruction,
+                    "action": actions,
+                },
+                fp,
+            )
 
 
 if __name__ == "__main__":
@@ -204,7 +226,18 @@ if __name__ == "__main__":
         help="Directory to save the evaluation results",
     )
     parser.add_argument(
+        "--debug", action="store_true", help="Enable debug mode for detailed logging"
+    )
+    parser.add_argument(
         "--seed", type=int, default=42, help="Random seed for reproducibility"
     )
     args = parser.parse_args()
-    main(args.model, args.weights, args.env, args.task, args.output_dir, args.seed)
+    main(
+        args.model,
+        args.weights,
+        args.env,
+        args.task,
+        args.output_dir,
+        args.seed,
+        args.debug,
+    )

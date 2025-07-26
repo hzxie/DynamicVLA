@@ -144,9 +144,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self._memcached = {}
         self.repo_id = repo_id
         self.root = (
-            pathlib.Path(root)
-            if root
-            else lerobot.constants.HF_LEROBOT_HOME / repo_id
+            pathlib.Path(root) if root else lerobot.constants.HF_LEROBOT_HOME / repo_id
         )
         self.delta_action = delta_action
         self.required_features = required_features
