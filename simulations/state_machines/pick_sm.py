@@ -66,7 +66,6 @@ class PickStateMachine:
         self,
         dt: float,
         num_envs: int,
-        object_size: torch.tensor,
         rest_pose: torch.tensor,
         final_position: torch.tensor,
         final_quat: torch.tensor,
@@ -90,7 +89,6 @@ class PickStateMachine:
         self.dt = float(dt)
         self.num_envs = num_envs
         self.device = device
-        self.object_size = object_size
         # initialize state machine
         self.rest_pose = rest_pose[:, [0, 1, 2, 4, 5, 6, 3]].repeat(num_envs, 1)
         self.sm_dt = torch.full((num_envs,), dt, device=device)
