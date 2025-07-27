@@ -719,7 +719,6 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
             "dt": env_cfg.sim.dt * env_cfg.decimation,
             "num_envs": env.unwrapped.num_envs,
             "device": env.unwrapped.device,
-            "object_size": object_size,
             "gripper_length": configs.robot_cfg.get_gripper_length(task_cfg["robot"]),
         },
     )
