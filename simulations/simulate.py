@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-20 17:00:42
+# @Last Modified at: 2025-07-27 22:12:11
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -29,7 +29,7 @@ from PIL import Image
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 
 
-def get_object_size_from_usd(usd_path):
+def _get_object_size(usd_path):
     import pxr
     import omni.usd
 
@@ -43,24 +43,27 @@ def get_object_size_from_usd(usd_path):
     bbox = bbox_cache.ComputeWorldBound(default_prim).ComputeAlignedBox()
     size = bbox.max - bbox.min
     usd_context.new_stage()
-    return [size[0], size[1], size[2]]
+    return np.array([size[0], size[1], size[2]], dtype=np.float32)
 
 
-def get_all_obj_size_json(object_dir):
-    categories = [f for f in os.listdir(object_dir)]
-    all_size_json = {}
-    for category in categories :
-        all_size_json[category] = {}
-        objects = [f for f in os.listdir(os.path.join(object_dir, category)) if f.endswith(".usd")]
-        
-        for object in objects :
-            usd_path = os.path.join(object_dir, category, object)
-            size = get_object_size_from_usd(usd_path)
-            all_size_json[category][object] = size
-    return all_size_json
+def get_object_sizes(object_dir, target_categories=None):
+    object_sizes = {}
+    categories = sorted([f for f in os.listdir(object_dir)])
+    for c in categories:
+        if target_categories and c not in target_categories:
+            continue
+
+        objects = [
+            f for f in os.listdir(os.path.join(object_dir, c)) if f.endswith(".usd")
+        ]
+        for object in objects:
+            usd_path = os.path.join(object_dir, c, object)
+            object_sizes[usd_path] = _get_object_size(usd_path)
+
+    return object_sizes
 
 
-def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, robot):
+def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, object_sizes, robot):
     # The following packages MUST be imported after the simulation app is created
     import configs.scene_cfg
     import isaaclab_tasks
@@ -117,12 +120,13 @@ def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, robot):
     env_cfg.scene = configs.scene_cfg.set_light_asset(env_cfg.scene, **light_cfg)
 
     # Dynamically add objects to scene
-    env_cfg.scene, target_object_config = _set_up_scene_objects(
+    env_cfg.scene = _set_up_scene_objects(
         env_cfg.scene,
         sim_cfg,
         robot_pose,
         table["bbox"],
         object_dir,
+        object_sizes,
     )
     # Set up the container
     if os.path.exists(container_dir):
@@ -130,7 +134,7 @@ def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, robot):
             env_cfg.scene, table["bbox"], container_dir
         )
 
-    return env_cfg, target_object_config
+    return env_cfg
 
 
 def _set_up_scene_cameras(
@@ -240,10 +244,12 @@ def _get_light_cfg(light_cfg):
     }
 
 
-def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir):
+def _set_up_scene_objects(
+    scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir, object_sizes
+):
     import configs.scene_cfg
 
-    target_object_usd, target_object_config = _get_object_usd_path(
+    target_object_usd = _get_object_usd_path(
         object_dir, sim_cfg["scene"]["target_object"]["categories"]
     )
     logging.info("Using target object: %s" % os.path.basename(target_object_usd))
@@ -252,6 +258,7 @@ def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir
         _get_object_cfg(
             table_bbox,
             file_path=target_object_usd,
+            object_size=object_sizes.get(target_object_usd, None),
             robot_pos=robot_pose["pos"],
             moving_time=_get_moving_time(
                 sim_cfg["scene"]["target_object"]["moving_time"]
@@ -270,13 +277,14 @@ def _set_up_scene_objects(scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir
             _get_object_cfg(
                 table_bbox,
                 file_path=bg_object_usd,
+                object_size=object_sizes.get(bg_object_usd, None),
                 robot_pos=robot_pose["pos"],
                 moving_time=None,  # TODO
                 semantic_tags=[("class", "OBJECT_BG")],
             ),
         )
 
-    return scene_cfg, target_object_config
+    return scene_cfg
 
 
 def _get_object_usd_path(object_dir, categories):
@@ -291,7 +299,7 @@ def _get_object_usd_path(object_dir, categories):
         if f.endswith(".usd")
     ]
     target_object = random.choice(object_usd)
-    return os.path.join(object_dir, category, target_object), [category, target_object]
+    return os.path.join(object_dir, category, target_object)
 
 
 def _get_moving_time(moving_time_range):
@@ -304,6 +312,7 @@ def _get_moving_time(moving_time_range):
 def _get_object_cfg(
     table_bbox,
     file_path=None,
+    object_size=None,
     robot_pos=None,
     moving_time=None,
     semantic_tags=None,
@@ -312,7 +321,12 @@ def _get_object_cfg(
 
     PADDING = 0.02
     object_cfg = {}
-    tbl_z = table_bbox.max[2] + PADDING
+    tbl_z = table_bbox.max[2]
+    object_z = (
+        tbl_z + np.max(object_size) / 2
+        if object_size is not None
+        else tbl_z + PADDING
+    )
     if moving_time is None:
         object_range_min_0 = table_bbox.min[0] * 3 / 4 + table_bbox.max[0] / 4
         object_range_max_0 = table_bbox.min[0] / 4 + table_bbox.max[0] * 3 / 4
@@ -322,7 +336,7 @@ def _get_object_cfg(
             [
                 random.uniform(object_range_min_0, object_range_max_0),
                 random.uniform(object_range_min_1, object_range_max_1),
-                tbl_z,
+                object_z,
             ]
         )
         # 50% chance to set a random orientation. Otherwise, use the default orientation.
@@ -339,7 +353,7 @@ def _get_object_cfg(
                 random.uniform(
                     table_bbox.min[1] + PADDING, table_bbox.max[1] - PADDING
                 ),
-                tbl_z,
+                object_z,
             ]
         )
         assert (
@@ -349,7 +363,7 @@ def _get_object_cfg(
         tbl_ctr = (table_bbox.min + table_bbox.max) / 2.0
         rnd_rto = random.uniform(-0.5, 0.5)
         rnd_pos = tbl_ctr + rnd_rto * (robot_pos - tbl_ctr)
-        rnd_pos[2] = tbl_z
+        rnd_pos[2] = object_z
         # Determine the linear velocity of the object
         object_cfg["lin_vel"] = (rnd_pos - object_cfg["pos"]) / moving_time
         object_cfg["quat"] = configs.object_cfg.get_object_init_quat(
@@ -524,14 +538,7 @@ def _get_reach_dist_threshold(robot):
         raise ValueError("Unknown robot: %s." % robot)
 
 
-def set_object_initial_state(target_object, device, n_envs=1):
-    # adjust object height
-    root_state = target_object.data.default_root_state.clone()
-    object_size = get_object_size("/World/envs/env_0/Object", device)
-    root_state[:, 2] += object_size[:, 2] / 2
-    target_object.write_root_pose_to_sim(root_state[:, :7])
-
-    # adjust object physical material
+def set_object_material(target_object, n_envs=1):
     materials = target_object.root_physx_view.get_material_properties()
     materials[..., 0] = 0.9  # Static friction.
     materials[..., 1] = 1.0  # Dynamic friction.
@@ -545,10 +552,10 @@ def get_curr_state(
     ee_state,
     robot_joint_pos=None,
     object_state=None,
+    object_size=None,
     container_state=None,
     env_origins=None,
     robot_quat=None,
-    object_size=None,
     device="cpu",
 ):
     quat_opengl = robot_quat[:, [1, 2, 3, 0]]  # xyzw
@@ -568,13 +575,16 @@ def get_curr_state(
                 object_state.root_pos_w - env_origins, quat_opengl
             ),
             "quat": object_state.root_quat_w,
-            "object_size": _get_object_relative_bbox(
-                object_size, object_state.root_quat_w, quat_opengl
-            ),
             "velocity": _get_robot_relative_position(
                 object_state.root_lin_vel_w, quat_opengl
             ),
         }
+    if object_size is not None:
+        if "object" not in curr_state:
+            curr_state["object"] = {}
+        curr_state["object"]["size"] = _get_object_relative_bbox(
+            object_size, object_state.root_quat_w, quat_opengl
+        )
     if container_state is not None:
         curr_state["container"] = {
             "pos": _get_robot_relative_position(
@@ -597,9 +607,19 @@ def get_curr_state(
 
 def _get_object_relative_bbox(object_size, object_quat_w, robot_quat):
     from isaaclab.utils.math import quat_apply
-    object_size_x_rot = quat_apply(object_quat_w, torch.tensor([[object_size[:, 0], 0.0, 0.0]], device=robot_quat.device))
-    object_size_y_rot = quat_apply(object_quat_w, torch.tensor([[0.0, object_size[:, 1], 0.0]], device=robot_quat.device))
-    object_size_z_rot = quat_apply(object_quat_w, torch.tensor([[0.0, 0.0, object_size[:, 2]]], device=robot_quat.device))
+
+    object_size_x_rot = quat_apply(
+        object_quat_w,
+        torch.tensor([[object_size[:, 0], 0.0, 0.0]], device=robot_quat.device),
+    )
+    object_size_y_rot = quat_apply(
+        object_quat_w,
+        torch.tensor([[0.0, object_size[:, 1], 0.0]], device=robot_quat.device),
+    )
+    object_size_z_rot = quat_apply(
+        object_quat_w,
+        torch.tensor([[0.0, 0.0, object_size[:, 2]]], device=robot_quat.device),
+    )
     object_size_x_rot = _get_robot_relative_position(object_size_x_rot, robot_quat)[0]
     object_size_y_rot = _get_robot_relative_position(object_size_y_rot, robot_quat)[0]
     object_size_z_rot = _get_robot_relative_position(object_size_z_rot, robot_quat)[0]
@@ -705,32 +725,36 @@ def _get_curr_env_states(cam_views, curr_state, next_state, is_done):
     return env_states
 
 
-def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg, all_object_size):
+def simulate(sim_cfg, object_sizes, task_cfg, dir_cfg, debug_cfg):
     import configs.robot_cfg
     import omni.replicator.core as rep
 
     # Create a new environment
-    env_cfg, target_object_config = get_env_cfg(
+    env_cfg = get_env_cfg(
         dir_cfg["scene_dir"],
         dir_cfg["object_dir"],
         dir_cfg["container_dir"],
         sim_cfg,
+        object_sizes,
         task_cfg["robot"],
     )
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=debug_cfg["seed"])
     # Reset environment at start
     env.reset(seed=debug_cfg["seed"])
 
+    # Determine the object size (without transformation)
+    # TODO: Handle non USD objects
+    object_size = torch.tensor(
+        [object_sizes[env_cfg.scene.object.spawn.usd_path]],
+        dtype=torch.float32,
+        device=env.unwrapped.device,
+    )
+
     # Enable Path Tracing
     if debug_cfg["path_tracing"]:
         rep.settings.set_render_pathtraced()
 
     # Initialize the state machine
-    object_size = torch.tensor(
-        [all_object_size[target_object_config[0]][target_object_config[1]]], 
-        dtype=torch.float32, 
-        device=env.unwrapped.device
-    )
     state_machine = get_state_machine(
         task_cfg["task_name"],
         task_cfg["robot"],
@@ -743,10 +767,9 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg, all_object_size):
     )
 
     # Set the rotation, height, and physical material of the object
-    set_object_initial_state(
-        env.unwrapped.scene["object"], 
-        env.unwrapped.device, 
-        n_envs=env.unwrapped.num_envs
+    set_object_material(
+        env.unwrapped.scene["object"],
+        n_envs=env.unwrapped.num_envs,
     )
 
     # Simulation loop
@@ -775,6 +798,7 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg, all_object_size):
             env.unwrapped.scene["ee_frame"].data,
             env.unwrapped.scene.state["articulation"]["robot"]["joint_position"],
             env.unwrapped.scene["object"].data,
+            object_size,
             (
                 env.unwrapped.scene["container"].data
                 if "container" in env.unwrapped.scene.keys()
@@ -782,7 +806,6 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg, all_object_size):
             ),
             env.unwrapped.scene.env_origins + robot_origin,
             robot_quat,
-            object_size, 
             env.unwrapped.device,
         )
         next_state = state_machine.compute(
@@ -1021,10 +1044,10 @@ def dump_video(frames, output_path, fps=24):
 def main(simulation_app, args):
     with open(args.sim_cfg_file) as fp:
         sim_cfg = yaml.load(fp, Loader=yaml.FullLoader)
-    
-    # Get all object size
-    all_object_size = get_all_obj_size_json(
-        args.object_dir
+
+    # Calculate the bounding boxes of the target objects
+    object_sizes = get_object_sizes(
+        args.object_dir, sim_cfg["scene"]["target_object"]["categories"]
     )
 
     # Perform simulations in the environment
@@ -1038,6 +1061,7 @@ def main(simulation_app, args):
 
         env_cfg, env_states = simulate(
             sim_cfg,
+            object_sizes,
             {
                 "task_name": args.task,
                 "robot": args.robot,
@@ -1053,7 +1077,6 @@ def main(simulation_app, args):
                 "path_tracing": args.path_tracing,
                 "seed": seed,
             },
-            all_object_size,
         )
         # Save the simulation data
         for es in env_states:

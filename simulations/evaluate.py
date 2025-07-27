@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-22 19:06:01
+# @Last Modified at: 2025-07-27 21:16:50
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -70,7 +70,6 @@ def get_test_env(
     # Increase the fictional frictions of the object
     sim.set_object_material(
         env.unwrapped.scene["object"],
-        sim.get_object_size("/World/envs/env_0/Object", env.unwrapped.device),
         n_envs=env.unwrapped.num_envs,
     )
 
