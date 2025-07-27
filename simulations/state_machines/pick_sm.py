@@ -144,7 +144,7 @@ class PickStateMachine:
 
     def _get_grasp_position(
         self,
-        object_size: torch.Tensor,
+        object_projected_size: torch.Tensor,
         object_position: torch.Tensor,
         object_velocity: torch.Tensor,
     ) -> torch.Tensor:
@@ -152,7 +152,7 @@ class PickStateMachine:
         TABLE_HEIGHT_THRES = 0.006
         OBJECT_HEIGHT_DISPLACEMENT = 0.006
         grasp_position = object_position.clone() + object_velocity * WAITING_TIME
-        object_height = object_size[:, 2]
+        object_height = torch.norm(object_projected_size[:, 2])
         grasp_position_z = grasp_position[:, 2]
 
         # Plan B: Try to grasp the center of the object
@@ -177,7 +177,9 @@ class PickStateMachine:
         return grasp_position
 
     def _get_grasp_quat(
-        self, object_velocity: torch.Tensor, object_quat: torch.Tensor
+        self, 
+        object_projected_size: torch.Tensor, 
+        object_velocity: torch.Tensor, 
     ) -> torch.Tensor:
         # NOTE: Rotation around the z-axis (0, 0, 1)
         #       Quat = [
@@ -186,11 +188,21 @@ class PickStateMachine:
         #         z * sin(theta / 2),
         #         w * cos(theta / 2)
         #       ]
-        # TODO: Consider the object quaternion to determine the grasp quaternion for static objects
-        # self._is_object_static(object_velocity)
 
+        # Consider the object quaternion to determine the grasp quaternion for static objects
+        if self._is_object_static(object_velocity) :
+            object_size_z_rot = torch.abs(object_projected_size[:, 2])
+            object_size_z_max = torch.argmax(object_size_z_rot)
+            keep_indices = [i for i in range(3) if i != object_size_z_max]
+            object_size_xy_rot = object_projected_size[keep_indices, :2]
+            object_size_xy_norm = torch.norm(object_size_xy_rot, dim=1)
+            short_axis = torch.argmin(object_size_xy_norm)
+            grasp_direction = torch.tensor([[object_size_xy_rot[short_axis][1]], [object_size_xy_rot[short_axis][0]]], device=self.device)
+        else :
+            grasp_direction = [object_velocity[:, 1], object_velocity[:, 0]]
+        
         # Determine the grasp quaternion according to the velocity
-        gsp_theta = torch.arctan2(object_velocity[:, 1], object_velocity[:, 0])
+        gsp_theta = torch.arctan2(grasp_direction[0], grasp_direction[1])
         gsp_theta = torch.where(gsp_theta >= np.pi / 2, gsp_theta - np.pi, gsp_theta)
         gsp_theta = torch.where(gsp_theta <= -np.pi / 2, gsp_theta + np.pi, gsp_theta)
         gsp_theta = np.pi / 2 - gsp_theta
@@ -255,15 +267,19 @@ class PickStateMachine:
             dim=-1,
         )
 
+        # get object size based on rotation
+        object_projected_size = curr_state["object"]["object_size"]
+
         # Determine the object position before lifting
         self.grasp_position = self._get_grasp_position(
-            self.object_size,
+            object_projected_size,
             curr_state["object"]["pos"],
             curr_state["object"]["velocity"],
         )
 
         grasp_quat = self._get_grasp_quat(
-            curr_state["object"]["velocity"], curr_state["object"]["quat"]
+            object_projected_size, 
+            curr_state["object"]["velocity"],
         )
         # pose_angle = self._get_pose_angle(
         #     curr_state["object"]["velocity"], curr_state["end_effector"]["quat"]

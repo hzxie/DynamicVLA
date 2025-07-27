@@ -293,11 +293,11 @@ def _get_object_cfg(
                 tbl_z,
             ]
         )
-        # 50% chance to set a random orientation. Otherwise, use the default orientation.
-        if random.random() < 0.5:
-            object_cfg["quat"] = configs.object_cfg.get_object_init_quat(
-                np.random.uniform(-0.1, 0.1, size=3)
-            )
+        # # 50% chance to set a random orientation. Otherwise, use the default orientation.
+        # if random.random() < 0.5:
+        #     object_cfg["quat"] = configs.object_cfg.get_object_init_quat(
+        #         np.random.uniform(-0.1, 0.1, size=3)
+        #     )
     else:
         object_cfg["pos"] = np.array(
             [
@@ -320,9 +320,9 @@ def _get_object_cfg(
         rnd_pos[2] = tbl_z
         # Determine the linear velocity of the object
         object_cfg["lin_vel"] = (rnd_pos - object_cfg["pos"]) / moving_time
-        object_cfg["quat"] = configs.object_cfg.get_object_init_quat(
-            object_cfg["lin_vel"]
-        )
+        # object_cfg["quat"] = configs.object_cfg.get_object_init_quat(
+        #     object_cfg["lin_vel"]
+        # )
 
     return configs.object_cfg.get_object_cfg(
         "/Object",
@@ -492,17 +492,35 @@ def _get_reach_dist_threshold(robot):
         raise ValueError("Unknown robot: %s." % robot)
 
 
-def set_object_material(target_object, object_size, n_envs=1):
-    # adjust object initial height
+def set_object_initial_state(target_object, device, n_envs=1):
+    import configs.object_cfg
+    # adjust object quaternion
+    root_velo = target_object.data.root_lin_vel_w.clone()
+    object_quat = None
+    if torch.norm(root_velo) < 1e-3 :
+        if random.random() < 0.5:
+            object_quat = configs.object_cfg.get_object_init_quat(
+                np.random.uniform(-0.1, 0.1, size=3)
+            )
+    else :
+        object_quat = configs.object_cfg.get_object_init_quat(
+            root_velo.squeeze().cpu().numpy()
+        )
     root_state = target_object.data.default_root_state.clone()
+    if object_quat is not None :
+        root_state[:, 3:7] = torch.tensor([object_quat], dtype=torch.float32, device=device)
+        target_object.write_root_pose_to_sim(root_state[:, :7])
+    
+    # adjust object height
+    object_size = get_object_size("/World/envs/env_0/Object", device)
     root_state[:, 2] += object_size[:, 2] / 2
     target_object.write_root_pose_to_sim(root_state[:, :7])
 
     # adjust object physical material
     materials = target_object.root_physx_view.get_material_properties()
     materials[..., 0] = 0.9  # Static friction.
-    # materials[..., 1] = 0.1  # Dynamic friction.
-    materials[..., 1] = 1.0  # Restitution
+    materials[..., 1] = 1.0  # Dynamic friction.
+    materials[..., 2] = 0.0  # Restitution
     target_object.root_physx_view.set_material_properties(
         materials, torch.arange(n_envs)
     )
@@ -515,6 +533,7 @@ def get_curr_state(
     container_state=None,
     env_origins=None,
     robot_quat=None,
+    object_size=None,
     device="cpu",
 ):
     quat_opengl = robot_quat[:, [1, 2, 3, 0]]  # xyzw
@@ -534,6 +553,9 @@ def get_curr_state(
                 object_state.root_pos_w - env_origins, quat_opengl
             ),
             "quat": object_state.root_quat_w,
+            "object_size": _get_object_relative_bbox(
+                object_size, object_state.root_quat_w, quat_opengl
+            ),
             "velocity": _get_robot_relative_position(
                 object_state.root_lin_vel_w, quat_opengl
             ),
@@ -556,6 +578,17 @@ def get_curr_state(
                 curr_state[csk] = csv.cpu().numpy()
 
     return curr_state
+
+
+def _get_object_relative_bbox(object_size, object_quat_w, robot_quat):
+    from isaaclab.utils.math import quat_apply
+    object_size_x_rot = quat_apply(object_quat_w, torch.tensor([[object_size[:, 0], 0.0, 0.0]], device=robot_quat.device))
+    object_size_y_rot = quat_apply(object_quat_w, torch.tensor([[0.0, object_size[:, 1], 0.0]], device=robot_quat.device))
+    object_size_z_rot = quat_apply(object_quat_w, torch.tensor([[0.0, 0.0, object_size[:, 2]]], device=robot_quat.device))
+    object_size_x_rot = _get_robot_relative_position(object_size_x_rot, robot_quat)[0]
+    object_size_y_rot = _get_robot_relative_position(object_size_y_rot, robot_quat)[0]
+    object_size_z_rot = _get_robot_relative_position(object_size_z_rot, robot_quat)[0]
+    return torch.stack([object_size_x_rot, object_size_y_rot, object_size_z_rot], dim=0)
 
 
 def _get_robot_relative_position(point, robot_quat):
@@ -691,9 +724,11 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
         },
     )
 
-    # Increase the fictional frictions of the object
-    set_object_material(
-        env.unwrapped.scene["object"], object_size, n_envs=env.unwrapped.num_envs
+    # Set the rotation, height, and physical material of the object
+    set_object_initial_state(
+        env.unwrapped.scene["object"], 
+        env.unwrapped.device, 
+        n_envs=env.unwrapped.num_envs
     )
 
     # Simulation loop
@@ -729,6 +764,7 @@ def simulate(sim_cfg, task_cfg, dir_cfg, debug_cfg):
             ),
             env.unwrapped.scene.env_origins + robot_origin,
             robot_quat,
+            object_size, 
             env.unwrapped.device,
         )
         next_state = state_machine.compute(
