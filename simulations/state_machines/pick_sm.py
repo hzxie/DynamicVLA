@@ -194,7 +194,10 @@ class PickStateMachine:
             keep_indices = [i for i in range(3) if i != object_size_z_max]
             object_size_xy_rot = object_projected_size[keep_indices, :2]
             object_size_xy_norm = torch.norm(object_size_xy_rot, dim=1)
-            short_axis = torch.argmin(object_size_xy_norm)
+            if abs(object_size_xy_norm[0] / object_size_xy_norm[1] - 1) < 0.05 :
+                short_axis = 0
+            else :
+                short_axis = torch.argmin(object_size_xy_norm)
             grasp_direction = torch.tensor(
                 [
                     [object_size_xy_rot[short_axis][1]],
@@ -210,6 +213,7 @@ class PickStateMachine:
         gsp_theta = torch.where(gsp_theta >= np.pi / 2, gsp_theta - np.pi, gsp_theta)
         gsp_theta = torch.where(gsp_theta <= -np.pi / 2, gsp_theta + np.pi, gsp_theta)
         gsp_theta = np.pi / 2 - gsp_theta
+        gsp_theta = torch.where(gsp_theta < 1e-2, np.pi, gsp_theta)
 
         gsp_quat = torch.stack(
             [
