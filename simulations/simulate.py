@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-28 11:32:11
+# @Last Modified at: 2025-07-28 12:43:34
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -556,12 +556,11 @@ def get_curr_state(
     robot_quat=None,
     device="cpu",
 ):
-    quat_opengl = robot_quat[:, [1, 2, 3, 0]]  # xyzw
     curr_state = {}
     if ee_state is not None:
         curr_state["end_effector"] = {
             "pos": _get_robot_relative_position(
-                ee_state.target_pos_w[..., 0, :] - env_origins, quat_opengl
+                ee_state.target_pos_w[..., 0, :] - env_origins, robot_quat
             ),
             "quat": _get_robot_relative_quaternion(
                 ee_state.target_quat_w[..., 0, :], robot_quat
@@ -572,13 +571,13 @@ def get_curr_state(
     if object_state is not None:
         curr_state["object"] = {
             "pos": _get_robot_relative_position(
-                object_state.root_pos_w - env_origins, quat_opengl
+                object_state.root_pos_w - env_origins, robot_quat
             ),
             "quat": _get_robot_relative_quaternion(
-                object_state.root_quat_w, quat_opengl
+                object_state.root_quat_w, robot_quat
             ),
             "velocity": _get_robot_relative_position(
-                object_state.root_lin_vel_w, quat_opengl
+                object_state.root_lin_vel_w, robot_quat
             ),
         }
     if object_size is not None:
@@ -590,7 +589,7 @@ def get_curr_state(
     if container_state is not None:
         curr_state["container"] = {
             "pos": _get_robot_relative_position(
-                container_state.root_pos_w - env_origins, quat_opengl
+                container_state.root_pos_w - env_origins, robot_quat
             ),
             "quat": _get_robot_relative_quaternion(
                 container_state.root_quat_w, robot_quat
@@ -624,41 +623,46 @@ def _get_object_relative_bbox(object_size, object_quat_w, robot_quat):
         object_quat_w,
         torch.tensor([[0.0, 0.0, object_size[:, 2]]], device=robot_quat.device),
     )
-    object_size_x_rot = _get_robot_relative_position(object_size_x_rot, robot_quat)[0]
-    object_size_y_rot = _get_robot_relative_position(object_size_y_rot, robot_quat)[0]
-    object_size_z_rot = _get_robot_relative_position(object_size_z_rot, robot_quat)[0]
-    return torch.stack([object_size_x_rot, object_size_y_rot, object_size_z_rot], dim=0)
+    object_size_x_rot = _get_robot_relative_position(object_size_x_rot, robot_quat)
+    object_size_y_rot = _get_robot_relative_position(object_size_y_rot, robot_quat)
+    object_size_z_rot = _get_robot_relative_position(object_size_z_rot, robot_quat)
+    return torch.cat([object_size_x_rot, object_size_y_rot, object_size_z_rot], dim=0)
 
 
 def _get_robot_relative_position(point, robot_quat):
     # inv_quat = scipy.spatial.transform.Rotation.from_quat(robot_quat).inv()
     # inv_offset = inv_quat.apply(point)
+    from isaaclab.utils.math import quat_apply, quat_inv
 
-    # pytorch3d/transforms/rotation_conversions.html#quaternion_invert
-    inv_quat = robot_quat * torch.tensor([[-1, -1, -1, 1]], device=robot_quat.device)
-    # pytorch3d/transforms/rotation_conversions.html#quaternion_apply
-    t = 2.0 * torch.cross(inv_quat[..., :3], point, dim=-1)
-    inv_offset = (
-        point + inv_quat[..., 3:] * t + torch.cross(inv_quat[..., :3], t, dim=-1)
-    )
-    return inv_offset
+    return quat_apply(quat_inv(robot_quat), point)
+    # # pytorch3d/transforms/rotation_conversions.html#quaternion_invert
+    # inv_quat = robot_quat * torch.tensor([[1, -1, -1, -1]], device=robot_quat.device)
+    # # pytorch3d/transforms/rotation_conversions.html#quaternion_apply
+    # t = 2.0 * torch.cross(inv_quat[..., 1:], point, dim=-1)
+    # inv_offset = (
+    #     point + inv_quat[..., :1] * t + torch.cross(inv_quat[..., 1:], t, dim=-1)
+    # )
+    # return inv_offset
 
 
 def _get_robot_relative_quaternion(w_quat, robot_quat):
-    # pytorch3d/transforms/rotation_conversions.html#quaternion_invert
-    inv_quat = robot_quat * torch.tensor([[1, -1, -1, -1]], device=robot_quat.device)
-    # pytorch3d/transforms/rotation_conversions.html#quaternion_multiply
-    w1, x1, y1, z1 = w_quat.unbind(1)
-    w2, x2, y2, z2 = inv_quat.unbind(1)
-    return torch.stack(
-        [
-            w2 * w1 - x2 * x1 - y2 * y1 - z2 * z1,
-            w2 * x1 + x2 * w1 + y2 * z1 - z2 * y1,
-            w2 * y1 - x2 * z1 + y2 * w1 + z2 * x1,
-            w2 * z1 + x2 * y1 - y2 * x1 + z2 * w1,
-        ],
-        dim=1,
-    )
+    from isaaclab.utils.math import quat_inv, quat_mul
+
+    return quat_mul(quat_inv(robot_quat), w_quat)
+    # # pytorch3d/transforms/rotation_conversions.html#quaternion_invert
+    # inv_quat = robot_quat * torch.tensor([[1, -1, -1, -1]], device=robot_quat.device)
+    # # pytorch3d/transforms/rotation_conversions.html#quaternion_multiply
+    # w1, x1, y1, z1  = w_quat.unbind(1)
+    # w2, x2, y2, z2 = inv_quat.unbind(1)
+    # return torch.stack(
+    #     [
+    #         w2 * w1 - x2 * x1 - y2 * y1 - z2 * z1,
+    #         w2 * x1 + x2 * w1 + y2 * z1 - z2 * y1,
+    #         w2 * y1 - x2 * z1 + y2 * w1 + z2 * x1,
+    #         w2 * z1 + x2 * y1 - y2 * x1 + z2 * w1,
+    #     ],
+    #     dim=1,
+    # )
 
 
 def get_camera_views(sensors, views=["rgb"]):
@@ -708,7 +712,7 @@ def _get_semantic_segmentation(rgba_seg_maps, semantic_tags):
 
 
 def is_final_position_reached(object_pos, ee_pos, final_pos):
-    DIST_THRESHOLD = 0.05
+    DIST_THRESHOLD = 0.02
 
     ee_offset = (ee_pos - final_pos).abs().sum(dim=1)
     obj_offset = (object_pos - final_pos).abs().sum(dim=1)
