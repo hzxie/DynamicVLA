@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-27 21:16:50
+# @Last Modified at: 2025-07-28 07:58:27
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -357,8 +357,9 @@ def get_frames(cam_views):
 
 
 def get_episode_name(cfg_filename, sim_status):
+    seq_name = os.path.splitext(cfg_filename)[0]
     return "%s-%s-%s.mp4" % (
-        cfg_filename[:-5],
+        seq_name,
         datetime.datetime.now().strftime("%m%d-%H%M%S"),
         "SUCCESS" if sim_status == 2 else "FAIL",
     )
