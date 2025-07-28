@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-28 07:58:27
+# @Last Modified at: 2025-07-28 20:30:57
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -65,8 +65,6 @@ def get_test_env(
     env_cfg.dt = physics_time_step
     env_cfg.episode_length_s = timeout
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=cfg["seed"])
-    # Reset environment at start
-    env.reset(seed=cfg["seed"])
     # Increase the fictional frictions of the object
     sim.set_object_material(
         env.unwrapped.scene["object"],
@@ -81,8 +79,10 @@ def get_test_env(
 
 
 def _get_env_cfg(cfg, num_envs, scene_dir, object_dir, device, disable_fabric):
+    import configs.robot_cfg
     import configs.scene_cfg
     import isaaclab_tasks
+    import omni.usd
 
     gym.register(
         id="Robot-Env-Cfg-v0",
@@ -106,6 +106,8 @@ def _get_env_cfg(cfg, num_envs, scene_dir, object_dir, device, disable_fabric):
     env_cfg.scene = configs.scene_cfg.set_house_asset(
         env_cfg.scene, os.path.join(scene_dir, scene_usd_path)
     )
+    usd_context = omni.usd.get_context()
+    usd_context.new_stage()
 
     # Set up the robot arm
     robot_name = configs.robot_cfg.get_robot_name(
