@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-27 22:12:11
+# @Last Modified at: 2025-07-28 11:32:11
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -323,9 +323,7 @@ def _get_object_cfg(
     object_cfg = {}
     tbl_z = table_bbox.max[2]
     object_z = (
-        tbl_z + np.max(object_size) / 2
-        if object_size is not None
-        else tbl_z + PADDING
+        tbl_z + np.max(object_size) / 2 if object_size is not None else tbl_z + PADDING
     )
     if moving_time is None:
         object_range_min_0 = table_bbox.min[0] * 3 / 4 + table_bbox.max[0] / 4
@@ -565,7 +563,9 @@ def get_curr_state(
             "pos": _get_robot_relative_position(
                 ee_state.target_pos_w[..., 0, :] - env_origins, quat_opengl
             ),
-            "quat": ee_state.target_quat_w[..., 0, :],
+            "quat": _get_robot_relative_quaternion(
+                ee_state.target_quat_w[..., 0, :], robot_quat
+            ),
         }
     if robot_joint_pos is not None:
         curr_state["joints"] = robot_joint_pos
@@ -574,7 +574,9 @@ def get_curr_state(
             "pos": _get_robot_relative_position(
                 object_state.root_pos_w - env_origins, quat_opengl
             ),
-            "quat": object_state.root_quat_w,
+            "quat": _get_robot_relative_quaternion(
+                object_state.root_quat_w, quat_opengl
+            ),
             "velocity": _get_robot_relative_position(
                 object_state.root_lin_vel_w, quat_opengl
             ),
@@ -583,14 +585,16 @@ def get_curr_state(
         if "object" not in curr_state:
             curr_state["object"] = {}
         curr_state["object"]["size"] = _get_object_relative_bbox(
-            object_size, object_state.root_quat_w, quat_opengl
+            object_size, object_state.root_quat_w, robot_quat
         )
     if container_state is not None:
         curr_state["container"] = {
             "pos": _get_robot_relative_position(
                 container_state.root_pos_w - env_origins, quat_opengl
             ),
-            "quat": container_state.root_quat_w,
+            "quat": _get_robot_relative_quaternion(
+                container_state.root_quat_w, robot_quat
+            ),
         }
 
     if device == "cpu":
@@ -638,6 +642,23 @@ def _get_robot_relative_position(point, robot_quat):
         point + inv_quat[..., 3:] * t + torch.cross(inv_quat[..., :3], t, dim=-1)
     )
     return inv_offset
+
+
+def _get_robot_relative_quaternion(w_quat, robot_quat):
+    # pytorch3d/transforms/rotation_conversions.html#quaternion_invert
+    inv_quat = robot_quat * torch.tensor([[1, -1, -1, -1]], device=robot_quat.device)
+    # pytorch3d/transforms/rotation_conversions.html#quaternion_multiply
+    w1, x1, y1, z1 = w_quat.unbind(1)
+    w2, x2, y2, z2 = inv_quat.unbind(1)
+    return torch.stack(
+        [
+            w2 * w1 - x2 * x1 - y2 * y1 - z2 * z1,
+            w2 * x1 + x2 * w1 + y2 * z1 - z2 * y1,
+            w2 * y1 - x2 * z1 + y2 * w1 + z2 * x1,
+            w2 * z1 + x2 * y1 - y2 * x1 + z2 * w1,
+        ],
+        dim=1,
+    )
 
 
 def get_camera_views(sensors, views=["rgb"]):
