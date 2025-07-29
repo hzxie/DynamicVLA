@@ -40,8 +40,8 @@ class PickSmWaitTime:
 
     REST = wp.constant(0.08)
     APPROACH_ABOVE_OBJECT = wp.constant(0.4)
-    APPROACH_OBJECT = wp.constant(0.48)
-    GRASP_OBJECT = wp.constant(0.32)
+    APPROACH_OBJECT = wp.constant(0.72)
+    GRASP_OBJECT = wp.constant(0.56)
     LIFT_OBJECT = wp.constant(0.2)
     TO_TARGET = wp.constant(0.6)
 
