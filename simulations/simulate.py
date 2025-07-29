@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-29 14:57:44
+# @Last Modified at: 2025-07-29 19:19:36
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -701,6 +701,7 @@ def get_env_states(states, n_envs=1):
         "ee_quat": ("curr_state", "end_effector", "quat"),
         "joints": ("curr_state", "joints"),
         "object_pos": ("curr_state", "object", "pos"),
+        "object_quat": ("curr_state", "object", "quat"),
         "object_vel": ("curr_state", "object", "velocity"),
         "action": ("next_state", "action"),
     }

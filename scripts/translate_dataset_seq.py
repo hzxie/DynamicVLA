@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 18:09:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-29 16:16:31
+# @Last Modified at: 2025-07-29 19:39:29
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import random
+import shutil
 import sys
 
 import h5py
@@ -172,7 +173,13 @@ def main(args):
             env_state, success = es
             if args.save:
                 assert success  # Only save successful episodes
-                with h5py.File(os.path.join(args.output_dir, "%s-tr.h5" % seq[:-3]), "w") as fp:
+                shutil.copyfile(
+                    os.path.join(args.dataset_dir, "%s.json" % seq[:-3]),
+                    os.path.join(args.output_dir, "%s-tr.json" % seq[:-3]),
+                )
+                with h5py.File(
+                    os.path.join(args.output_dir, "%s-tr.h5" % seq[:-3]), "w"
+                ) as fp:
                     for k, v in env_state.items():
                         fp.create_dataset(k, data=v, compression="gzip")
 
@@ -215,7 +222,7 @@ if __name__ == "__main__":
 
     # Arguments for the script
     parser.add_argument("--path_tracing", action="store_true")
-    parser.add_argument("--physics_time_step", type=float, default=0.1)
+    parser.add_argument("--physics_time_step", type=float, default=0.04)
     parser.add_argument("--timeout", type=float, default=10)
     parser.add_argument(
         "--scene_dir", default=os.path.join(PROJECT_HOME, os.pardir, "scenes")

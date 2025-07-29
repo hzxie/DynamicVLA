@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 07:17:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-28 08:15:56
+# @Last Modified at: 2025-07-29 21:37:11
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -115,6 +115,8 @@ def main(args):
             episode_file_path,
         )
 
+    env.close()
+
 
 if __name__ == "__main__":
     logging.basicConfig(
@@ -143,7 +145,7 @@ if __name__ == "__main__":
 
     # Arguments for the script
     parser.add_argument("--path_tracing", action="store_true")
-    parser.add_argument("--physics_time_step", type=float, default=0.1)
+    parser.add_argument("--physics_time_step", type=float, default=0.04)
     parser.add_argument("--timeout", type=float, default=10)
     parser.add_argument(
         "--scene_dir", default=os.path.join(PROJECT_HOME, os.pardir, "scenes")
