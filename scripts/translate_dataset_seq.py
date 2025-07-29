@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 18:09:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-29 14:30:36
+# @Last Modified at: 2025-07-29 16:16:31
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -116,6 +116,11 @@ def simulate(env, sim_states, robot_origin, robot_quat, final_position, debug=Fa
 
 def main(args):
     sequences = sorted([f for f in os.listdir(args.dataset_dir) if f.endswith(".h5")])
+    if args.range is not None:
+        start, end = args.range
+        logging.info("Processing sequences from %d to %d" % (start, end))
+        sequences = sequences[start:end]
+
     for seq in sequences:
         # Load the dataset sequence
         with h5py.File(os.path.join(args.dataset_dir, seq), "r") as f:
@@ -169,7 +174,6 @@ def main(args):
                 assert success  # Only save successful episodes
                 with h5py.File(os.path.join(args.output_dir, "%s-tr.h5" % seq[:-3]), "w") as fp:
                     for k, v in env_state.items():
-                        print(k, v[0].dtype if v[0] is not None else None)
                         fp.create_dataset(k, data=v, compression="gzip")
 
             if args.debug:
@@ -225,6 +229,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "datasets")
     )
+    parser.add_argument("--range", type=int, nargs=2, default=None)
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args(script_args)
     # Copy the shared parameters from isaaclab_args to args
