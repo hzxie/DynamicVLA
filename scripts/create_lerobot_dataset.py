@@ -205,7 +205,7 @@ def get_episode_frames(episode_path, rot_fmt="quat", override_action=False):
                     frames[i + 1]["observation.state"],
                     frames[i]["action"][-1:],
                 ],
-                axis=-1
+                axis=-1,
             )
         frames = frames[:-1]
 
@@ -286,7 +286,9 @@ def main(repo_id, input_dir, rot_fmt, override_action, push_to_hub):
 
         try:
             _metadata = get_episode_metadata(os.path.join(input_dir, e))
-            _frames = get_episode_frames(os.path.join(input_dir, e), rot_fmt, override_action)
+            _frames = get_episode_frames(
+                os.path.join(input_dir, e), rot_fmt, override_action
+            )
             _task = get_task_instruction(os.path.basename(e))
             for f in _frames:
                 lerobot_dataset.add_frame(f, _task)

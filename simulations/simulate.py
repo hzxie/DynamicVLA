@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-28 12:43:34
+# @Last Modified at: 2025-07-29 14:57:44
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -15,10 +15,10 @@ import os
 import random
 import uuid
 
-import av
 import cv2
 import gymnasium as gym
 import h5py
+import imageio
 import isaaclab.app
 import numpy as np
 import scipy.spatial.transform
@@ -595,7 +595,6 @@ def get_curr_state(
                 container_state.root_quat_w, robot_quat
             ),
         }
-
     if device == "cpu":
         for csk, csv in curr_state.items():
             if isinstance(csv, dict):
@@ -635,34 +634,12 @@ def _get_robot_relative_position(point, robot_quat):
     from isaaclab.utils.math import quat_apply, quat_inv
 
     return quat_apply(quat_inv(robot_quat), point)
-    # # pytorch3d/transforms/rotation_conversions.html#quaternion_invert
-    # inv_quat = robot_quat * torch.tensor([[1, -1, -1, -1]], device=robot_quat.device)
-    # # pytorch3d/transforms/rotation_conversions.html#quaternion_apply
-    # t = 2.0 * torch.cross(inv_quat[..., 1:], point, dim=-1)
-    # inv_offset = (
-    #     point + inv_quat[..., :1] * t + torch.cross(inv_quat[..., 1:], t, dim=-1)
-    # )
-    # return inv_offset
 
 
 def _get_robot_relative_quaternion(w_quat, robot_quat):
     from isaaclab.utils.math import quat_inv, quat_mul
 
     return quat_mul(quat_inv(robot_quat), w_quat)
-    # # pytorch3d/transforms/rotation_conversions.html#quaternion_invert
-    # inv_quat = robot_quat * torch.tensor([[1, -1, -1, -1]], device=robot_quat.device)
-    # # pytorch3d/transforms/rotation_conversions.html#quaternion_multiply
-    # w1, x1, y1, z1  = w_quat.unbind(1)
-    # w2, x2, y2, z2 = inv_quat.unbind(1)
-    # return torch.stack(
-    #     [
-    #         w2 * w1 - x2 * x1 - y2 * y1 - z2 * z1,
-    #         w2 * x1 + x2 * w1 + y2 * z1 - z2 * y1,
-    #         w2 * y1 - x2 * z1 + y2 * w1 + z2 * x1,
-    #         w2 * z1 + x2 * y1 - y2 * x1 + z2 * w1,
-    #     ],
-    #     dim=1,
-    # )
 
 
 def get_camera_views(sensors, views=["rgb"]):
@@ -711,41 +688,60 @@ def _get_semantic_segmentation(rgba_seg_maps, semantic_tags):
     return seg_maps
 
 
-def is_final_position_reached(object_pos, ee_pos, final_pos):
-    DIST_THRESHOLD = 0.02
-
+def is_final_position_reached(object_pos, ee_pos, final_pos, threshold=0.05):
     ee_offset = (ee_pos - final_pos).abs().sum(dim=1)
     obj_offset = (object_pos - final_pos).abs().sum(dim=1)
-    return torch.bitwise_and(ee_offset < DIST_THRESHOLD, obj_offset < DIST_THRESHOLD)
+    return torch.bitwise_and(ee_offset < threshold, obj_offset < threshold)
 
 
-def _get_curr_env_states(cam_views, curr_state, next_state, is_done):
-    # Reorganize by env_id
-    env_states = []
-    for env_id in range(is_done.size(0)):
-        if is_done[env_id].item():
-            env_states.append({})
-            continue
+def get_env_states(states, n_envs=1):
+    KEYS = {
+        "sm_state": ("next_state", "sm_state"),
+        "ee_pos": ("curr_state", "end_effector", "pos"),
+        "ee_quat": ("curr_state", "end_effector", "quat"),
+        "joints": ("curr_state", "joints"),
+        "object_pos": ("curr_state", "object", "pos"),
+        "object_vel": ("curr_state", "object", "velocity"),
+        "action": ("next_state", "action"),
+    }
+    if not states:
+        return []
 
-        env_states.append(
-            {
-                "sm_state": next_state["sm_state"][env_id].item(),
-                "ee_pos": curr_state["end_effector"]["pos"][env_id].cpu().numpy(),
-                "ee_quat": curr_state["end_effector"]["quat"][env_id].cpu().numpy(),
-                "joints": curr_state["joints"][env_id].cpu().numpy(),
-                "object_pos": curr_state["object"]["pos"][env_id].cpu().numpy(),
-                "object_quat": curr_state["object"]["quat"][env_id].cpu().numpy(),
-                "object_vel": curr_state["object"]["velocity"][env_id].cpu().numpy(),
-                "grasp_pos": next_state["grasp_postion"][env_id].cpu().numpy(),
-                "grasp_quat": next_state["grasp_quat"][env_id].cpu().numpy(),
-                "action": next_state["action"][env_id].cpu().numpy(),
-            }
-        )
-        # Add camera views to the env_states
-        if cam_views is not None:
-            for cam, imgs in cam_views.items():
-                for k, v in imgs.items():
-                    env_states[-1]["%s_%s" % (cam, k)] = v[env_id]
+    env_states = [{} for _ in range(n_envs)]
+    for es in states:
+        # es = {"cam_views": dict, "curr_state": dict, "next_state": dict, "is_done": Tensor}
+        for eid in range(n_envs):
+            if es["is_done"][eid].item():
+                continue
+            # Predefined keys
+            for k, v in KEYS.items():
+                value = None
+                if v[0] not in es:
+                    continue
+                # Retrieve the value based on the key path
+                if len(v) == 1:
+                    value = es[v[0]][eid].cpu().numpy()
+                elif len(v) == 2 and v[1] in es[v[0]]:
+                    value = es[v[0]][v[1]][eid].cpu().numpy()
+                elif len(v) == 3 and v[1] in es[v[0]] and v[2] in es[v[0]][v[1]]:
+                    value = es[v[0]][v[1]][v[2]][eid].cpu().numpy()
+
+                if value is None:
+                    continue
+                if k not in env_states[eid]:
+                    env_states[eid][k] = []
+
+                env_states[eid][k].append(value)
+
+            # Camera views
+            if "cam_views" in es:
+                for cam, imgs in es["cam_views"].items():
+                    for k, v in imgs.items():
+                        cam_key = "%s_%s" % (cam, k)
+                        if cam_key not in env_states[eid]:
+                            env_states[eid][cam_key] = []
+
+                        env_states[eid][cam_key].append(v[eid])
 
     return env_states
 
@@ -798,7 +794,7 @@ def simulate(sim_cfg, object_sizes, task_cfg, dir_cfg, debug_cfg):
     )
 
     # Simulation loop
-    env_states = [{} for _ in range(env.unwrapped.num_envs)]
+    env_states = []
     is_done = torch.zeros(
         env.unwrapped.num_envs, dtype=torch.bool, device=env.unwrapped.device
     )
@@ -846,6 +842,7 @@ def simulate(sim_cfg, object_sizes, task_cfg, dir_cfg, debug_cfg):
             curr_state["object"]["pos"],
             curr_state["end_effector"]["pos"],
             state_machine.final_object_pose[:, :3],
+            threshold=0.02,
         )
         # Omit the sequence if the object is dropped or timeout
         if (
@@ -854,18 +851,16 @@ def simulate(sim_cfg, object_sizes, task_cfg, dir_cfg, debug_cfg):
         ):
             break
         # Save current env. states (camera views, robot states, and object states)
-        _env_states = _get_curr_env_states(cam_views, curr_state, next_state, is_done)
-        # Reorganize the env_states by keys
-        for eid, es in enumerate(_env_states):
-            for k, v in es.items():
-                # Omit these keys in the dumped data
-                if k in ["grasp_pos", "grasp_quat"]:
-                    continue
-                if k not in env_states[eid]:
-                    env_states[eid][k] = []
+        env_states.append(
+            {
+                "cam_views": cam_views,
+                "curr_state": curr_state,
+                "next_state": next_state,
+                "is_done": is_done,
+            }
+        )
 
-                env_states[eid][k].append(v)
-
+    env_states = get_env_states(env_states, env.unwrapped.num_envs)
     env.close()
     # Ignore the simulation if the task is not finished
     # If in debug mode, save all simulation data even if the task is not finished
@@ -1046,24 +1041,22 @@ def dump_video(frames, output_path, fps=24):
     if len(frames) == 0:
         return
 
-    # Ref: lerobot.common.datasets.video_utils.encode_video_frames
-    with av.open(str(output_path), "w") as output:
-        output_stream = output.add_stream(
-            "libsvtav1", fps, options={"g": "2", "crf": "30"}
-        )
-        output_stream.pix_fmt = "yuv420p"
-        output_stream.width = frames[0].shape[1]
-        output_stream.height = frames[0].shape[0]
-        # Loop through input frames and encode them
-        for frame in frames:
-            input_frame = av.VideoFrame.from_image(Image.fromarray(frame))
-            packet = output_stream.encode(input_frame)
-            if packet:
-                output.mux(packet)
-        # Flush the encoder
-        packet = output_stream.encode()
-        if packet:
-            output.mux(packet)
+    writer = imageio.get_writer(
+        str(output_path),
+        fps=fps,
+        codec="libx264",
+        format="ffmpeg",
+        ffmpeg_params=[
+            "-crf",
+            "30",
+            "-g",
+            "2",
+        ],
+    )
+    for frame in frames:
+        writer.append_data(frame.astype(np.uint8))
+
+    writer.close()
 
 
 def main(simulation_app, args):

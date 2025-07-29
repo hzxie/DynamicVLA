@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-27 21:43:19
+# @Last Modified at: 2025-07-29 05:56:43
 # @Email:  root@haozhexie.com
 
 import collections
@@ -40,8 +40,8 @@ class PickSmWaitTime:
 
     REST = wp.constant(0.08)
     APPROACH_ABOVE_OBJECT = wp.constant(0.4)
-    APPROACH_OBJECT = wp.constant(0.48)
-    GRASP_OBJECT = wp.constant(0.32)
+    APPROACH_OBJECT = wp.constant(0.72)
+    GRASP_OBJECT = wp.constant(0.56)
     LIFT_OBJECT = wp.constant(0.2)
     TO_TARGET = wp.constant(0.6)
 
@@ -194,9 +194,9 @@ class PickStateMachine:
             keep_indices = [i for i in range(3) if i != object_size_z_max]
             object_size_xy_rot = object_projected_size[keep_indices, :2]
             object_size_xy_norm = torch.norm(object_size_xy_rot, dim=1)
-            if abs(object_size_xy_norm[0] / object_size_xy_norm[1] - 1) < 0.05 :
+            if abs(object_size_xy_norm[0] / object_size_xy_norm[1] - 1) < 0.05:
                 short_axis = 0
-            else :
+            else:
                 short_axis = torch.argmin(object_size_xy_norm)
             grasp_direction = torch.tensor(
                 [
