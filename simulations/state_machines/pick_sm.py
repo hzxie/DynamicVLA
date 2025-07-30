@@ -229,28 +229,10 @@ class PickStateMachine:
         return self._quat_multiply(gsp_quat, self.final_object_pose[:, 3:7])
 
     def _get_pose_angle(
-        self, object_velocity: torch.Tensor, ee_quat: torch.Tensor
+        self, target_quat: torch.Tensor, ee_quat: torch.Tensor
     ) -> torch.Tensor:
-        # Determine the object direction according to the velocity
-        obj_pose = torch.arctan2(object_velocity[:, 1], object_velocity[:, 0])
-        obj_pose = torch.where(obj_pose >= np.pi / 2, obj_pose - np.pi, obj_pose)
-        obj_pose = torch.where(obj_pose <= -np.pi / 2, obj_pose + np.pi, obj_pose)
-        obj_pose = obj_pose + np.pi / 2
-
-        # Determine the end-effector direction according to the quaternion
-        w, x, y, z = ee_quat.unbind(dim=1)
-        ee_pose = torch.atan2(2 * (x * y + z * w), 1 - 2 * (y**2 + z**2))
-        ee_pose = torch.where(ee_pose <= 0, ee_pose + np.pi, ee_pose)
-
-        # Compute the angle between the end effector and the object
-        pose_angle = obj_pose - ee_pose
-        pose_angle = abs(pose_angle)
-        pose_angle = torch.where(pose_angle > np.pi / 2, np.pi - pose_angle, pose_angle)
-
-        # Reset the angle as 0 if the object is static (Bug fix for static objects)
-        pose_angle[self._is_object_static(object_velocity)] = 0.0
-
-        return pose_angle * 180 / np.pi
+        from isaaclab.utils.math import quat_box_minus
+        return quat_box_minus(target_quat, ee_quat)[:, 2] * 180 / np.pi
 
     def _quat_multiply(self, q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
         """Quaternion multiplication."""
@@ -286,10 +268,12 @@ class PickStateMachine:
             curr_state["object"]["size"],
             curr_state["object"]["velocity"],
         )
-        # pose_angle = self._get_pose_angle(
-        #     curr_state["object"]["velocity"], curr_state["end_effector"]["quat"]
-        # )
-        pose_angle = torch.zeros((self.num_envs), device=self.device)
+
+        pose_angle = self._get_pose_angle(
+            grasp_quat[:, [3, 0, 1, 2]], 
+            curr_state["end_effector"]["quat"],
+        )
+
         grasp_pose = torch.cat([self.grasp_position, grasp_quat], dim=-1)
         object_pose = torch.cat([curr_state["object"]["pos"], grasp_quat], dim=-1)
 
@@ -484,7 +468,7 @@ def infer_state_machine(
             is_offset_below_threshold(
                 offset_object_ee, thres_object_ee, object_vel[tid]
             )
-            # and pose_angle[tid] < grasp_pose_threshold # we don't care angle for franka
+            and pose_angle[tid] < grasp_pose_threshold
         ):
             if sm_wait_time[tid] >= PickSmWaitTime.APPROACH_ABOVE_OBJECT:
                 sm_state[tid] = PickSmState.APPROACH_OBJECT
