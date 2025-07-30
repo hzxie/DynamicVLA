@@ -505,8 +505,8 @@ def get_final_position(task, robot, device="cpu"):
 def _get_final_quat(task, robot, device="cpu"):
     FINAL_QUATS = {
         "pick": {
-            "franka": [0, 1, 0, 0],
-            "piper": [0, 1, 0, 0],
+            "franka": [-1, 0, 0, 0],
+            "piper": [-1, 0, 0, 0],
         },
         "place": {
             "franka": [0, 1, 0, 0],

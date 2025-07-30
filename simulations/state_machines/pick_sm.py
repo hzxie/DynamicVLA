@@ -213,7 +213,8 @@ class PickStateMachine:
         gsp_theta = torch.where(gsp_theta >= np.pi / 2, gsp_theta - np.pi, gsp_theta)
         gsp_theta = torch.where(gsp_theta <= -np.pi / 2, gsp_theta + np.pi, gsp_theta)
         gsp_theta = np.pi / 2 - gsp_theta
-        gsp_theta = torch.where(gsp_theta < 1e-2, np.pi, gsp_theta)
+        gsp_theta = torch.where(gsp_theta >= np.pi / 2, gsp_theta - np.pi, gsp_theta)
+        gsp_theta = torch.where(gsp_theta > np.pi / 2 - 1e-2, -np.pi, gsp_theta)
 
         gsp_quat = torch.stack(
             [
