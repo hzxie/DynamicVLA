@@ -41,7 +41,7 @@ class PickSmWaitTime:
     REST = wp.constant(0.08)
     APPROACH_ABOVE_OBJECT = wp.constant(0.4)
     APPROACH_OBJECT = wp.constant(0.72)
-    GRASP_OBJECT = wp.constant(0.56)
+    GRASP_OBJECT = wp.constant(0.72)
     LIFT_OBJECT = wp.constant(0.2)
     TO_TARGET = wp.constant(0.6)
 
@@ -148,7 +148,7 @@ class PickStateMachine:
     ) -> torch.Tensor:
         WAITING_TIME = 0.23
         TABLE_HEIGHT_THRES = 0.006
-        OBJECT_HEIGHT_DISPLACEMENT = 0.006
+        OBJECT_HEIGHT_DISPLACEMENT = 0.008
         grasp_position = object_position.clone() + object_velocity * WAITING_TIME
         object_height = torch.norm(object_projected_size[:, 2])
         grasp_position_z = grasp_position[:, 2]
