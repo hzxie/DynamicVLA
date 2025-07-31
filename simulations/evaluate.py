@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-28 20:30:57
+# @Last Modified at: 2025-07-31 15:38:55
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -422,12 +422,12 @@ def main(simulation_app, args):
         sim_status, cam_views = simulate(
             env, obs_socket, act_socket, robot_origin, robot_quat, final_position
         )
-        logging.info("Resetting environment with code: %d" % sim_status)
+        logging.info("Simulation finished with code: %d" % sim_status)
         env.reset(seed=env_cfg["seed"])
         # Clear the action socket
         get_latest_action(act_socket)
         # Save the frames if needed
-        # NOTE: Reset will occur twice, and the second time will include just one frame
+        # NOTE: Reset will occur twice, and the second time will produce just one frame
         if args.save and len(cam_views) > 1:
             episode_name = get_episode_name(os.path.basename(args.env_cfg), sim_status)
             episode_file_path = os.path.join(args.output_dir, episode_name)

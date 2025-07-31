@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-25 11:07:24
+# @Last Modified at: 2025-07-31 15:11:37
 # @Email:  root@haozhexie.com
 
 import json
@@ -237,6 +237,7 @@ def get_policy_cfg(
 
         input_features = get_policy_features(cfg_data.get("input_features"))
         output_features = get_policy_features(cfg_data.get("output_features"))
+        chunk_size = cfg_data.get("chunk_size")
         logging.info(
             f"Loaded policy configuration from {cfg_file} with input features:"
             f"{input_features} and output features: {output_features}"

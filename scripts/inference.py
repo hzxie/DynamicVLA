@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-26 11:56:23
+# @Last Modified at: 2025-07-31 15:33:41
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -210,7 +210,7 @@ def main(
     actions = []
     instruction = None
     while True:
-        if n_tests > n_total_tests:
+        if n_tests >= n_total_tests:
             logging.info("Reached the maximum number of tests: %d" % n_total_tests)
             break
 
@@ -220,10 +220,11 @@ def main(
 
         # Determine the instruction from the observation
         if "task" in observation:
-            n_tests += 1
+            if len(actions) > 0:
+                n_tests += 1
+
             instruction = observation["task"]
             logging.info("[Test%02d] Received new task: %s" % (n_tests, instruction))
-            print(n_tests, len(actions), len(getattr(get_action, "states", [])))
             # Save the debug states/actions
             if output_dir and actions:
                 dump_vla_states(
