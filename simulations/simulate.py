@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-29 19:19:36
+# @Last Modified at: 2025-07-31 14:10:17
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -1017,10 +1017,8 @@ def _get_state_text(state):
     text = ""
     for k, v in state.items():
         k = k.replace("_", " ").title()
-        if isinstance(v, (int, np.int32, np.int64)):
+        if isinstance(v, (int, np.int32, np.int64)) or v.ndim == 0:
             text += "%s: %d\n" % (k, v)
-        elif isinstance(v, float):
-            text += "%s: %.3f\n" % (k, v)
         elif isinstance(v, np.ndarray):
             # Convert all quaternions to Euler angles
             if k.find("Quat") != -1:
