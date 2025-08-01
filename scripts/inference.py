@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-01 11:57:44
+# @Last Modified at: 2025-08-01 18:38:30
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -188,7 +188,7 @@ def get_test_stats(test_results):
         "success_rate": n_success_trials / len(test_results),
         "avg_steps": n_steps / len(test_results),
         "avg_actions": n_actions / len(test_results),
-        "avg_path_length": np.mean(path_length) if path_length else 0,
+        "avg_path_length": np.mean(path_length).item() if path_length else 0,
     }
 
 
