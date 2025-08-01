@@ -4,11 +4,10 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-31 15:33:41
+# @Last Modified at: 2025-08-01 11:57:44
 # @Email:  root@haozhexie.com
 
 import argparse
-import datetime
 import logging
 import os
 import pathlib
@@ -162,13 +161,35 @@ def get_action(vla_model, observation, rotation, use_delta_action, debug=False):
     return action
 
 
-def dump_vla_states(vla_name, states, actions, output_dir):
-    output_path = os.path.join(
-        output_dir,
-        "%s-%s.pkl" % (vla_name, datetime.datetime.now().strftime("%m%d-%H%M%S")),
-    )
+def dump_vla_states(episode_name, vla_cfg, states, actions, output_dir):
+    output_path = os.path.join(output_dir, "%s.pkl" % episode_name)
     with open(output_path, "wb") as fp:
-        pickle.dump({"state": states, "action": actions}, fp)
+        pickle.dump({"vla": vla_cfg, "state": states, "action": actions}, fp)
+
+
+def get_test_stats(test_results):
+    n_steps = 0
+    n_actions = 0
+    n_success_trials = 0
+    path_length = []
+    for tr in test_results:
+        if not tr["success"]:
+            continue
+
+        n_success_trials += 1
+        n_steps += len(tr["ee_path"])
+        n_actions += len(tr["actions"])
+        path_length.append(
+            np.sum(np.linalg.norm(np.diff(tr["ee_path"], axis=0), axis=-1))
+        )
+
+    return {
+        "n_tests": len(test_results),
+        "success_rate": n_success_trials / len(test_results),
+        "avg_steps": n_steps / len(test_results),
+        "avg_actions": n_actions / len(test_results),
+        "avg_path_length": np.mean(path_length) if path_length else 0,
+    }
 
 
 def main(
@@ -207,11 +228,10 @@ def main(
 
     logging.info("Starting evaluation the VLA model ...")
     n_tests = 0
-    actions = []
     instruction = None
+    test_results = []
     while True:
         if n_tests >= n_total_tests:
-            logging.info("Reached the maximum number of tests: %d" % n_total_tests)
             break
 
         observation = get_latest_observation(obs_socket)
@@ -220,26 +240,39 @@ def main(
 
         # Determine the instruction from the observation
         if "task" in observation:
-            if len(actions) > 0:
-                n_tests += 1
-
             instruction = observation["task"]
             logging.info("[Test%02d] Received new task: %s" % (n_tests, instruction))
-            # Save the debug states/actions
-            if output_dir and actions:
-                dump_vla_states(
-                    os.path.basename(vla_weights),
-                    getattr(get_action, "states", []),
-                    actions,
-                    output_dir,
-                )
-                setattr(get_action, "states", [])
             # Reset the model with the new instruction
             action = None
             actions = []
             vla_model.reset()
+            setattr(get_action, "states", [])
             if hasattr(get_action, "count"):
                 delattr(get_action, "count")
+        elif "success" in observation:
+            observation["actions"] = actions
+            test_results.append(observation)
+            # Save the debug states/actions
+            if output_dir:
+                dump_vla_states(
+                    observation["name"],
+                    vla_model.config,
+                    getattr(get_action, "states", []),
+                    actions,
+                    output_dir,
+                )
+
+            logging.info(
+                "[Test%02d] Test done with %s in %d steps and %d actions."
+                % (
+                    n_tests,
+                    "SUCCESS" if observation["success"] else "FAILURE",
+                    len(observation["ee_path"]),
+                    len(observation["actions"]),
+                )
+            )
+            n_tests += 1
+            continue
         elif instruction is not None:
             observation["task"] = instruction
         else:
@@ -253,6 +286,9 @@ def main(
             act_socket.send_pyobj(action, flags=zmq.NOBLOCK)
             logging.debug("Sending action: %s" % (np.round(action, 2),))
             actions.append(action)
+
+    logging.info("Evaluation completed. Total tests run: %d" % n_tests)
+    logging.info("Test results: %s" % get_test_stats(test_results))
 
 
 if __name__ == "__main__":
@@ -294,7 +330,7 @@ if __name__ == "__main__":
         "-n",
         "--n_tests",
         type=int,
-        default=10,
+        default=20,
         help="The number of tests to run",
     )
     parser.add_argument(

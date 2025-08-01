@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-31 15:38:55
+# @Last Modified at: 2025-08-01 11:19:36
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -271,12 +271,10 @@ def _get_action_tensor(action, num_envs, device):
 def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_position):
     import configs.robot_cfg
 
-    sim_status = 0
     last_action = None
-    cam_views = []
-
+    sim_results = {"status": -1, "cam_views": [], "ee_path": []}
     # The simulation loop
-    while sim_status == 0:
+    while sim_results["status"] == -1:
         # scene_state = env.unwrapped.scene.state
         cam_view = sim.get_camera_views(env.unwrapped.scene.sensors, ["rgb"])
         curr_state = sim.get_curr_state(
@@ -287,7 +285,8 @@ def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_positi
             robot_quat=robot_quat,
             device=env.unwrapped.device,
         )
-        cam_views.append(cam_view)
+        sim_results["cam_views"].append(cam_view)
+        sim_results["ee_path"].append(curr_state["end_effector"]["pos"].cpu().numpy())
         obs_socket.send_pyobj(
             {
                 "observation.state": {
@@ -302,14 +301,10 @@ def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_positi
 
         action = get_latest_action(act_socket)
         if action is not None:
-            logging.debug("Received action with shape: %s" % (action.shape,))
+            # logging.debug("Received action with shape: %s" % (action.shape,))
             action = _get_action_tensor(
                 action, env.unwrapped.num_envs, env.unwrapped.device
             )
-            # Delta the end-effector position from the action
-            # action[:, :3] += torch.from_numpy(rbt_state["end_effector"]["pos"]).to(
-            #     action.device
-            # )
             last_action = action
 
         # If no action is received, use the previous action to make the
@@ -329,19 +324,19 @@ def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_positi
             )
 
         response = env.step(last_action)
-        if (
-            response[-1]["log"]["Episode_Termination/time_out"]
-            or response[-1]["log"]["Episode_Termination/object_dropping"]
-        ):
-            sim_status = 1
-        elif sim.is_final_position_reached(
+        if sim.is_final_position_reached(
             curr_state["object"]["pos"],
             curr_state["end_effector"]["pos"],
             final_position,
         ):
-            sim_status = 2
+            sim_results["status"] = 0
+        elif (
+            response[-1]["log"]["Episode_Termination/time_out"]
+            or response[-1]["log"]["Episode_Termination/object_dropping"]
+        ):
+            sim_results["status"] = 1 if action is not None else 2
 
-    return sim_status, cam_views
+    return sim_results
 
 
 def get_frames(cam_views):
@@ -363,7 +358,7 @@ def get_episode_name(cfg_filename, sim_status):
     return "%s-%s-%s.mp4" % (
         seq_name,
         datetime.datetime.now().strftime("%m%d-%H%M%S"),
-        "SUCCESS" if sim_status == 2 else "FAIL",
+        "SUCCESS" if sim_status == 0 else "FAIL",
     )
 
 
@@ -419,26 +414,41 @@ def main(simulation_app, args):
     while simulation_app.is_running():
         # Send the task instruction at the beginning of the simulation
         obs_socket.send_pyobj({"task": instruction})
-        sim_status, cam_views = simulate(
+        sim_results = simulate(
             env, obs_socket, act_socket, robot_origin, robot_quat, final_position
         )
-        logging.info("Simulation finished with code: %d" % sim_status)
+        logging.info("Simulation finished with code: %d" % sim_results["status"])
         env.reset(seed=env_cfg["seed"])
         # Clear the action socket
         get_latest_action(act_socket)
         # Save the frames if needed
-        # NOTE: Reset will occur twice, and the second time will produce just one frame
-        if args.save and len(cam_views) > 1:
-            episode_name = get_episode_name(os.path.basename(args.env_cfg), sim_status)
+        # NOTE:
+        # 1) Reset will occur twice, and the second time will produce just one frame
+        # 2) sim_status == 1 means no action was received, so we do not save the frames
+        if sim_results["status"] == 2:
+            logging.info("No action received in this episode.")
+            continue
+
+        episode_name = get_episode_name(
+            os.path.basename(args.env_cfg), sim_results["status"]
+        )
+        obs_socket.send_pyobj(
+            {
+                "name": episode_name[:-4],  # Remove the '.mp4' extension
+                "success": sim_results["status"] == 0,
+                "ee_path": np.array(sim_results["ee_path"]),
+            }
+        )
+        if args.save and len(sim_results["cam_views"]) > 1:
             episode_file_path = os.path.join(args.output_dir, episode_name)
             logging.info(
-                "Saving videos (%d frames) to %s" % (len(cam_views), episode_file_path)
+                "Saving videos (%d frames) to %s"
+                % (len(sim_results["cam_views"]), episode_file_path)
             )
             sim.dump_video(
-                sim.get_frames(get_frames(cam_views), state_keys=[]),
+                sim.get_frames(get_frames(sim_results["cam_views"]), state_keys=[]),
                 episode_file_path,
             )
-            breakpoint()
 
 
 if __name__ == "__main__":
@@ -468,7 +478,7 @@ if __name__ == "__main__":
 
     # Arguments for the script
     parser.add_argument("--path_tracing", action="store_true")
-    parser.add_argument("--physics_time_step", type=float, default=0.1)
+    parser.add_argument("--physics_time_step", type=float, default=0.04)
     parser.add_argument("--timeout", type=float, default=10)
     parser.add_argument(
         "--scene_dir", default=os.path.join(PROJECT_HOME, os.pardir, "scenes")
