@@ -447,7 +447,7 @@
     type="fixed">
     <origin
       xyz="0 0 0"
-      rpy="0 0 0" />
+      rpy="0 0 3.1416" />
     <parent
       link="link6" />
     <child

@@ -474,7 +474,12 @@ def get_rest_pose(robot, device="cpu"):
             device=device,
         )
     elif robot == "piper":
-        raise NotImplementedError
+        return torch.tensor(
+            [[0.373, 0.0, 0.271, 0.0, 0.9739, 0.0, 0.227]],
+            # [[0.3, 0.0, 0.3, 0.0, 0.0, 1.0, 0.0]],
+            dtype=torch.float32,
+            device=device,
+        )
     else:
         raise ValueError("Unknown robot: %s." % robot)
 

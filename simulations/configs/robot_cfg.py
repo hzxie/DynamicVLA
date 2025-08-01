@@ -74,7 +74,7 @@ class PiperActionCfg(ActionCfg):
         asset_name="robot",
         joint_names=["joint8", "joint7"],
         open_command_expr={"joint8": -0.035, "joint7": 0.035},
-        close_command_expr={"joint8": 0.0, "joint7": 0.0},
+        close_command_expr={"joint8": -0.01, "joint7": 0.01},
     )
 
 
