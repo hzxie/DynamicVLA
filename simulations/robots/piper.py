@@ -38,7 +38,13 @@ AGILEX_PIPER_CFG = ArticulationCfg(
             solver_position_iteration_count=8,
             solver_velocity_iteration_count=0,
         ),
-        # collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
+        collision_props=sim_utils.CollisionPropertiesCfg(
+            collision_enabled=True,
+            contact_offset=0.01,
+            rest_offset=0.0,
+            min_torsional_patch_radius=0.01,
+            torsional_patch_radius=0.01,
+        ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         joint_pos={
@@ -72,7 +78,7 @@ AGILEX_PIPER_CFG = ArticulationCfg(
             effort_limit_sim=200.0,
             velocity_limit_sim=0.2,
             stiffness=2e3,
-            damping=1e2,
+            damping=5e2,
             friction=50,
         ),
     },
@@ -84,9 +90,9 @@ AGILEX_PIPER_CFG = ArticulationCfg(
 AGILEX_PIPER_HIGH_PD_CFG = AGILEX_PIPER_CFG.copy()
 AGILEX_PIPER_HIGH_PD_CFG.spawn.rigid_props.disable_gravity = True
 AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_shoulder"].stiffness = 400.0
-AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_shoulder"].damping = 80.0
+AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_shoulder"].damping = 125.0
 AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_forearm"].stiffness = 400.0
-AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_forearm"].damping = 80.0
+AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_forearm"].damping = 125.0
 """Configuration of Franka Emika Panda robot with stiffer PD control.
 
 This configuration is useful for task-space control using differential IK.
