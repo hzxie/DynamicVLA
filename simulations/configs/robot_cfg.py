@@ -135,7 +135,7 @@ def get_ee_frame_cfg(robot: str) -> FrameTransformerCfg:
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Robot/gripper_base",
                     name="end_effector",
-                    offset=OffsetCfg(pos=[0.0, 0.0, 0.1434]),
+                    offset=OffsetCfg(pos=[0.0, 0.0, 0.1304]),
                 ),
             ],
         )

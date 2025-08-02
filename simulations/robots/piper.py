@@ -78,7 +78,7 @@ AGILEX_PIPER_CFG = ArticulationCfg(
             effort_limit_sim=200.0,
             velocity_limit_sim=0.2,
             stiffness=2e3,
-            damping=5e2,
+            damping=6e2,
             friction=50,
         ),
     },
@@ -90,9 +90,9 @@ AGILEX_PIPER_CFG = ArticulationCfg(
 AGILEX_PIPER_HIGH_PD_CFG = AGILEX_PIPER_CFG.copy()
 AGILEX_PIPER_HIGH_PD_CFG.spawn.rigid_props.disable_gravity = True
 AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_shoulder"].stiffness = 400.0
-AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_shoulder"].damping = 125.0
+AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_shoulder"].damping = 120.0
 AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_forearm"].stiffness = 400.0
-AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_forearm"].damping = 125.0
+AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_forearm"].damping = 120.0
 """Configuration of PIPER robot with stiffer PD control.
 
 This configuration is useful for task-space control using differential IK.
