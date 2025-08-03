@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-17 16:10:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-23 06:45:09
+# @Last Modified at: 2025-08-02 08:55:12
 # @Email:  root@haozhexie.com
 
 import logging
@@ -302,7 +302,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         if self.delta_action:
             act_dim = item["action"].shape[-1] - 1
             # Only delta the XYZ and rotation components of the action
-            item["action"][:, :act_dim] -= item["observation.state"][:, :act_dim]
+            item["action"][..., :act_dim] -= item["observation.state"][..., :act_dim]
 
         # Add task as a string
         task_idx = episode["task_index"][frame_idx].item()

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-01 07:40:13
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-01 18:43:18
+# @Last Modified at: 2025-08-02 08:33:08
 # @Email:  root@haozhexie.com
 
 import ast
@@ -94,8 +94,8 @@ def test_checkpoint(
         args.append("-d")
 
     test_results = None
-    output = subprocess.check_output(args, stderr=subprocess.STDOUT, text=True)
     try:
+        output = subprocess.check_output(args, stderr=subprocess.STDOUT, text=True)
         test_results = re.search(r"Test results:\s*(\{.*?\})", output)
         test_results = ast.literal_eval(test_results.group(1))
     except Exception as ex:
@@ -118,6 +118,12 @@ def main(
     act_port,
     n_total_tests,
 ):
+    # Load previously evaluated checkpoints
+    eval_ckpts_file_path = os.path.join(work_dir, "checkpoints.txt")
+    if os.path.exists(eval_ckpts_file_path):
+        with open(eval_ckpts_file_path, "r") as fp:
+            setattr(get_new_checkpoints, "checkpoints", fp.read().splitlines())
+
     # TensorBoard writers for different experiments
     tb_writers = {}
     # Evaluate checkpoints in a loop
@@ -146,6 +152,13 @@ def main(
                 act_port,
                 n_total_tests,
             )
+            with open(eval_ckpts_file_path, "a") as fp:
+                fp.write("%s\n" % nc)
+
+            if test_results is None:
+                logging.error("Failed to get test results for checkpoint %s" % nc)
+                continue
+
             logging.info("Test results for checkpoint %s: %s" % (nc, test_results))
             if exp_name not in tb_writers:
                 tb_writers[exp_name] = torch.utils.tensorboard.SummaryWriter(
