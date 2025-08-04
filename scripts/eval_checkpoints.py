@@ -109,9 +109,9 @@ def test_checkpoint(
 def add_tensorboard_scalars(test_results, ep_idx, tb_writer):
     for env, results in test_results.items():
         tb_writer.add_scalar("%s/SuccessRate" % env, results["success_rate"], ep_idx)
-        tb_writer.add_scalar("%s/SuccessRate" % env, results["avg_steps"], ep_idx)
-        tb_writer.add_scalar("%s/SuccessRate" % env, results["avg_actions"], ep_idx)
-        tb_writer.add_scalar("%s/SuccessRate" % env, results["avg_path_length"], ep_idx)
+        tb_writer.add_scalar("%s/AvgSteps" % env, results["avg_steps"], ep_idx)
+        tb_writer.add_scalar("%s/AvgActions" % env, results["avg_actions"], ep_idx)
+        tb_writer.add_scalar("%s/PathLength" % env, results["avg_path_length"], ep_idx)
 
 
 def main(

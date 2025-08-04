@@ -3,12 +3,12 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Configuration for the PIPER Emika robots.
+"""Configuration for the PIPER robots.
 
 The following configurations are available:
 
-* :obj:`PIPER_PANDA_CFG`: PIPER Emika Panda robot with Panda hand
-* :obj:`PIPER_PANDA_HIGH_PD_CFG`: PIPER Emika Panda robot with Panda hand with stiffer PD control
+* :obj:`AGILEX_PIPER_CFG`: PIPER robot
+* :obj:`AGILEX_PIPER_HIGH_PD_CFG`: PIPER robot with stiffer PD control
 
 Reference: https://github.com/agilexrobotics/PIPER_ros
 """
@@ -78,22 +78,22 @@ AGILEX_PIPER_CFG = ArticulationCfg(
             effort_limit_sim=200.0,
             velocity_limit_sim=0.2,
             stiffness=2e3,
-            damping=5e2,
+            damping=6e2,
             friction=50,
         ),
     },
     soft_joint_pos_limit_factor=1.0,
 )
-"""Configuration of PIPER Emika Panda robot."""
+"""Configuration of PIPER robot."""
 
 
 AGILEX_PIPER_HIGH_PD_CFG = AGILEX_PIPER_CFG.copy()
 AGILEX_PIPER_HIGH_PD_CFG.spawn.rigid_props.disable_gravity = True
 AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_shoulder"].stiffness = 400.0
-AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_shoulder"].damping = 125.0
+AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_shoulder"].damping = 120.0
 AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_forearm"].stiffness = 400.0
-AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_forearm"].damping = 125.0
-"""Configuration of Franka Emika Panda robot with stiffer PD control.
+AGILEX_PIPER_HIGH_PD_CFG.actuators["piper_forearm"].damping = 120.0
+"""Configuration of PIPER robot with stiffer PD control.
 
 This configuration is useful for task-space control using differential IK.
 """
