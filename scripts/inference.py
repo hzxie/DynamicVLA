@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-01 18:38:30
+# @Last Modified at: 2025-08-04 19:33:30
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -168,39 +168,44 @@ def dump_vla_states(episode_name, vla_cfg, states, actions, output_dir):
 
 
 def get_test_stats(test_results):
-    n_steps = 0
-    n_actions = 0
-    n_success_trials = 0
-    path_length = []
-    for tr in test_results:
-        if not tr["success"]:
-            continue
+    stats = {}
+    for env, results in test_results.items():
+        n_steps = 0
+        n_actions = 0
+        n_success_trials = 0
+        path_length = []
+        for tr in results:
+            if not tr["success"]:
+                continue
 
-        n_success_trials += 1
-        n_steps += len(tr["ee_path"])
-        n_actions += len(tr["actions"])
-        path_length.append(
-            np.sum(np.linalg.norm(np.diff(tr["ee_path"], axis=0), axis=-1))
-        )
+            n_success_trials += 1
+            n_steps += len(tr["ee_path"])
+            n_actions += len(tr["actions"])
+            path_length.append(
+                np.sum(np.linalg.norm(np.diff(tr["ee_path"], axis=0), axis=-1))
+            )
 
-    return {
-        "n_tests": len(test_results),
-        "success_rate": n_success_trials / len(test_results),
-        "avg_steps": n_steps / len(test_results),
-        "avg_actions": n_actions / len(test_results),
-        "avg_path_length": np.mean(path_length).item() if path_length else 0,
-    }
+        stats[env] = {
+            "n_tests": len(results),
+            "success_rate": n_success_trials / len(results),
+            "avg_steps": n_steps / len(results),
+            "avg_actions": n_actions / len(results),
+            "avg_path_length": np.mean(path_length).item() if path_length else 0,
+        }
+
+    return stats
 
 
 def main(
     vla_model,
     vla_weights,
+    vla_alias,
+    vla_epoch_idx,
     rotation,
     use_delta_action,
     host,
     img_port,
     act_port,
-    n_total_tests,
     output_dir,
 ):
     # Initialize the VLA model
@@ -227,39 +232,50 @@ def main(
             time.sleep(5)
 
     logging.info("Starting evaluation the VLA model ...")
-    n_tests = 0
-    instruction = None
-    test_results = []
-    while True:
-        if n_tests >= n_total_tests:
-            break
+    # Hand-shake to the evaluation server
+    act_socket.send_pyobj(
+        {
+            "vla": (
+                vla_alias if vla_alias is not None else os.path.basename(vla_weights)
+            ),
+            "epoch": vla_epoch_idx,
+        },
+        flags=zmq.NOBLOCK,
+    )
 
+    actions = []
+    n_tests = 0
+    test_results = {}
+    instruction = None
+    while True:
         observation = get_latest_observation(obs_socket)
         if observation is None:
             continue
 
-        # Determine the instruction from the observation
-        if "task" in observation:
-            instruction = observation["task"]
-            logging.info("[Test%02d] Received new task: %s" % (n_tests, instruction))
-            # Reset the model with the new instruction
-            action = None
-            actions = []
-            vla_model.reset()
-            setattr(get_action, "states", [])
-            if hasattr(get_action, "count"):
-                delattr(get_action, "count")
+        if "success_rates" in observation:
+            logging.info(
+                "Test suite done with success rates: %s" % observation["success_rates"]
+            )
+            break
         elif "success" in observation:
             observation["actions"] = actions
-            test_results.append(observation)
+            env_name = observation["env_name"]
+            if env_name not in test_results:
+                test_results[env_name] = []
+
+            test_results[env_name].append(observation)
             # Save the debug states/actions
             if output_dir:
+                _output_dir = os.path.join(
+                    output_dir, os.path.basename(vla_weights), "%04d" % vla_epoch_idx
+                )
+                os.makedirs(_output_dir, exist_ok=True)
                 dump_vla_states(
-                    observation["name"],
+                    observation["eps_name"],
                     vla_model.config,
                     getattr(get_action, "states", []),
                     actions,
-                    output_dir,
+                    _output_dir,
                 )
 
             logging.info(
@@ -273,6 +289,18 @@ def main(
             )
             n_tests += 1
             continue
+        elif "task" in observation:
+            instruction = observation["task"]
+            logging.info(
+                "[Test%02d] Received new task: %s" % (n_tests, instruction.strip())
+            )
+            # Reset the model with the new instruction
+            action = None
+            actions = []
+            vla_model.reset()
+            setattr(get_action, "states", [])
+            if hasattr(get_action, "count"):
+                delattr(get_action, "count")
         elif instruction is not None:
             observation["task"] = instruction
         else:
@@ -283,7 +311,7 @@ def main(
             vla_model, observation, rotation, use_delta_action, output_dir is not None
         )
         if action is not None:
-            act_socket.send_pyobj(action, flags=zmq.NOBLOCK)
+            act_socket.send_pyobj({"action": action}, flags=zmq.NOBLOCK)
             logging.debug("Sending action: %s" % (np.round(action, 2),))
             actions.append(action)
 
@@ -327,11 +355,18 @@ if __name__ == "__main__":
         help="The path to the pretrained VLA model",
     )
     parser.add_argument(
-        "-n",
-        "--n_tests",
+        "-a",
+        "--alias",
+        type=str,
+        default=None,
+        help="The alias of the pretrained VLA model",
+    )
+    parser.add_argument(
+        "-i",
+        "--epoch",
         type=int,
-        default=20,
-        help="The number of tests to run",
+        default=0,
+        help="The epoch index of the pretrained VLA model",
     )
     parser.add_argument(
         "-o",
@@ -344,11 +379,12 @@ if __name__ == "__main__":
     main(
         args.model,
         args.weights,
+        args.alias,
+        args.epoch,
         args.rotation,
         args.delta,
         args.host,
         args.img_port,
         args.act_port,
-        args.n_tests,
         args.output_dir,
     )

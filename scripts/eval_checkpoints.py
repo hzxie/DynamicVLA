@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-01 07:40:13
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-02 08:33:08
+# @Last Modified at: 2025-08-04 19:46:08
 # @Email:  root@haozhexie.com
 
 import ast
@@ -68,7 +68,6 @@ def test_checkpoint(
     host,
     img_port,
     act_port,
-    n_total_tests,
 ):
     # Construct the checkpoints in the work directory
     os.makedirs(work_dir, exist_ok=True)
@@ -78,6 +77,7 @@ def test_checkpoint(
         os.path.join(work_dir, "config.json"),
     )
 
+    matches = re.search(r"/([^/]+)/model\.epoch(\d+)\.safetensors$", vla_weights)
     # fmt: off
     args = [
         "python", os.path.join(os.path.dirname(__file__), "inference.py"),
@@ -85,9 +85,10 @@ def test_checkpoint(
         "--img_port", str(img_port),
         "--act_port", str(act_port),
         "-m", vla_model,
+        "-a", matches.group(1),
+        "-i", matches.group(2),
         "-p", work_dir,
         "-r", rotation,
-        "--n_tests", str(n_total_tests),
     ]
     # fmt: on
     if use_delta_action:
@@ -96,13 +97,21 @@ def test_checkpoint(
     test_results = None
     try:
         output = subprocess.check_output(args, stderr=subprocess.STDOUT, text=True)
-        test_results = re.search(r"Test results:\s*(\{.*?\})", output)
+        test_results = re.search(r"Test results: ({.*})", output)
         test_results = ast.literal_eval(test_results.group(1))
     except Exception as ex:
         logging.error("Failed to parse test results from output:\n%s" % output)
         logging.exception(ex)
 
     return test_results
+
+
+def add_tensorboard_scalars(test_results, ep_idx, tb_writer):
+    for env, results in test_results.items():
+        tb_writer.add_scalar("%s/SuccessRate" % env, results["success_rate"], ep_idx)
+        tb_writer.add_scalar("%s/SuccessRate" % env, results["avg_steps"], ep_idx)
+        tb_writer.add_scalar("%s/SuccessRate" % env, results["avg_actions"], ep_idx)
+        tb_writer.add_scalar("%s/SuccessRate" % env, results["avg_path_length"], ep_idx)
 
 
 def main(
@@ -116,7 +125,6 @@ def main(
     host,
     img_port,
     act_port,
-    n_total_tests,
 ):
     # Load previously evaluated checkpoints
     eval_ckpts_file_path = os.path.join(work_dir, "checkpoints.txt")
@@ -150,7 +158,6 @@ def main(
                 host,
                 img_port,
                 act_port,
-                n_total_tests,
             )
             with open(eval_ckpts_file_path, "a") as fp:
                 fp.write("%s\n" % nc)
@@ -165,18 +172,7 @@ def main(
                     os.path.join(log_dir, exp_name)
                 )
 
-            tb_writers[exp_name].add_scalar(
-                "Test/SuccessRate", test_results["success_rate"], ep_idx
-            )
-            tb_writers[exp_name].add_scalar(
-                "Test/AvgSteps", test_results["avg_steps"], ep_idx
-            )
-            tb_writers[exp_name].add_scalar(
-                "Test/AvgActions", test_results["avg_actions"], ep_idx
-            )
-            tb_writers[exp_name].add_scalar(
-                "Test/PathLength", test_results["avg_path_length"], ep_idx
-            )
+            add_tensorboard_scalars(test_results, ep_idx, tb_writers[exp_name])
 
 
 if __name__ == "__main__":
@@ -232,13 +228,6 @@ if __name__ == "__main__":
         default=None,
         help="The pattern to match checkpoints in the directory",
     )
-    parser.add_argument(
-        "-n",
-        "--n_tests",
-        type=int,
-        default=20,
-        help="The number of tests to run",
-    )
     args = parser.parse_args()
     main(
         args.model,
@@ -251,5 +240,4 @@ if __name__ == "__main__":
         args.host,
         args.img_port,
         args.act_port,
-        args.n_tests,
     )

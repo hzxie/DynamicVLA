@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-31 14:10:17
+# @Last Modified at: 2025-08-04 16:32:36
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -18,13 +18,12 @@ import uuid
 import cv2
 import gymnasium as gym
 import h5py
-import imageio
+import imageio.v3
 import isaaclab.app
 import numpy as np
 import scipy.spatial.transform
 import torch
 import yaml
-from PIL import Image
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 
@@ -1045,22 +1044,13 @@ def dump_video(frames, output_path, fps=24):
     if len(frames) == 0:
         return
 
-    writer = imageio.get_writer(
+    imageio.v3.imwrite(
         str(output_path),
-        fps=fps,
+        frames,
+        fps=24,
         codec="libx264",
-        format="ffmpeg",
-        ffmpeg_params=[
-            "-crf",
-            "30",
-            "-g",
-            "2",
-        ],
+        macro_block_size=1,
     )
-    for frame in frames:
-        writer.append_data(frame.astype(np.uint8))
-
-    writer.close()
 
 
 def main(simulation_app, args):

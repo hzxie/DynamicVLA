@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-01 11:19:36
+# @Last Modified at: 2025-08-04 19:16:25
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -14,6 +14,7 @@ import logging
 import os
 import random
 import sys
+import time
 
 import gymnasium as gym
 import isaaclab.app
@@ -268,7 +269,14 @@ def _get_action_tensor(action, num_envs, device):
     return action
 
 
-def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_position):
+def simulate(
+    env,
+    obs_socket,
+    act_socket,
+    robot_origin,
+    robot_quat,
+    final_position,
+):
     import configs.robot_cfg
 
     last_action = None
@@ -300,10 +308,9 @@ def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_positi
         )
 
         action = get_latest_action(act_socket)
-        if action is not None:
-            # logging.debug("Received action with shape: %s" % (action.shape,))
+        if action is not None and "action" in action:
             action = _get_action_tensor(
-                action, env.unwrapped.num_envs, env.unwrapped.device
+                action["action"], env.unwrapped.num_envs, env.unwrapped.device
             )
             last_action = action
 
@@ -328,6 +335,7 @@ def simulate(env, obs_socket, act_socket, robot_origin, robot_quat, final_positi
             curr_state["object"]["pos"],
             curr_state["end_effector"]["pos"],
             final_position,
+            threshold=0.1,
         ):
             sim_results["status"] = 0
         elif (
@@ -362,40 +370,42 @@ def get_episode_name(cfg_filename, sim_status):
     )
 
 
-def main(simulation_app, args):
-    logging.info("Starting evaluation server...")
-    # Set up Zero MQ context and sockets
-    obs_socket, act_socket = get_zmq_sockets(args.host, args.img_port, args.act_port)
-    logging.info(
-        "ZeroMQs are listensing on %s:%d for images and %s:%d for actions"
-        % (args.host, args.img_port, args.host, args.act_port)
-    )
+def get_sim_results(sim_cfg, env_cfg_file_path, obs_socket, act_socket):
+    prev_cfg_path = getattr(get_sim_results, "cfg_path", None)
+    if env_cfg_file_path == prev_cfg_path:
+        env = getattr(get_sim_results, "env")
+        env_cfg = getattr(get_sim_results, "cfg")
+    else:
+        env = getattr(get_sim_results, "env", None)
+        if env is not None:
+            env.close()  # Close the previous environment
 
-    # Set up test environment
-    logging.info("Recovering test environment from %s" % args.env_cfg)
-    with open(args.env_cfg, "r") as fp:
-        env_cfg = json.load(fp)
+        logging.info("Recovering test environment from %s" % env_cfg_file_path)
+        with open(env_cfg_file_path, "r") as fp:
+            env_cfg = json.load(fp)
+
+        env = get_test_env(
+            env_cfg,
+            sim_cfg["num_envs"],
+            sim_cfg["scene_dir"],
+            sim_cfg["object_dir"],
+            sim_cfg["physics_time_step"],
+            sim_cfg["timeout"],
+            sim_cfg["device"],
+            sim_cfg["disable_fabric"],
+            sim_cfg["path_tracing"],
+        )
+        setattr(get_sim_results, "cfg_path", env_cfg_file_path)
+        setattr(get_sim_results, "cfg", env_cfg)
+        setattr(get_sim_results, "env", env)
 
     # Fix random seed for reproducibility
     random.seed(env_cfg["seed"])
     np.random.seed(env_cfg["seed"])
     torch.manual_seed(env_cfg["seed"])
-
-    # Set up the instruction and environment
-    instruction = get_task_instruction(args.env_cfg)
-    env = get_test_env(
-        env_cfg,
-        args.num_envs,
-        args.scene_dir,
-        args.object_dir,
-        args.physics_time_step,
-        args.timeout,
-        args.device,
-        args.disable_fabric,
-        args.path_tracing,
-    )
     env.reset(seed=env_cfg["seed"])
 
+    instruction = get_task_instruction(env_cfg_file_path)
     robot_origin = (
         torch.from_numpy(np.array(env.unwrapped.cfg.scene.robot.init_state.pos))
         .unsqueeze(0)
@@ -409,46 +419,122 @@ def main(simulation_app, args):
         .to(env.unwrapped.device)
     )
     final_position = get_final_position(env_cfg, env.unwrapped.device)
+    # Send the task instruction at the beginning of the simulation
+    obs_socket.send_pyobj({"task": instruction})
+    sim_results = simulate(
+        env,
+        obs_socket,
+        act_socket,
+        robot_origin,
+        robot_quat,
+        final_position,
+    )
+    logging.info("Simulation finished with code: %d" % sim_results["status"])
+    # Clear the action socket
+    get_latest_action(act_socket)
 
+    return sim_results
+
+
+def main(simulation_app, args):
+    logging.info("Starting evaluation server...")
+    # Set up Zero MQ context and sockets
+    obs_socket, act_socket = get_zmq_sockets(args.host, args.img_port, args.act_port)
+    logging.info(
+        "ZeroMQs are listensing on %s:%d for images and %s:%d for actions"
+        % (args.host, args.img_port, args.host, args.act_port)
+    )
+
+    # Determine the test suites
+    _, ext = os.path.splitext(args.env_cfg)
+    assert ext in [".txt", ".json"], "Unsupported Config File: %s" % args.env_cfg
+
+    test_envs = []
+    if ext == ".json":
+        test_envs.append(args.env_cfg)
+    elif ext == ".txt":
+        with open(args.env_cfg) as fp:
+            test_envs = fp.read().splitlines()
+
+    test_envs = [te for te in test_envs if os.path.exists(te)]
+    if not test_envs:
+        logging.fatal("No valid test environments found. Exiting.")
+        sys.exit(2)
+
+    logging.info("#Test environments: %d." % len(test_envs))
     # Simulation loop
+    sim_cfg = {
+        "num_envs": args.num_envs,
+        "scene_dir": args.scene_dir,
+        "object_dir": args.object_dir,
+        "physics_time_step": args.physics_time_step,
+        "timeout": args.timeout,
+        "device": args.device,
+        "disable_fabric": args.disable_fabric,
+        "path_tracing": args.path_tracing,
+    }
     while simulation_app.is_running():
-        # Send the task instruction at the beginning of the simulation
-        obs_socket.send_pyobj({"task": instruction})
-        sim_results = simulate(
-            env, obs_socket, act_socket, robot_origin, robot_quat, final_position
-        )
-        logging.info("Simulation finished with code: %d" % sim_results["status"])
-        env.reset(seed=env_cfg["seed"])
-        # Clear the action socket
-        get_latest_action(act_socket)
-        # Save the frames if needed
-        # NOTE:
-        # 1) Reset will occur twice, and the second time will produce just one frame
-        # 2) sim_status == 1 means no action was received, so we do not save the frames
-        if sim_results["status"] == 2:
-            logging.info("No action received in this episode.")
+        action = get_latest_action(act_socket)
+        # Hand-shake to the VLA client
+        if action is None or "vla" not in action:
+            logging.debug("No VLA clients connected.")
+            time.sleep(10)
             continue
 
-        episode_name = get_episode_name(
-            os.path.basename(args.env_cfg), sim_results["status"]
-        )
-        obs_socket.send_pyobj(
-            {
-                "name": episode_name[:-4],  # Remove the '.mp4' extension
-                "success": sim_results["status"] == 0,
-                "ee_path": np.array(sim_results["ee_path"]),
-            }
-        )
-        if args.save and len(sim_results["cam_views"]) > 1:
-            episode_file_path = os.path.join(args.output_dir, episode_name)
-            logging.info(
-                "Saving videos (%d frames) to %s"
-                % (len(sim_results["cam_views"]), episode_file_path)
-            )
-            sim.dump_video(
-                sim.get_frames(get_frames(sim_results["cam_views"]), state_keys=[]),
-                episode_file_path,
-            )
+        vla_name = action["vla"]
+        output_dir = os.path.join(args.output_dir, vla_name, "%04d" % action["epoch"])
+        success_rates = {}
+
+        os.makedirs(output_dir, exist_ok=True)
+        logging.info("Evaluation started. Output Dir: %s" % (output_dir))
+        for te in test_envs:
+            n_tests = 0
+            env_name = os.path.basename(te)[:-5]
+            success_rates[env_name] = 0
+            while n_tests < args.n_tests:
+                sim_results = get_sim_results(sim_cfg, te, obs_socket, act_socket)
+                # Save the frames if needed
+                # NOTE:
+                # 1) Reset will occur twice if failed (I dnk why), and the second time
+                #    will produce just one frame.
+                # 2) sim_status == 2 means no action was received, so we do not save
+                #    the frames.
+                if len(sim_results["cam_views"]) <= 1:  # Unexpected extra reset
+                    continue
+
+                n_tests += 1
+                if sim_results["status"] == 0:
+                    success_rates[env_name] += 1
+                elif sim_results["status"] == 2:
+                    logging.info("No action received in this episode.")
+                    continue
+
+                episode_name = get_episode_name(env_name, sim_results["status"])
+                obs_socket.send_pyobj(
+                    {
+                        "env_name": env_name,
+                        "eps_name": episode_name[:-4],
+                        "success": sim_results["status"] == 0,
+                        "ee_path": np.array(sim_results["ee_path"]),
+                    }
+                )
+                if args.save:
+                    episode_file_path = os.path.join(output_dir, episode_name)
+                    logging.info(
+                        "Saving videos (%d frames) to %s"
+                        % (len(sim_results["cam_views"]), episode_file_path)
+                    )
+                    sim.dump_video(
+                        sim.get_frames(
+                            get_frames(sim_results["cam_views"]), state_keys=[]
+                        ),
+                        episode_file_path,
+                    )
+            # Calcuate the success rate for this env
+            success_rates[env_name] /= n_tests
+
+        # Say goodbye to the VLA client
+        obs_socket.send_pyobj({"vla": vla_name, "success_rates": success_rates})
 
 
 if __name__ == "__main__":
@@ -496,6 +582,13 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--act_port", default=3188, type=int, help="Port for action stream"
+    )
+    parser.add_argument(
+        "-n",
+        "--n_tests",
+        type=int,
+        default=20,
+        help="The number of tests to run",
     )
     parser.add_argument("--env_cfg", required=True)
     args = parser.parse_args(script_args)
