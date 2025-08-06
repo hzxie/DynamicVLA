@@ -77,9 +77,9 @@ def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, object_sizes, rob
     )
     env_cfg = isaaclab_tasks.utils.parse_cfg.parse_env_cfg(
         "Robot-Env-Cfg-v0",
-        device=args.device,
-        num_envs=args.num_envs,
-        use_fabric=not args.disable_fabric,
+        device=sim_cfg["device"],
+        num_envs=sim_cfg["num_envs"],
+        use_fabric=not sim_cfg["disable_fabric"],
     )
 
     table = None
@@ -1056,6 +1056,9 @@ def dump_video(frames, output_path, fps=24):
 def main(simulation_app, args):
     with open(args.sim_cfg_file) as fp:
         sim_cfg = yaml.load(fp, Loader=yaml.FullLoader)
+    sim_cfg["num_envs"] = args.num_envs
+    sim_cfg["device"] = args.device
+    sim_cfg["disable_fabric"] = args.disable_fabric
 
     # Calculate the bounding boxes of the target objects
     object_sizes = get_object_sizes(
