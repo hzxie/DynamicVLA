@@ -10,8 +10,8 @@ DATASET:
   IMG_SIZE: [224, 224]
   DELTA_TIMESTAMPS:
   REQUIRED_FEATURES:
-    - "observation.images.base"
-    - "observation.images.wrist"
+    - "observation.images.side_cam"
+    - "observation.images.gripper_cam"
     - "observation.state"
     - "action"
 
@@ -35,7 +35,9 @@ WANDB:
 TRAIN:
   N_EPOCHS: 500
   BATCH_SIZE: 44
-  CKPT_SAVE_FREQ: 100
+  CKPT_SAVE_FREQ:
+    EPOCH: 5
+    BATCH: 500
   OPTIMIZER:
     LR: 1.0e-4
     EPS: 1.0e-8
