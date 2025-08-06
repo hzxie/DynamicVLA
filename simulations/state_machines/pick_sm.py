@@ -200,21 +200,19 @@ class PickStateMachine:
                 short_axis = torch.argmin(object_size_xy_norm)
             grasp_direction = torch.tensor(
                 [
-                    [object_size_xy_rot[short_axis][1]],
                     [object_size_xy_rot[short_axis][0]],
+                    [object_size_xy_rot[short_axis][1]],
                 ],
                 device=self.device,
             )
         else:
-            grasp_direction = [object_velocity[:, 1], object_velocity[:, 0]]
+            grasp_direction = [object_velocity[:, 0], object_velocity[:, 1]]
 
         # Determine the grasp quaternion according to the velocity
         gsp_theta = torch.arctan2(grasp_direction[0], grasp_direction[1])
-        gsp_theta = torch.where(gsp_theta >= np.pi / 2, gsp_theta - np.pi, gsp_theta)
         gsp_theta = torch.where(gsp_theta <= -np.pi / 2, gsp_theta + np.pi, gsp_theta)
-        gsp_theta = np.pi / 2 - gsp_theta
-        gsp_theta = torch.where(gsp_theta >= np.pi / 2, gsp_theta - np.pi, gsp_theta)
-        gsp_theta = torch.where(gsp_theta > np.pi / 2 - 1e-2, -np.pi, gsp_theta) # BUG here! I'll fix it today.
+        gsp_theta = torch.where(gsp_theta <= -np.pi / 2, gsp_theta + np.pi, gsp_theta)
+        gsp_theta = torch.where(gsp_theta > np.pi / 2 - 1e-2, -np.pi / 2, gsp_theta)
 
         gsp_quat = torch.stack(
             [
