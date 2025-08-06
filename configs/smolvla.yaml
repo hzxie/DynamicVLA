@@ -10,13 +10,14 @@ DATASET:
   IMG_SIZE: [224, 224]
   DELTA_TIMESTAMPS:
   REQUIRED_FEATURES:
-    - "observation.images.gripper_cam"
-    - "observation.images.side_cam"
+    - "observation.images.base"
+    - "observation.images.wrist"
     - "observation.state"
     - "action"
 
 POLICY:
   NAME: "smolvla"
+  CHECKPOINT: "lerobot/smolvla_base"
   CHUNK_SIZE: 
 
 DIR:

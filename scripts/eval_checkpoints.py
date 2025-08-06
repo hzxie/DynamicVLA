@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-01 07:40:13
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-06 10:32:28
+# @Last Modified at: 2025-08-07 06:31:00
 # @Email:  root@haozhexie.com
 
 import ast
@@ -60,7 +60,6 @@ def get_ckpt_info(ckpt_path):
 
 
 def test_checkpoint(
-    vla_model,
     vla_weights,
     work_dir,
     rotation,
@@ -84,7 +83,6 @@ def test_checkpoint(
         "--host", host,
         "--img_port", str(img_port),
         "--act_port", str(act_port),
-        "-m", vla_model,
         "-a", matches.group(1),
         "-i", matches.group(2),
         "-p", work_dir,
@@ -97,6 +95,12 @@ def test_checkpoint(
     test_results = None
     try:
         output = subprocess.check_output(args, stderr=subprocess.STDOUT, text=True)
+    except Exception as ex:
+        logging.error("Failed to execute command:\n%s" % " ".join(args))
+        logging.exception(ex)
+        return None
+
+    try:
         test_results = re.search(r"Test results: ({.*})", output)
         test_results = ast.literal_eval(test_results.group(1))
     except Exception as ex:
@@ -121,7 +125,6 @@ def add_tensorboard_scalars(test_results, ep_idx, tb_writer):
 
 
 def main(
-    vla_model,
     log_dir,
     work_dir,
     ckpt_dir,
@@ -158,9 +161,8 @@ def main(
                 logging.warning("Ignoring checkpoint %s due to invalid format." % nc)
                 continue
 
-            logging.info("Testing checkpoint %s with model %s" % (nc, vla_model))
+            logging.info("Testing checkpoint %s" % (nc))
             test_results = test_checkpoint(
-                vla_model,
                 nc,
                 work_dir,
                 rotation,
@@ -201,9 +203,6 @@ if __name__ == "__main__":
         "--act_port", default=3188, type=int, help="Port for action stream"
     )
     parser.add_argument(
-        "-m", "--model", type=str, required=True, help="The name of VLA model to use"
-    )
-    parser.add_argument(
         "-r",
         "--rotation",
         type=str,
@@ -241,7 +240,6 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     main(
-        args.model,
         args.log_dir,
         args.work_dir,
         args.ckpt_dir,

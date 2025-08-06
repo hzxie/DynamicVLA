@@ -4,10 +4,11 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-04 19:33:30
+# @Last Modified at: 2025-08-07 06:35:04
 # @Email:  root@haozhexie.com
 
 import argparse
+import json
 import logging
 import os
 import pathlib
@@ -76,12 +77,19 @@ def get_latest_observation(obs_socket):
     return image
 
 
-def get_vla_model(model_name, pretrained_model):
+def get_vla_model(pretrained_model):
     pretrained_cfg = None
-    if os.path.exists(pretrained_model):
-        logging.info("Loading VLA model from local path: %s" % pretrained_model)
-        pretrained_model = pathlib.Path(pretrained_model).expanduser().resolve()
-        pretrained_cfg = pretrained_model / "config.json"
+    if not os.path.exists(pretrained_model):
+        raise FileNotFoundError(
+            "Pretrained model path does not exist: %s" % pretrained_model
+        )
+
+    logging.info("Loading VLA model from local path: %s" % pretrained_model)
+    pretrained_model = pathlib.Path(pretrained_model).expanduser().resolve()
+    pretrained_cfg = pretrained_model / "config.json"
+    with open(pretrained_cfg, "r") as fp:
+        model_cfg = json.load(fp)
+        model_name = model_cfg["type"]
 
     vla_cfg = utils.helpers.get_policy_cfg(model_name, cfg_file=pretrained_cfg)
     vla_model = utils.helpers.get_policy_class(model_name).from_pretrained(
@@ -197,7 +205,6 @@ def get_test_stats(test_results):
 
 
 def main(
-    vla_model,
     vla_weights,
     vla_alias,
     vla_epoch_idx,
@@ -209,8 +216,8 @@ def main(
     output_dir,
 ):
     # Initialize the VLA model
-    logging.info("Loading VLA model: %s with weights: %s" % (vla_model, vla_weights))
-    vla_model = get_vla_model(model_name=vla_model, pretrained_model=vla_weights)
+    logging.info("Loading VLA model with weights: %s" % (vla_weights))
+    vla_model = get_vla_model(vla_weights)
     vla_model.reset()
     logging.info(
         "Input features: %s; Output features: %s"
@@ -334,9 +341,6 @@ if __name__ == "__main__":
         "--act_port", default=3188, type=int, help="Port for action stream"
     )
     parser.add_argument(
-        "-m", "--model", type=str, required=True, help="The name of VLA model to use"
-    )
-    parser.add_argument(
         "-r",
         "--rotation",
         type=str,
@@ -377,7 +381,6 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     main(
-        args.model,
         args.weights,
         args.alias,
         args.epoch,

@@ -18,6 +18,7 @@ DATASET:
 POLICY:
   NAME: "pi0fast"
   CHUNK_SIZE: 
+  CHECKPOINT: "lerobot/pi0fast_base"
 
 DIR:
   OUTPUT: "./runs"
