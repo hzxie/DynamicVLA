@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-01 07:40:13
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-04 19:46:08
+# @Last Modified at: 2025-08-06 10:32:28
 # @Email:  root@haozhexie.com
 
 import ast
@@ -107,11 +107,17 @@ def test_checkpoint(
 
 
 def add_tensorboard_scalars(test_results, ep_idx, tb_writer):
+    average = {}
     for env, results in test_results.items():
-        tb_writer.add_scalar("%s/SuccessRate" % env, results["success_rate"], ep_idx)
-        tb_writer.add_scalar("%s/AvgSteps" % env, results["avg_steps"], ep_idx)
-        tb_writer.add_scalar("%s/AvgActions" % env, results["avg_actions"], ep_idx)
-        tb_writer.add_scalar("%s/PathLength" % env, results["avg_path_length"], ep_idx)
+        for k, v in results.items():
+            tb_writer.add_scalar("%s/%s" % (env, k), v, ep_idx)
+            if k not in average:
+                average[k] = []
+
+            average[k].append(v)
+
+    for k, v in average.items():
+        tb_writer.add_scalar("overall/%s" % k, sum(v) / len(v), ep_idx)
 
 
 def main(
@@ -130,7 +136,11 @@ def main(
     eval_ckpts_file_path = os.path.join(work_dir, "checkpoints.txt")
     if os.path.exists(eval_ckpts_file_path):
         with open(eval_ckpts_file_path, "r") as fp:
-            setattr(get_new_checkpoints, "checkpoints", fp.read().splitlines())
+            setattr(
+                get_new_checkpoints,
+                "checkpoints",
+                [line for line in fp.read().splitlines() if os.path.exists(line)],
+            )
 
     # TensorBoard writers for different experiments
     tb_writers = {}
@@ -161,6 +171,7 @@ def main(
             )
             with open(eval_ckpts_file_path, "a") as fp:
                 fp.write("%s\n" % nc)
+                fp.write("%s\n" % test_results)
 
             if test_results is None:
                 logging.error("Failed to get test results for checkpoint %s" % nc)
