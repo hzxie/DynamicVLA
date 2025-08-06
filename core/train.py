@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-23 06:44:51
+# @Last Modified at: 2025-08-06 08:17:13
 # @Email:  root@haozhexie.com
 
 import logging
@@ -108,6 +108,9 @@ def train(cfg):
     init_epoch = 0
     if "CKPT" in cfg.CONST:
         logging.info("Loading pretrained model from %s ..." % cfg.CONST.CKPT)
+        if os.path.exists(os.path.join(cfg.CONST.CKPT)):
+            with open(os.path.join(cfg.CONST.CKPT, "epoch.txt")) as fp:
+                init_epoch = int(fp.read().strip())
         # Save the normalizers to enable migration to the new datasets
         normalizers = {
             n: getattr(policy, n)
@@ -150,6 +153,7 @@ def train(cfg):
         # Summary writer
         tb_writer = utils.summary_writer.SummaryWriter(cfg)
         # Log current config
+        tb_writer.add_config(cfg.POLICY)
         tb_writer.add_config(cfg.TRAIN)
 
     for epoch_idx in range(init_epoch, cfg.TRAIN.N_EPOCHS):
@@ -229,6 +233,9 @@ def train(cfg):
         # Save the model checkpoint
         if utils.distributed.is_master():
             logging.info("Saving model checkpoint to %s ..." % cfg.DIR.CHECKPOINTS)
+            with open(os.path.join(cfg.DIR.CHECKPOINTS, "epoch.txt"), "r") as fp:
+                init_epoch = int(fp.read().strip())
+
             policy.module.save_pretrained(cfg.DIR.CHECKPOINTS)
             if epoch_idx % cfg.TRAIN.CKPT_SAVE_FREQ == 0:
                 shutil.copy(
