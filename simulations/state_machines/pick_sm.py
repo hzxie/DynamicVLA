@@ -231,6 +231,7 @@ class PickStateMachine:
         self, target_quat: torch.Tensor, ee_quat: torch.Tensor
     ) -> torch.Tensor:
         from isaaclab.utils.math import quat_box_minus
+
         return quat_box_minus(target_quat, ee_quat)[:, 2] * 180 / np.pi
 
     def _quat_multiply(self, q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
@@ -269,7 +270,7 @@ class PickStateMachine:
         )
 
         pose_angle = self._get_pose_angle(
-            grasp_quat[:, [3, 0, 1, 2]], 
+            grasp_quat[:, [3, 0, 1, 2]],
             curr_state["end_effector"]["quat"],
         )
 

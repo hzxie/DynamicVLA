@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-04 16:32:36
+# @Last Modified at: 2025-08-07 06:41:43
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -1056,10 +1056,14 @@ def dump_video(frames, output_path, fps=24):
 def main(simulation_app, args):
     with open(args.sim_cfg_file) as fp:
         sim_cfg = yaml.load(fp, Loader=yaml.FullLoader)
-    sim_cfg["num_envs"] = args.num_envs
-    sim_cfg["device"] = args.device
-    sim_cfg["disable_fabric"] = args.disable_fabric
 
+    sim_cfg.update(
+        {
+            "num_envs": args.num_envs,
+            "device": args.device,
+            "disable_fabric": args.disable_fabric,
+        }
+    )
     # Calculate the bounding boxes of the target objects
     object_sizes = get_object_sizes(
         args.object_dir, sim_cfg["scene"]["target_object"]["categories"]
