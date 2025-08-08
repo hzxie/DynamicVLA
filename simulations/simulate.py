@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-07 06:41:43
+# @Last Modified at: 2025-08-08 14:47:18
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -106,9 +106,10 @@ def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, object_sizes, rob
     # Set up the robot arm
     env_cfg = configs.env_cfg.set_robot(robot, env_cfg, robot_pose)
     # Set up cameras in the scene
-    env_cfg.scene = _set_up_scene_cameras(
-        env_cfg.scene, sim_cfg, robot, robot_pose, side_cam_pose, table["bbox"]
-    )
+    if sim_cfg["enable_cameras"]:
+        env_cfg.scene = _set_up_scene_cameras(
+            env_cfg.scene, sim_cfg, robot, robot_pose, side_cam_pose, table["bbox"]
+        )
 
     # Set the light intensity and color
     light_cfg = _get_light_cfg(sim_cfg["lighting"])
@@ -751,9 +752,8 @@ def get_env_states(states, n_envs=1):
     return env_states
 
 
-def simulate(sim_cfg, object_sizes, task_cfg, dir_cfg, debug_cfg):
+def simulate(sim_cfg, object_sizes, task_cfg, dir_cfg, seed):
     import configs.robot_cfg
-    import omni.replicator.core as rep
 
     # Create a new environment
     env_cfg = get_env_cfg(
@@ -764,20 +764,22 @@ def simulate(sim_cfg, object_sizes, task_cfg, dir_cfg, debug_cfg):
         object_sizes,
         task_cfg["robot"],
     )
-    env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=debug_cfg["seed"])
+    env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=seed)
     # Reset environment at start
-    env.reset(seed=debug_cfg["seed"])
+    env.reset(seed=seed)
 
     # Determine the object size (without transformation)
     # TODO: Handle non USD objects
     object_size = torch.tensor(
-        [object_sizes[env_cfg.scene.object.spawn.usd_path]],
+        object_sizes[env_cfg.scene.object.spawn.usd_path],
         dtype=torch.float32,
         device=env.unwrapped.device,
-    )
+    ).unsqueeze(0)
 
     # Enable Path Tracing
-    if debug_cfg["path_tracing"]:
+    if sim_cfg["enable_cameras"] and sim_cfg["path_tracing"]:
+        import omni.replicator.core as rep
+
         rep.settings.set_render_pathtraced()
 
     # Initialize the state machine
@@ -816,7 +818,7 @@ def simulate(sim_cfg, object_sizes, task_cfg, dir_cfg, debug_cfg):
 
     while not is_done.all():
         # Add an option to disable the state machine to accelerate the simulation
-        if debug_cfg["disable_sm"]:
+        if sim_cfg["disable_sm"]:
             env.step(torch.from_numpy(env.action_space.sample()))
             continue
 
@@ -834,9 +836,9 @@ def simulate(sim_cfg, object_sizes, task_cfg, dir_cfg, debug_cfg):
             robot_quat,
             env.unwrapped.device,
         )
-        next_state = state_machine.compute(
-            curr_state
-        )  # xyz, quat (wxyz), gripper (-1/1)
+        # NOTE: state format in xyz, quat (wxyz), gripper (-1/1)
+        next_state = state_machine.compute(curr_state)
+
         cam_views = get_camera_views(
             env.unwrapped.scene.sensors, ["rgb", "depth", "seg"]
         )
@@ -872,7 +874,7 @@ def simulate(sim_cfg, object_sizes, task_cfg, dir_cfg, debug_cfg):
     return env_cfg, [
         es
         for env_id, es in enumerate(env_states)
-        if is_done[env_id].item() or debug_cfg["debug"]
+        if is_done[env_id].item() or sim_cfg["debug"]
     ]
 
 
@@ -1059,9 +1061,13 @@ def main(simulation_app, args):
 
     sim_cfg.update(
         {
-            "num_envs": args.num_envs,
+            "debug": args.debug,
             "device": args.device,
             "disable_fabric": args.disable_fabric,
+            "disable_sm": args.disable_sm,
+            "enable_cameras": args.enable_cameras,
+            "num_envs": args.num_envs,
+            "path_tracing": args.path_tracing,
         }
     )
     # Calculate the bounding boxes of the target objects
@@ -1090,12 +1096,7 @@ def main(simulation_app, args):
                 "object_dir": args.object_dir,
                 "container_dir": args.container_dir,
             },
-            {
-                "debug": args.debug,
-                "disable_sm": args.disable_sm,
-                "path_tracing": args.path_tracing,
-                "seed": seed,
-            },
+            seed,
         )
         # Save the simulation data
         for es in env_states:
@@ -1183,5 +1184,16 @@ if __name__ == "__main__":
             setattr(args, sp, getattr(isaaclab_args, sp))
 
     app_launcher = isaaclab.app.AppLauncher(isaaclab_args)
+    # Pass "enable_cameras" to this script
+    # Ref: https://isaac-sim.github.io/IsaacLab/main/_modules/isaaclab/app/app_launcher.html
+    args.enable_cameras = app_launcher._enable_cameras
+    if not args.enable_cameras:
+        logging.warning(
+            "Cameras are disabled. No images will be produced during simulation."
+        )
+        answer = input("Do you want to overwrite? (y/N) ").strip().lower()
+        if answer != "y":
+            exit(0)
+
     main(app_launcher.app, args)
     app_launcher.app.close()

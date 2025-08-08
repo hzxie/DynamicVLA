@@ -1,4 +1,7 @@
 scene:
+  cameras:
+    side_cam:
+    gripper_cam:
   table:
     max_children: 3
     max_height: 1.5
@@ -6,7 +9,7 @@ scene:
   target_object:
     categories:
       - can
-    moving_time: 
+    moving_time: [0.5, 2.0]
   other_objects:
     n_objects: 0
     categories:
