@@ -98,7 +98,7 @@ def get_action(vla_model, observation, use_delta_action):
     _state = getattr(get_action, "state", None)
     for ifk in vla_model.config.input_features.keys():
         if ifk not in observation:
-            logging.warning("Ingoring observation without key: %s" % ifk)
+            logging.warning("Ignoring observation without key: %s" % ifk)
             return None
 
     observation = inference.get_transformed_observation(
