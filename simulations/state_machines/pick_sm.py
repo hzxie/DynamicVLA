@@ -210,7 +210,7 @@ class PickStateMachine:
 
         # Determine the grasp quaternion according to the velocity
         gsp_theta = torch.arctan2(grasp_direction[0], grasp_direction[1])
-        gsp_theta = torch.where(gsp_theta <= -np.pi / 2, gsp_theta + np.pi, gsp_theta)
+        gsp_theta = torch.where(gsp_theta >= np.pi / 2, gsp_theta - np.pi, gsp_theta)
         gsp_theta = torch.where(gsp_theta <= -np.pi / 2, gsp_theta + np.pi, gsp_theta)
         gsp_theta = torch.where(gsp_theta > np.pi / 2 - 1e-2, -np.pi / 2, gsp_theta)
 
