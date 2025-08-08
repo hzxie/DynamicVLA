@@ -23,8 +23,8 @@ PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.p
 sys.path.append(PROJECT_HOME)
 sys.path.append(os.path.dirname(__file__))
 
-import simulations.simulate as sim
 import simulations.evaluate as eval
+import simulations.simulate as sim
 
 
 def _get_action_tensor(action, num_envs, device):

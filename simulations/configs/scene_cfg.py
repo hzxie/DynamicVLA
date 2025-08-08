@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-23 12:28:24
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-08 13:17:37
+# @Last Modified at: 2025-08-08 21:10:15
 # @Email:  root@haozhexie.com
 
 import logging
@@ -170,7 +170,9 @@ def set_house_asset(
     return scene_cfg
 
 
-def get_table_assets(scene_asset_usd_file: str, table_limits: dict) -> list:
+def get_table_assets(
+    scene_asset_usd_file: str, table_limits: dict, cameras: list[dict]
+) -> list:
     TABLE_ASSET_KEYWORD = "Table"
     TABLE_ASSET_GRP_NAME = "/house/furniture"
     WALL_ASSET_GRP_NAME = "/house/structure"
@@ -203,16 +205,17 @@ def get_table_assets(scene_asset_usd_file: str, table_limits: dict) -> list:
                 and size[2] <= table_limits["max_height"]
                 and (np.array(size) != 0).all()
             ):
-                anchors = _get_table_anchors(bbox, size)
-                anchors = _get_uncollided_anchors(
-                    anchors, furniture_primtives + structure_primtives, bbox_cache
+                # Check whether the table contains at least one anchor point for long sides
+                table_anchors = _get_table_anchors(bbox, size)
+                table_anchors = _get_uncollided_anchors(
+                    table_anchors,
+                    cameras,
+                    furniture_primtives + structure_primtives,
+                    bbox_cache,
                 )
-                # Check whether the table contains at least one anchor point for short
-                # and long sides
-                long_side_anchors = [a for a in anchors if a["side"] == "long"]
-                short_side_anchors = [a for a in anchors if a["side"] == "short"]
-                if len(long_side_anchors) > 0 and len(short_side_anchors) > 0:
-                    tables.append({"anchors": anchors, "bbox": bbox})
+                long_side_anchors = [a for a in table_anchors if a["side"] == "long"]
+                if len(long_side_anchors) > 0:
+                    tables.append({"anchors": table_anchors, "bbox": bbox})
 
     # Create a new stage for the subsequent simulations
     usd_context.new_stage()
@@ -265,35 +268,62 @@ def _get_table_anchors(bbox: pxr.Gf.BBox3d, size: pxr.Gf.Vec3d) -> dict:
 
 
 def _get_uncollided_anchors(
-    anchors: list, primtives: list, bbox_cache: pxr.UsdGeom.BBoxCache
+    table_anchors: list[np.array],
+    cameras: list[dict],
+    primtives: list,
+    bbox_cache: pxr.UsdGeom.BBoxCache,
 ) -> list:
-    ANCHOR_SIZE = 0.25
     for prim in primtives:
         bbox_cache = pxr.UsdGeom.BBoxCache(
             pxr.Usd.TimeCode.Default(), [pxr.UsdGeom.Tokens.default_]
         )
-        bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
-        for anchor in anchors:
-            if anchor["collision"]:
+        prim_bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
+        for ta in table_anchors:
+            if ta["collision"]:
                 continue
 
-            anchor_bbox = pxr.Gf.Range3d(
-                pxr.Gf.Vec3d(
-                    anchor["pos"][0] - ANCHOR_SIZE,
-                    anchor["pos"][1] - ANCHOR_SIZE,
-                    anchor["pos"][2],
-                ),
-                pxr.Gf.Vec3d(
-                    anchor["pos"][0] + ANCHOR_SIZE,
-                    anchor["pos"][1] + ANCHOR_SIZE,
-                    anchor["pos"][2] + ANCHOR_SIZE,
-                ),
-            )
-            if _is_bbox3d_intersects(bbox, anchor_bbox):
-                anchor["collision"] = True
-                logging.debug("Anchor %s collides with %s", anchor, prim.GetName())
+            # Check if the table anchor collides with the primitives
+            if _is_anchor_collided(prim_bbox, ta["pos"]):
+                ta["collision"] = True
+                logging.debug("Anchor %s collides with %s", ta["pos"], prim.GetName())
 
-    return [a for a in anchors if not a["collision"]]
+            # Check if the camera anchor collides with the primitives
+            for cam in cameras:
+                if _is_anchor_collided(prim_bbox, _get_camera_position(ta, cam)):
+                    ta["collision"] = True
+                    logging.debug(
+                        "Camera %s of %s collides with %s",
+                        cam["name"],
+                        ta["pos"],
+                        prim.GetName(),
+                    )
+
+    return [ta for ta in table_anchors if not ta["collision"]]
+
+
+def _get_camera_position(anchor, cam):
+    # scalar_first is not supported in scipy < 1.12.0 (required by Isaac Lab)
+    r = scipy.spatial.transform.Rotation.from_quat(
+        [anchor["quat"][1], anchor["quat"][2], anchor["quat"][3], anchor["quat"][0]]
+    )
+    return r.apply(cam["position"]) + anchor["pos"]
+
+
+def _is_anchor_collided(prim_bbox: pxr.Gf.Range3d, anchor_position: dict) -> bool:
+    ANCHOR_SIZE = 0.25
+    anchor_bbox = pxr.Gf.Range3d(
+        pxr.Gf.Vec3d(
+            anchor_position[0] - ANCHOR_SIZE,
+            anchor_position[1] - ANCHOR_SIZE,
+            anchor_position[2],
+        ),
+        pxr.Gf.Vec3d(
+            anchor_position[0] + ANCHOR_SIZE,
+            anchor_position[1] + ANCHOR_SIZE,
+            anchor_position[2] + ANCHOR_SIZE,
+        ),
+    )
+    return _is_bbox3d_intersects(prim_bbox, anchor_bbox)
 
 
 def _is_bbox3d_intersects(bbox1: pxr.Gf.Range3d, bbox2: pxr.Gf.Range3d) -> bool:

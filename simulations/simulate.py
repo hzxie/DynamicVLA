@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-08 14:56:37
+# @Last Modified at: 2025-08-08 21:31:27
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -29,8 +29,8 @@ PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.p
 
 
 def _get_object_size(usd_path):
-    import pxr
     import omni.usd
+    import pxr
 
     usd_context = omni.usd.get_context()
     usd_context.open_stage(usd_path)
@@ -83,33 +83,31 @@ def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, object_sizes, rob
     )
 
     table = None
+    scenes = [f for f in os.listdir(scene_dir) if f.endswith(".usd")]
     while table is None:
         # Dynamically create basic scene from USD files
-        usd_file = os.path.join(
-            scene_dir,
-            random.choice([f for f in os.listdir(scene_dir) if f.endswith(".usd")]),
-            # "5a6ad201-c801-4ea3-bd67-4d7bdff0b77a.usd",
-        )
+        scene = random.choice(scenes)
+        usd_file = os.path.join(scene_dir, scene)
         logging.info("Loading scene from %s", usd_file)
         env_cfg.scene = configs.scene_cfg.set_house_asset(
             env_cfg.scene, os.path.join(scene_dir, usd_file)
         )
-        tables = configs.scene_cfg.get_table_assets(usd_file, sim_cfg["scene"]["table"])
-        if len(tables) != 0:
+        tables = configs.scene_cfg.get_table_assets(
+            usd_file, sim_cfg["scene"]["table"], sim_cfg["scene"]["cameras"]
+        )
+        if len(tables) == 0:
+            scenes.remove(scene)
+            logging.info("No table found in %s. Trying another scene." % scene)
+        else:
             table = random.choice(tables)
 
     # Determine the robot pose
     robot_pose = random.choice([a for a in table["anchors"] if a["side"] == "long"])
-    side_cam_pose = random.choice([a for a in table["anchors"] if a["side"] == "short"])
-    # robot_pose = [a for a in table["anchors"] if a["side"] == "long"][0]
-    # side_cam_pose = [a for a in table["anchors"] if a["side"] == "short"][0]
     # Set up the robot arm
     env_cfg = configs.env_cfg.set_robot(robot, env_cfg, robot_pose)
     # Set up cameras in the scene
     if sim_cfg["enable_cameras"]:
-        env_cfg.scene = _set_up_scene_cameras(
-            env_cfg.scene, sim_cfg, robot, robot_pose, side_cam_pose, table["bbox"]
-        )
+        env_cfg.scene = _set_up_scene_cameras(env_cfg.scene, sim_cfg, robot)
 
     # Set the light intensity and color
     light_cfg = _get_light_cfg(sim_cfg["lighting"])
@@ -137,95 +135,42 @@ def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, object_sizes, rob
     return env_cfg
 
 
-def _set_up_scene_cameras(
-    scene_cfg, sim_cfg, robot, robot_pose, side_cam_pose, table_bbox
-):
+def _set_up_scene_cameras(scene_cfg, sim_cfg, robot):
+    import configs.robot_cfg
     import configs.scene_cfg
 
-    # Set up the top-view camera
+    # Set up the wrist camera on the robot arm
     scene_cfg = configs.scene_cfg.add_scene_camera(
         scene_cfg,
-        "top_cam",
+        "wrist_cam",
         configs.scene_cfg.get_camera_cfg(
-            sim_cfg["camera"].copy(),
-            _get_top_camera_relative_pose(robot_pose, table_bbox),
+            sim_cfg["camera"].copy(), configs.robot_cfg.get_wrist_camera_cfg(robot)
         ),
     )
-    # Set up the third-view camera
-    scene_cfg = configs.scene_cfg.add_scene_camera(
-        scene_cfg,
-        "side_cam",
-        configs.scene_cfg.get_camera_cfg(
-            sim_cfg["camera"].copy(),
-            _get_side_camera_relative_pose(side_cam_pose, robot_pose, table_bbox),
-        ),
-    )
-    # Set up the gripper camera on the robot arm
-    scene_cfg = configs.scene_cfg.add_scene_camera(
-        scene_cfg,
-        "gripper_cam",
-        configs.scene_cfg.get_camera_cfg(
-            sim_cfg["camera"].copy(), configs.robot_cfg.get_gripper_camera_cfg(robot)
-        ),
-    )
+    # Set up the cameras according to relative position in the config file
+    for cam in sim_cfg["scene"]["cameras"]:
+        scene_cfg = configs.scene_cfg.add_scene_camera(
+            scene_cfg,
+            cam["name"],
+            configs.scene_cfg.get_camera_cfg(
+                sim_cfg["camera"].copy(),
+                _get_camera_pose(cam),
+            ),
+        )
+
     return scene_cfg
 
 
-def _get_top_camera_relative_pose(robot_pose, table_bbox):
-    # import configs.scene_cfg
-    robot_quat = robot_pose["quat"]
-    inv_r = scipy.spatial.transform.Rotation.from_quat(
-        [robot_quat[1], robot_quat[2], robot_quat[3], robot_quat[0]]
-    ).inv()
-
-    # Plan A: Look at the table center
-    tbl_center = (table_bbox.min + table_bbox.max) / 2.0
-    tbl_center[2] = table_bbox.max[2] + 1
-    cx, cy, cz = inv_r.apply(np.array(tbl_center) - robot_pose["pos"])
+def _get_camera_pose(cam):
+    quat = scipy.spatial.transform.Rotation.from_euler(
+        "xyz", cam["facing"], degrees=True
+    ).as_quat()
 
     return {
-        "prim_path": "/Robot/TopCamera",
-        "pos": [cx, cy, cz],
-        "quat": [0.7071068, 0, 0, -0.7071068],
+        "prim_path": cam["prim_path"],
+        "pos": cam["position"],
+        "quat": quat,
         "convention": "opengl",
-    }
-    # Plan B: Look at the robot base
-    # dx, dy, _ = inv_r.apply((np.array(tbl_center) - robot_pose["pos"]) * 1.5)
-    # dz = table_bbox.max[2] + 0.25
-    # cam_quat = configs.scene_cfg.get_quat_from_look_at([dx, dy, dz], [0.0, 0.0, 0.0])
-    # return {
-    #     "prim_path": "/Robot/TopCamera",
-    #     "pos": [dx, dy, dz],
-    #     "quat": cam_quat,
-    #     "convention": "world",
-    # }
-
-
-def _get_side_camera_relative_pose(cam_pose, robot_pose, table_bbox):
-    import configs.scene_cfg
-
-    robot_quat = robot_pose["quat"]
-    inv_r = scipy.spatial.transform.Rotation.from_quat(
-        [robot_quat[1], robot_quat[2], robot_quat[3], robot_quat[0]]
-    ).inv()
-    # Relative position of the camera to the robot
-    dx, dy, dz = inv_r.apply(cam_pose["pos"] - robot_pose["pos"])
-
-    # Relative rotation of the camera to the robot
-    tbl_center = (table_bbox.min + table_bbox.max) / 2.0
-    cx, cy, cz = inv_r.apply(np.array(tbl_center) - robot_pose["pos"])
-    # cz = -robot_pose["pos"][2]
-    cam_quat = configs.scene_cfg.get_quat_from_look_at([dx, dy, dz], [cx, cy, cz])
-
-    # Determine the height of the camera (1/5 of the longer side of the table)
-    tbl_size = table_bbox.max - table_bbox.min
-    dz += max(tbl_size[:2]) / 5
-
-    return {
-        "prim_path": "/Robot/SideCamera",
-        "pos": [dx, dy, dz],  # Move the camera above the table top
-        "quat": cam_quat,
-        "convention": "world",
     }
 
 

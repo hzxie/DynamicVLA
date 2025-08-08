@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-24 16:59:09
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-14 13:35:40
+# @Last Modified at: 2025-08-08 19:32:32
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
@@ -143,11 +143,11 @@ def get_ee_frame_cfg(robot: str) -> FrameTransformerCfg:
         raise ValueError("Unknown robot: %s" % robot)
 
 
-def get_gripper_camera_cfg(robot: str) -> dict:
+def get_wrist_camera_cfg(robot: str) -> dict:
     if robot == "franka":
-        prim_path = "/Robot/panda_hand/GripperCamera"
+        prim_path = "/Robot/panda_hand/WristCamera"
     elif robot == "piper":
-        prim_path = "/Robot/gripper_base/GripperCamera"
+        prim_path = "/Robot/gripper_base/WristCamera"
     else:
         raise ValueError("Unknown robot: %s" % robot)
 
