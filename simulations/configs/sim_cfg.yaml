@@ -1,7 +1,13 @@
 scene:
   cameras:
-    side_cam:
-    gripper_cam:
+    - name: "top_cam"
+      position: [0.5, 0, 1]
+      facing: [-90, 0, 0]
+      prim_path: "/Robot/TopCamera"
+    - name: "side_cam"
+      position: [0.5, 0.5, 0.2]
+      facing: [0, 0, 90]
+      prim_path: "/Robot/SideCamera"
   table:
     max_children: 3
     max_height: 1.5
