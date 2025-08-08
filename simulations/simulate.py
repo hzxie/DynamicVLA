@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-08 14:47:18
+# @Last Modified at: 2025-08-08 14:56:37
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -1120,7 +1120,7 @@ def main(simulation_app, args):
                     for k, v in es.items():
                         fp.create_dataset(k, data=v, compression="gzip")
 
-            if args.debug:
+            if args.debug and args.enable_cameras:
                 dump_video(
                     get_frames(es),
                     os.path.join(args.output_dir, "%s.mp4" % episode_name),
@@ -1191,7 +1191,7 @@ if __name__ == "__main__":
         logging.warning(
             "Cameras are disabled. No images will be produced during simulation."
         )
-        answer = input("Do you want to overwrite? (y/N) ").strip().lower()
+        answer = input("Do you want to continue? (y/N) ").strip().lower()
         if answer != "y":
             exit(0)
 
