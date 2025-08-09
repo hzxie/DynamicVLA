@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-08 21:31:27
+# @Last Modified at: 2025-08-09 10:54:57
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -162,14 +162,15 @@ def _set_up_scene_cameras(scene_cfg, sim_cfg, robot):
 
 
 def _get_camera_pose(cam):
+    # scalar_first is not supported in scipy < 1.12.0 (required by Isaac Lab)
     quat = scipy.spatial.transform.Rotation.from_euler(
-        "xyz", cam["facing"], degrees=True
+        "XYZ", cam["rotation"], degrees=True
     ).as_quat()
 
     return {
         "prim_path": cam["prim_path"],
         "pos": cam["position"],
-        "quat": quat,
+        "quat": [quat[3], quat[0], quat[1], quat[2]],  # wxyz
         "convention": "opengl",
     }
 
