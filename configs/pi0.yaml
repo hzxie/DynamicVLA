@@ -16,9 +16,10 @@ DATASET:
     - "action"
 
 POLICY:
-  NAME: "pi0"
-  CHUNK_SIZE: 
+  TYPE: "pi0"
   CHECKPOINT: "lerobot/pi0"
+  CHUNK_SIZE: 
+  N_ACTION_STEPS: 
 
 DIR:
   OUTPUT: "./runs"

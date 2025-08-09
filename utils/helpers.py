@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-09 17:28:49
+# @Last Modified at: 2025-08-09 22:40:29
 # @Email:  root@haozhexie.com
 
 import json
@@ -13,6 +13,7 @@ import os
 import pathlib
 
 import av
+import easydict
 import numpy as np
 import scipy.spatial.transform
 import torch
@@ -127,12 +128,11 @@ def get_quaternion(rotation, format="rotvec", scalar_first=True):
 
 
 def get_delta_timestamps(
-    policy_name: str,
-    chunk_size: int | None = None,
+    policy_cfg: str,
     dataset_cfg: dict[str, list[float]] | None = None,
 ) -> dict[str, list] | None:
     # Ref: lerobot.datasets.factorfvy.resolve_delta_timestamps
-    policy_cfg = get_policy_cfg(policy_name, chunk_size=chunk_size)
+    policy_cfg = get_policy_cfg(policy_cfg)
     delta_timestamps = {}
     if policy_cfg.reward_delta_indices is not None:
         delta_timestamps["reward"] = policy_cfg.reward_delta_indices
@@ -149,10 +149,9 @@ def get_delta_timestamps(
 
 
 def get_policy(
-    policy_name: str,
+    policy_cfg: dict,
     dataset_metadata: LeRobotDatasetMetadata,
     img_size: tuple[int, int] | None = None,
-    chunk_size: int | None = None,
     required_features: list[str] | None = None,
 ) -> PreTrainedPolicy:
     features = dataset_to_policy_features(dataset_metadata.features)
@@ -166,17 +165,16 @@ def get_policy(
         for key, ft in features.items()
         if key not in output_features and key in required_features
     }
-    policy_cfg = get_policy_cfg(
-        policy_name,
+    cfg = get_policy_cfg(
+        policy_cfg,
         input_features=input_features,
         output_features=output_features,
-        chunk_size=chunk_size,
         img_size=img_size,
     )
 
-    policy_class = get_policy_class(policy_name)
+    policy_class = get_policy_class(policy_cfg.TYPE)
     return policy_class(
-        policy_cfg, dataset_stats=fix_0std_dataset_stats(dataset_metadata.stats)
+        cfg, dataset_stats=fix_0std_dataset_stats(dataset_metadata.stats)
     )
 
 
@@ -224,20 +222,19 @@ def get_policy_features(features: dict[str, dict]) -> dict[str, FeatureType]:
 
 
 def get_policy_cfg(
-    policy_name: str,
+    policy_cfg: dict,
     input_features: dict = {},
     output_features: dict = {},
     img_size: tuple[int, int] | None = None,
-    chunk_size: int | None = None,
     cfg_file: pathlib.Path | str | None = None,
 ) -> PreTrainedConfig:
     if cfg_file is not None and os.path.exists(cfg_file):
         with open(cfg_file, "r") as f:
-            cfg_data = json.load(f)
+            policy_cfg = json.load(f)
 
-        input_features = get_policy_features(cfg_data.get("input_features"))
-        output_features = get_policy_features(cfg_data.get("output_features"))
-        chunk_size = cfg_data.get("chunk_size")
+        policy_cfg = easydict.EasyDict(policy_cfg)
+        input_features = get_policy_features(policy_cfg.get("input_features"))
+        output_features = get_policy_features(policy_cfg.get("output_features"))
         logging.info(
             f"Loaded policy configuration from {cfg_file} with input features:"
             f"{input_features} and output features: {output_features}"
@@ -252,41 +249,32 @@ def get_policy_cfg(
                 feature.shape = (feature.shape[0], img_size[0], img_size[1])
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    if policy_name == "diffusion":
-        policy_cfg = DiffusionConfig(
-            input_features=input_features,
-            output_features=output_features,
-            device=device,
-        )
-    elif policy_name == "pi0":
-        policy_cfg = PI0Config(
-            input_features=input_features,
-            output_features=output_features,
-            device=device,
-        )
-    elif policy_name == "pi0fast":
-        policy_cfg = PI0FASTConfig(
-            input_features=input_features,
-            output_features=output_features,
-            device=device,
-        )
-    elif policy_name == "smolvla":
-        policy_cfg = SmolVLAConfig(
-            input_features=input_features,
-            output_features=output_features,
-            device=device,
-        )
+    cfg_class = None
+    if policy_cfg.TYPE == "diffusion":
+        cfg_class = DiffusionConfig
+    elif policy_cfg.TYPE == "pi0":
+        cfg_class = PI0Config
+    elif policy_cfg.TYPE == "pi0fast":
+        cfg_class = PI0FASTConfig
+    elif policy_cfg.TYPE == "smolvla":
+        cfg_class = SmolVLAConfig
     else:
-        raise ValueError(f"Unknown policy: {policy_name}")
+        raise ValueError(f"Unknown policy: {policy_cfg.TYPE}")
 
-    if chunk_size is not None:
-        logging.info(
-            "Setting chunk size to %d for policy %s." % (chunk_size, policy_name)
-        )
-        policy_cfg.chunk_size = chunk_size
-        policy_cfg.n_action_steps = chunk_size
+    cfg = cfg_class(
+        input_features=input_features,
+        output_features=output_features,
+        device=device,
+    )
+    for k, v in policy_cfg.items():
+        attr_key = k.lower()
+        if hasattr(cfg, attr_key) and v is not None:
+            attr_value = getattr(cfg, attr_key)
+            if attr_value != v:
+                logging.warning(f"Overriding {k} in policy config with value: {v}")
+                setattr(cfg, attr_key, v)
 
-    return policy_cfg
+    return cfg
 
 
 def dump_video(frames, output_path, fps=24):

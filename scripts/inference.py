@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-07 06:35:04
+# @Last Modified at: 2025-08-09 22:32:48
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -89,10 +89,9 @@ def get_vla_model(pretrained_model):
     pretrained_cfg = pretrained_model / "config.json"
     with open(pretrained_cfg, "r") as fp:
         model_cfg = json.load(fp)
-        model_name = model_cfg["type"]
 
-    vla_cfg = utils.helpers.get_policy_cfg(model_name, cfg_file=pretrained_cfg)
-    vla_model = utils.helpers.get_policy_class(model_name).from_pretrained(
+    vla_cfg = utils.helpers.get_policy_cfg(model_cfg["type"], cfg_file=pretrained_cfg)
+    vla_model = utils.helpers.get_policy_class(model_cfg["type"]).from_pretrained(
         pretrained_model, config=vla_cfg
     )
     if torch.cuda.is_available():

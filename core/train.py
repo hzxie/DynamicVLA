@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-07 11:06:52
+# @Last Modified at: 2025-08-09 22:31:49
 # @Email:  root@haozhexie.com
 
 import logging
@@ -40,7 +40,7 @@ def train(cfg):
             cfg.DATASET.IMG_SIZE, cfg.TRAIN.IMAGE_TRANSFORMS
         ),
         delta_timestamps=utils.helpers.get_delta_timestamps(
-            cfg.POLICY.NAME, cfg.POLICY.CHUNK_SIZE, cfg.DATASET.DELTA_TIMESTAMPS
+            cfg.POLICY, cfg.DATASET.DELTA_TIMESTAMPS
         ),
     )
     test_dataset = utils.datasets.get_dataset(
@@ -51,7 +51,7 @@ def train(cfg):
         required_features=cfg.DATASET.REQUIRED_FEATURES,
         image_transforms=utils.datasets.ImageTransforms(cfg.DATASET.IMG_SIZE),
         delta_timestamps=utils.helpers.get_delta_timestamps(
-            cfg.POLICY.NAME, cfg.POLICY.CHUNK_SIZE, cfg.DATASET.DELTA_TIMESTAMPS
+            cfg.POLICY, cfg.DATASET.DELTA_TIMESTAMPS
         ),
     )
     train_sampler = None
@@ -83,15 +83,14 @@ def train(cfg):
 
     # Set up the policy
     policy = utils.helpers.get_policy(
-        cfg.POLICY.NAME,
+        cfg.POLICY,
         train_dataset.meta,
         cfg.DATASET.IMG_SIZE,
-        cfg.POLICY.CHUNK_SIZE,
         cfg.DATASET.REQUIRED_FEATURES,
     )
     if utils.distributed.is_master():
         logging.info(
-            "Using policy: %s with config %s" % (cfg.POLICY.NAME, policy.config)
+            "Using policy: %s with config %s" % (cfg.POLICY.TYPE, policy.config)
         )
         logging.info(
             "#Parameters: %s/%s"

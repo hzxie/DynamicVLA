@@ -15,9 +15,10 @@ DATASET:
     - "action"
 
 POLICY:
-  NAME: "diffusion"
-  CHUNK_SIZE: 
+  TYPE: "diffusion"
   CHECKPOINT:
+  CHUNK_SIZE: 
+  N_ACTION_STEPS:
 
 DIR:
   OUTPUT: "./runs"

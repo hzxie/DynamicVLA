@@ -16,9 +16,13 @@ DATASET:
     - "action"
 
 POLICY:
-  NAME: "smolvla"
+  TYPE: "smolvla"
   CHECKPOINT: "lerobot/smolvla_base"
   CHUNK_SIZE: 
+  N_ACTION_STEPS: 
+  LOAD_VLM_WEIGHTS: false
+  FREEZE_VISION_ENCODER: true
+  TRAIN_EXPERT_ONLY: true
 
 DIR:
   OUTPUT: "./runs"
