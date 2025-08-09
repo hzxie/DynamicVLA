@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-09 10:54:57
+# @Last Modified at: 2025-08-09 15:39:54
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -154,14 +154,14 @@ def _set_up_scene_cameras(scene_cfg, sim_cfg, robot):
             cam["name"],
             configs.scene_cfg.get_camera_cfg(
                 sim_cfg["camera"].copy(),
-                _get_camera_pose(cam),
+                get_camera_pose(cam),
             ),
         )
 
     return scene_cfg
 
 
-def _get_camera_pose(cam):
+def get_camera_pose(cam):
     # scalar_first is not supported in scipy < 1.12.0 (required by Isaac Lab)
     quat = scipy.spatial.transform.Rotation.from_euler(
         "XYZ", cam["rotation"], degrees=True

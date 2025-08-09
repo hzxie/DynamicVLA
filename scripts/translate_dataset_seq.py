@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 18:09:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-29 19:39:29
+# @Last Modified at: 2025-08-09 16:30:41
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -19,6 +19,7 @@ import h5py
 import isaaclab.app
 import numpy as np
 import torch
+import yaml
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 sys.path.append(PROJECT_HOME)
@@ -28,22 +29,29 @@ import simulations.evaluate as eval
 import simulations.simulate as sim
 
 
-def _get_action_tensor(action, num_envs, device):
-    if isinstance(action, np.ndarray):
-        action = torch.from_numpy(action).to(device)
-    elif isinstance(action, torch.tensor):
-        action = action.to(device)
-    else:
-        logging.warning("Unsupported action type: %s" % type(action))
-        action = None
+def get_camera_config(sim_cfg_file, robot_usd_path):
+    import configs.robot_cfg
 
-    if action.size(0) != num_envs or action.size(1) != 8:
-        logging.warning(
-            "Received action with shape %s, expected (%d, 8)" % (action.shape, num_envs)
-        )
-        action = None
+    if sim_cfg_file is None or not os.path.exists(sim_cfg_file):
+        return None
 
-    return action
+    cam_cfg = {}
+    robot_name = configs.robot_cfg.get_robot_name(robot_usd_path)
+    with open(sim_cfg_file) as fp:
+        sim_cfg = yaml.load(fp, Loader=yaml.FullLoader)
+
+    sim_cfg["camera"]["class_type"] = "isaaclab.sensors.camera.camera:Camera"
+    if "cameras" in sim_cfg["scene"] and "camera" in sim_cfg:
+        # Wrist camera configuration
+        cam_cfg["wrist_cam"] = sim_cfg["camera"].copy()
+        cam_cfg["wrist_cam"].update(configs.robot_cfg.get_wrist_camera_cfg(robot_name))
+        # Other cameras configuration
+        for cam in sim_cfg["scene"]["cameras"]:
+            cam_name = cam["name"]
+            cam_cfg[cam_name] = sim_cfg["camera"].copy()
+            cam_cfg[cam_name].update(sim.get_camera_pose(cam))
+
+    return {"scene": cam_cfg}
 
 
 def simulate(env, sim_states, robot_origin, robot_quat, final_position, debug=False):
@@ -81,7 +89,9 @@ def simulate(env, sim_states, robot_origin, robot_quat, final_position, debug=Fa
             robot_quat,
             env.unwrapped.device,
         )
-        cam_view = sim.get_camera_views(env.unwrapped.scene.sensors, ["rgb"])
+        cam_view = sim.get_camera_views(
+            env.unwrapped.scene.sensors, ["rgb", "depth", "seg"]
+        )
 
         action = action_seq[act_conter]
         # Replace the action with the next state
@@ -115,6 +125,24 @@ def simulate(env, sim_states, robot_origin, robot_quat, final_position, debug=Fa
     ]
 
 
+def _get_action_tensor(action, num_envs, device):
+    if isinstance(action, np.ndarray):
+        action = torch.from_numpy(action).to(device)
+    elif isinstance(action, torch.tensor):
+        action = action.to(device)
+    else:
+        logging.warning("Unsupported action type: %s" % type(action))
+        action = None
+
+    if action.size(0) != num_envs or action.size(1) != 8:
+        logging.warning(
+            "Received action with shape %s, expected (%d, 8)" % (action.shape, num_envs)
+        )
+        action = None
+
+    return action
+
+
 def main(args):
     sequences = sorted([f for f in os.listdir(args.dataset_dir) if f.endswith(".h5")])
     if args.range is not None:
@@ -132,6 +160,23 @@ def main(args):
         logging.info("Recovering test environment from %s" % env_cfg)
         with open(env_cfg, "r") as fp:
             env_cfg = json.load(fp)
+
+        # Remove old camera configurations
+        env_cfg = {
+            k: v
+            for k, v in env_cfg.items()
+            if not isinstance(v, dict)
+            or "class_type" not in v
+            or not isinstance(v["class_type"], str)
+            or not v["class_type"].startswith("isaaclab.sensors.camera")
+        }
+        # Recover camera configuration from the simulation config file
+        if args.enable_cameras and args.sim_cfg_file is not None:
+            env_cfg["scene"].update(
+                get_camera_config(
+                    args.sim_cfg_file, env_cfg["scene"]["robot"]["spawn"]["usd_path"]
+                )
+            )
 
         # Fix random seed for reproducibility
         random.seed(env_cfg["seed"])
@@ -225,6 +270,10 @@ if __name__ == "__main__":
     parser.add_argument("--physics_time_step", type=float, default=0.04)
     parser.add_argument("--timeout", type=float, default=10)
     parser.add_argument(
+        "--sim_cfg_file",
+        default=os.path.join(PROJECT_HOME, "simulations", "configs", "sim_cfg.yaml"),
+    )
+    parser.add_argument(
         "--scene_dir", default=os.path.join(PROJECT_HOME, os.pardir, "scenes")
     )
     parser.add_argument(
@@ -245,5 +294,16 @@ if __name__ == "__main__":
             setattr(args, sp, getattr(isaaclab_args, sp))
 
     app_launcher = isaaclab.app.AppLauncher(isaaclab_args)
+    # Pass "enable_cameras" to this script
+    # Ref: https://isaac-sim.github.io/IsaacLab/main/_modules/isaaclab/app/app_launcher.html
+    args.enable_cameras = app_launcher._enable_cameras
+    if not args.enable_cameras:
+        logging.warning(
+            "Cameras are disabled. No images will be produced during simulation."
+        )
+        answer = input("Do you want to continue? (y/N) ").strip().lower()
+        if answer != "y":
+            exit(0)
+
     main(args)
     app_launcher.app.close()

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-04 19:16:25
+# @Last Modified at: 2025-08-09 16:20:31
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -139,9 +139,13 @@ def _get_env_cfg(cfg, num_envs, scene_dir, object_dir, device, disable_fabric):
 def _set_up_scene_cameras(scene_cfg, cfg):
     import configs.scene_cfg
 
-    # Set up the top-view camera
     for k, v in cfg.items():
-        if not k.endswith("_cam"):
+        if (
+            not isinstance(v, dict)
+            or "class_type" not in v
+            or not isinstance(v["class_type"], str)
+            or not v["class_type"].startswith("isaaclab.sensors.camera")
+        ):
             continue
 
         # Remove prefix: '/World/envs/env_.*'
