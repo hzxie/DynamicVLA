@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-31 15:11:37
+# @Last Modified at: 2025-08-09 17:28:49
 # @Email:  root@haozhexie.com
 
 import json
@@ -284,6 +284,7 @@ def get_policy_cfg(
             "Setting chunk size to %d for policy %s." % (chunk_size, policy_name)
         )
         policy_cfg.chunk_size = chunk_size
+        policy_cfg.n_action_steps = chunk_size
 
     return policy_cfg
 
