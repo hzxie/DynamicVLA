@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-09 22:32:48
+# @Last Modified at: 2025-08-10 11:14:53
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -90,7 +90,7 @@ def get_vla_model(pretrained_model):
     with open(pretrained_cfg, "r") as fp:
         model_cfg = json.load(fp)
 
-    vla_cfg = utils.helpers.get_policy_cfg(model_cfg["type"], cfg_file=pretrained_cfg)
+    vla_cfg = utils.helpers.get_policy_cfg(cfg_file=pretrained_cfg)
     vla_model = utils.helpers.get_policy_class(model_cfg["type"]).from_pretrained(
         pretrained_model, config=vla_cfg
     )

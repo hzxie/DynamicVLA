@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-09 15:39:54
+# @Last Modified at: 2025-08-10 09:53:46
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -878,6 +878,7 @@ def get_frames(
 ):
     MAX_DEPTH = 25
 
+    cam_name = None
     cam_frames = {}
     for st_key, frames in env_state.items():
         cam_idx = st_key.find("_cam_")
@@ -911,6 +912,9 @@ def get_frames(
                 frame = cv2.applyColorMap(frame * 64, cv2.COLORMAP_JET)
 
             cam_frames[cam_name][img_name].append(frame)
+
+    if cam_name is None:
+        raise ValueError("No camera frames found in the environment state.")
 
     n_frames = len(cam_frames[cam_name][img_name])
     frames = [[[] for _ in range(len(cam_frames))] for _ in range(n_frames)]

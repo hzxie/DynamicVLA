@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-09 22:40:29
+# @Last Modified at: 2025-08-10 09:27:11
 # @Email:  root@haozhexie.com
 
 import json
@@ -222,7 +222,7 @@ def get_policy_features(features: dict[str, dict]) -> dict[str, FeatureType]:
 
 
 def get_policy_cfg(
-    policy_cfg: dict,
+    policy_cfg: dict = {},
     input_features: dict = {},
     output_features: dict = {},
     img_size: tuple[int, int] | None = None,
@@ -233,6 +233,7 @@ def get_policy_cfg(
             policy_cfg = json.load(f)
 
         policy_cfg = easydict.EasyDict(policy_cfg)
+        policy_cfg.TYPE = policy_cfg.type
         input_features = get_policy_features(policy_cfg.get("input_features"))
         output_features = get_policy_features(policy_cfg.get("output_features"))
         logging.info(
@@ -268,10 +269,12 @@ def get_policy_cfg(
     )
     for k, v in policy_cfg.items():
         attr_key = k.lower()
+        if k in ["type", "device", "input_features", "output_features"]:
+            continue
         if hasattr(cfg, attr_key) and v is not None:
             attr_value = getattr(cfg, attr_key)
             if attr_value != v:
-                logging.warning(f"Overriding {k} in policy config with value: {v}")
+                logging.warning(f"Overriding {k} in policy config: {attr_value} -> {v}")
                 setattr(cfg, attr_key, v)
 
     return cfg

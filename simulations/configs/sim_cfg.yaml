@@ -26,7 +26,7 @@ scene:
 camera:
   width: 480
   height: 360
-  fps: 50
+  fps: 25
   focal_length: 2.3
   focus_distance: 400
   horizontal_aperture: 4.6

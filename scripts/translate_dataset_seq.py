@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 18:09:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-09 16:30:41
+# @Last Modified at: 2025-08-10 10:49:54
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -31,6 +31,7 @@ import simulations.simulate as sim
 
 def get_camera_config(sim_cfg_file, robot_usd_path):
     import configs.robot_cfg
+    import configs.scene_cfg
 
     if sim_cfg_file is None or not os.path.exists(sim_cfg_file):
         return None
@@ -43,15 +44,17 @@ def get_camera_config(sim_cfg_file, robot_usd_path):
     sim_cfg["camera"]["class_type"] = "isaaclab.sensors.camera.camera:Camera"
     if "cameras" in sim_cfg["scene"] and "camera" in sim_cfg:
         # Wrist camera configuration
-        cam_cfg["wrist_cam"] = sim_cfg["camera"].copy()
-        cam_cfg["wrist_cam"].update(configs.robot_cfg.get_wrist_camera_cfg(robot_name))
+        cam_cfg["wrist_cam"] = configs.scene_cfg.get_camera_cfg(
+            sim_cfg["camera"].copy(), configs.robot_cfg.get_wrist_camera_cfg(robot_name)
+        ).to_dict()
         # Other cameras configuration
         for cam in sim_cfg["scene"]["cameras"]:
             cam_name = cam["name"]
-            cam_cfg[cam_name] = sim_cfg["camera"].copy()
-            cam_cfg[cam_name].update(sim.get_camera_pose(cam))
+            cam_cfg[cam_name] = configs.scene_cfg.get_camera_cfg(
+                sim_cfg["camera"].copy(), sim.get_camera_pose(cam)
+            ).to_dict()
 
-    return {"scene": cam_cfg}
+    return cam_cfg
 
 
 def simulate(env, sim_states, robot_origin, robot_quat, final_position, debug=False):
@@ -172,11 +175,11 @@ def main(args):
         }
         # Recover camera configuration from the simulation config file
         if args.enable_cameras and args.sim_cfg_file is not None:
-            env_cfg["scene"].update(
-                get_camera_config(
-                    args.sim_cfg_file, env_cfg["scene"]["robot"]["spawn"]["usd_path"]
-                )
+            cam_cfg = get_camera_config(
+                args.sim_cfg_file, env_cfg["scene"]["robot"]["spawn"]["usd_path"]
             )
+            for k, v in cam_cfg.items():
+                env_cfg["scene"][k] = v
 
         # Fix random seed for reproducibility
         random.seed(env_cfg["seed"])
@@ -228,7 +231,7 @@ def main(args):
                     for k, v in env_state.items():
                         fp.create_dataset(k, data=v, compression="gzip")
 
-            if args.debug:
+            if args.debug and args.enable_cameras:
                 sim.dump_video(
                     sim.get_frames(env_state, ["ee_pos", "object_pos", "object_vel"]),
                     os.path.join(
