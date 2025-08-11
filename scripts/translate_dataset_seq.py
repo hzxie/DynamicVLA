@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 18:09:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-10 10:49:54
+# @Last Modified at: 2025-08-11 19:41:12
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -221,10 +221,11 @@ def main(args):
             env_state, success = es
             if args.save:
                 assert success  # Only save successful episodes
-                shutil.copyfile(
-                    os.path.join(args.dataset_dir, "%s.json" % seq[:-3]),
-                    os.path.join(args.output_dir, "%s-tr.json" % seq[:-3]),
-                )
+                with open(
+                    os.path.join(args.output_dir, "%s-tr.json" % seq[:-3]), "w"
+                ) as fp:
+                    json.dump(env_cfg, fp, indent=2)
+
                 with h5py.File(
                     os.path.join(args.output_dir, "%s-tr.h5" % seq[:-3]), "w"
                 ) as fp:

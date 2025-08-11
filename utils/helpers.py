@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-10 09:27:11
+# @Last Modified at: 2025-08-11 10:22:56
 # @Email:  root@haozhexie.com
 
 import json
@@ -278,27 +278,3 @@ def get_policy_cfg(
                 setattr(cfg, attr_key, v)
 
     return cfg
-
-
-def dump_video(frames, output_path, fps=24):
-    if len(frames) == 0:
-        return
-
-    # Ref: lerobot.datasets.video_utils.encode_video_frames
-    with av.open(str(output_path), "w") as output:
-        output_stream = output.add_stream(
-            "libsvtav1", fps, options={"g": "2", "crf": "30"}
-        )
-        output_stream.pix_fmt = "yuv420p"
-        output_stream.width = frames[0].shape[1]
-        output_stream.height = frames[0].shape[0]
-        # Loop through input frames and encode them
-        for frame in frames:
-            input_frame = av.VideoFrame.from_image(Image.fromarray(frame))
-            packet = output_stream.encode(input_frame)
-            if packet:
-                output.mux(packet)
-        # Flush the encoder
-        packet = output_stream.encode()
-        if packet:
-            output.mux(packet)

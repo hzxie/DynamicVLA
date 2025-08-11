@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-11 14:31:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-24 12:38:51
+# @Last Modified at: 2025-08-11 10:25:45
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/main.py
 #
@@ -19,6 +19,7 @@ import pickle
 import sys
 
 import cv2
+import imageio.v3
 import numpy as np
 from libero.libero import benchmark as libero_benchmark
 from libero.libero import envs as libero_envs
@@ -170,8 +171,13 @@ def main(vla_model, vla_weights, env_name, task_id, output_dir, seed, debug):
             break
 
     env.close()
-    utils.helpers.dump_video(
-        frames, os.path.join(output_dir, get_episode_name(env_name, task_id, done))
+
+    imageio.v3.imwrite(
+        os.path.join(output_dir, get_episode_name(env_name, task_id, done)),
+        frames,
+        fps=10,
+        codec="libx264",
+        macro_block_size=1,
     )
     if debug:
         output_path = os.path.join(

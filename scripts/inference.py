@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-10 11:14:53
+# @Last Modified at: 2025-08-11 15:31:52
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -105,7 +105,7 @@ def get_transformed_observation(observation, rotation, feat_cfg, device="cuda"):
     images = {
         k: v.astype(np.float32) / 255.0
         for k, v in observation.items()
-        if k.startswith("observation.images.") and k in feat_cfg
+        if k.startswith("observation.image") and k in feat_cfg
     }
     ee_pose = observation["observation.state"]["end_effector"]
     ee_pose = np.concatenate(

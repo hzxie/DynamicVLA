@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-10 09:53:46
+# @Last Modified at: 2025-08-11 10:24:36
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -999,7 +999,7 @@ def dump_video(frames, output_path, fps=24):
     imageio.v3.imwrite(
         str(output_path),
         frames,
-        fps=24,
+        fps=fps,
         codec="libx264",
         macro_block_size=1,
     )
