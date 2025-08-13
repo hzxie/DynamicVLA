@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-09 22:31:49
+# @Last Modified at: 2025-08-13 14:44:41
 # @Email:  root@haozhexie.com
 
 import logging
@@ -107,17 +107,17 @@ def train(cfg):
     init_epoch = 0
     if "CKPT" in cfg.CONST:
         logging.info("Loading pretrained model from %s ..." % cfg.CONST.CKPT)
-        if not os.path.exists(os.path.join(cfg.CONST.CKPT)):
+        if cfg.CONST.CKPT is None or not os.path.exists(cfg.CONST.CKPT):
             logging.warning(
                 "Checkpoint %s does not exist. Fallback to default checkpoint %s."
                 % (cfg.CONST.CKPT, cfg.POLICY.CHECKPOINT)
             )
             cfg.CONST.CKPT = cfg.POLICY.CHECKPOINT
-        if os.path.exists(os.path.join(cfg.CONST.CKPT, "epoch.txt")):
-            with open(os.path.join(cfg.CONST.CKPT, "epoch.txt")) as fp:
-                init_epoch = int(fp.read().strip())
 
         if cfg.CONST.CKPT is not None:
+            if os.path.exists(os.path.join(cfg.CONST.CKPT, "epoch.txt")):
+                with open(os.path.join(cfg.CONST.CKPT, "epoch.txt")) as fp:
+                    init_epoch = int(fp.read().strip())
             # Save the normalizers to enable migration to the new datasets
             normalizers = {
                 n: getattr(policy, n)

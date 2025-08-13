@@ -448,11 +448,13 @@ def get_dataset_info(dataset_info, episode_metadata, n_tasks):
                 for k, v in values["video_info"].items()
                 if k not in ["video.is_depth_map"]
             }
-            dataset_info["features"][feature]["info"].update({
-                "video.height": values["shape"][0],
-                "video.width": values["shape"][1],
-                "video.channel": values["shape"][2],
-            })
+            dataset_info["features"][feature]["info"].update(
+                {
+                    "video.height": values["shape"][0],
+                    "video.width": values["shape"][1],
+                    "video.channel": values["shape"][2],
+                }
+            )
 
     EXTRA_FEATURES = [
         ("timestamp", "float32"),
