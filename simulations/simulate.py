@@ -214,9 +214,10 @@ def _set_up_scene_objects(
     )
     # Add more objects to the scene
     for oi in range(sim_cfg["scene"]["other_objects"]["n_objects"]):
-        bg_object_usd, _ = _get_object_usd_path(
+        bg_object_usd = _get_object_usd_path(
             object_dir, sim_cfg["scene"]["other_objects"]["categories"]
         )
+        logging.info("Using additional object: %s" % os.path.basename(bg_object_usd))
         scene_cfg = configs.scene_cfg.add_object_to_scene(
             scene_cfg,
             "object_%03d" % (oi + 1),
@@ -225,8 +226,11 @@ def _set_up_scene_objects(
                 file_path=bg_object_usd,
                 object_size=object_sizes.get(bg_object_usd, None),
                 robot_pos=robot_pose["pos"],
-                moving_time=None,  # TODO
+                moving_time=_get_moving_time(
+                    sim_cfg["scene"]["target_object"]["moving_time"]
+                ),  # TODO
                 semantic_tags=[("class", "OBJECT_BG")],
+                object_name_id=(oi + 1)
             ),
         )
 
@@ -262,6 +266,7 @@ def _get_object_cfg(
     robot_pos=None,
     moving_time=None,
     semantic_tags=None,
+    object_name_id=None
 ):
     import configs.object_cfg
 
@@ -314,8 +319,12 @@ def _get_object_cfg(
             object_cfg["lin_vel"]
         )
 
+    object_name = "/Object"
+    if object_name_id is not None:
+        object_name = f"/Object{object_name_id}"
+
     return configs.object_cfg.get_object_cfg(
-        "/Object",
+        object_name,
         object_cfg,
         configs.object_cfg.get_spawner_cfg(
             file_path=file_path, semantic_tags=semantic_tags
