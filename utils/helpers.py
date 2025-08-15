@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-11 10:22:56
+# @Last Modified at: 2025-08-16 06:22:04
 # @Email:  root@haozhexie.com
 
 import json
@@ -12,7 +12,6 @@ import logging
 import os
 import pathlib
 
-import av
 import easydict
 import numpy as np
 import scipy.spatial.transform
@@ -21,8 +20,6 @@ from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.types import FeatureType, PolicyFeature
 from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
 from lerobot.datasets.utils import dataset_to_policy_features
-from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
-from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
 from lerobot.policies.pi0.configuration_pi0 import PI0Config
 from lerobot.policies.pi0.modeling_pi0 import PI0Policy
 from lerobot.policies.pi0fast.configuration_pi0fast import PI0FASTConfig
@@ -30,7 +27,9 @@ from lerobot.policies.pi0fast.modeling_pi0fast import PI0FASTPolicy
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
 from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
-from PIL import Image
+
+from policies.diffusion.configuration_diffusion import DiffusionPolicyConfig
+from policies.diffusion.modeling_diffusion import DiffusionPolicy
 
 
 def get_n_parameters(model: PreTrainedPolicy, trainable_only: bool = True) -> int:
@@ -252,7 +251,7 @@ def get_policy_cfg(
     device = "cuda" if torch.cuda.is_available() else "cpu"
     cfg_class = None
     if policy_cfg.TYPE == "diffusion":
-        cfg_class = DiffusionConfig
+        cfg_class = DiffusionPolicyConfig
     elif policy_cfg.TYPE == "pi0":
         cfg_class = PI0Config
     elif policy_cfg.TYPE == "pi0fast":
@@ -269,7 +268,7 @@ def get_policy_cfg(
     )
     for k, v in policy_cfg.items():
         attr_key = k.lower()
-        if k in ["type", "device", "input_features", "output_features"]:
+        if k.lower() in ["type", "device", "input_features", "output_features"]:
             continue
         if hasattr(cfg, attr_key) and v is not None:
             attr_value = getattr(cfg, attr_key)
