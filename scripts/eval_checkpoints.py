@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-01 07:40:13
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-07 06:31:00
+# @Last Modified at: 2025-08-16 12:07:24
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -94,10 +94,11 @@ def test_checkpoint(
 
     test_results = None
     try:
+        logging.info("Executing command:\n%s" % " ".join(args))
         output = subprocess.check_output(args, stderr=subprocess.STDOUT, text=True)
     except Exception as ex:
-        logging.error("Failed to execute command:\n%s" % " ".join(args))
         logging.exception(ex)
+        logging.exception(ex.output)
         return None
 
     try:

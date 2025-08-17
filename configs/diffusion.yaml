@@ -15,7 +15,7 @@ DATASET:
     - "action"
 
 POLICY:
-  TYPE: "diffusion"
+  TYPE: "dp"
   CHECKPOINT:
   CHUNK_SIZE: 
   N_ACTION_STEPS:

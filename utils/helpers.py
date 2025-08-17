@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-16 06:22:04
+# @Last Modified at: 2025-08-16 11:00:12
 # @Email:  root@haozhexie.com
 
 import json
@@ -194,7 +194,7 @@ def fix_0std_dataset_stats(
 
 def get_policy_class(policy_name: str) -> type[PreTrainedPolicy]:
     policy_classes = {
-        "diffusion": DiffusionPolicy,
+        "dp": DiffusionPolicy,
         "pi0": PI0Policy,
         "pi0fast": PI0FASTPolicy,
         "smolvla": SmolVLAPolicy,
@@ -250,7 +250,7 @@ def get_policy_cfg(
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     cfg_class = None
-    if policy_cfg.TYPE == "diffusion":
+    if policy_cfg.TYPE == "dp":
         cfg_class = DiffusionPolicyConfig
     elif policy_cfg.TYPE == "pi0":
         cfg_class = PI0Config

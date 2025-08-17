@@ -120,8 +120,8 @@ class DiffusionPolicyConfig(PreTrainedConfig):
 
     # Architecture / modeling.
     # Vision backbone.
-    vision_backbone: str = "resnet18"
-    crop_shape: tuple[int, int] | None = (84, 84)
+    vision_backbone: str = "resnet50"
+    crop_shape: tuple[int, int] | None = None
     crop_is_random: bool = True
     pretrained_backbone_weights: str | None = None
     use_group_norm: bool = True

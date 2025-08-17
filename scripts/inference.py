@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-11 15:31:52
+# @Last Modified at: 2025-08-16 11:08:56
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -148,7 +148,7 @@ def get_action(vla_model, observation, rotation, use_delta_action, debug=False):
         observation, rotation, vla_model.config.input_features
     )
     # Update the state every chunk_size steps
-    if _count % vla_model.config.chunk_size == 0:
+    if _count % vla_model.config.n_action_steps == 0:
         _state = observation["observation.state"].cpu().numpy()
         setattr(get_action, "state", _state)
         if debug:
