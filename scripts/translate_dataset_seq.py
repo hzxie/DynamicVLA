@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 18:09:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-11 19:41:12
+# @Last Modified at: 2025-08-17 18:06:26
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -154,6 +154,10 @@ def main(args):
         sequences = sequences[start:end]
 
     for seq in sequences:
+        output_file = os.path.join(args.output_dir, "%s-tr.json" % seq[:-3])
+        if os.path.exists(output_file):
+            continue
+
         # Load the dataset sequence
         with h5py.File(os.path.join(args.dataset_dir, seq), "r") as f:
             env_states = {k: f[k][()] for k in f.keys()}
