@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-16 22:07:46
+# @Last Modified at: 2025-08-20 15:44:34
 # @Email:  root@haozhexie.com
 
 import collections
@@ -101,7 +101,6 @@ class PlaceStateMachine:
         self.sm_wait_time = torch.zeros((num_envs,), device=device)
 
         # desired grasp state
-        self.grasp_position = torch.zeros((num_envs, 3), device=device)
         self.standard_orientation = torch.zeros((num_envs, 4), device=device)
         self.standard_orientation[:, 1] = 1.0
         # next gripper state
@@ -177,12 +176,11 @@ class PlaceStateMachine:
         )
 
         # Determine the object position before lifting
-        self.grasp_position = self._get_grasp_position(
+        grasp_position = self._get_grasp_position(
             self.object_size,
             curr_state["object"]["pos"],
         )
-
-        grasp_pose = torch.cat([self.grasp_position, self.standard_orientation], dim=-1)
+        grasp_pose = torch.cat([grasp_position, self.standard_orientation], dim=-1)
         object_pose = torch.cat(
             [curr_state["object"]["pos"], self.standard_orientation], dim=-1
         )
@@ -226,8 +224,8 @@ class PlaceStateMachine:
         action = torch.cat([des_ee_pose, self.des_gripper_state.unsqueeze(-1)], dim=-1)
         return {
             "action": action,
-            "sm_state": self.sm_state,
-            "grasp_postion": self.grasp_position,
+            "sm_state": self.sm_state.clone(),
+            "grasp_position": grasp_position,
             "grasp_quat": self.standard_orientation,
         }
 

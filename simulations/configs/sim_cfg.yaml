@@ -10,10 +10,6 @@ scene:
       rotation: [-90, 0, 180]
       # quat: [0, 0, 0.70710678, 0.70710678]
       prim_path: "/Robot/SideCamera"
-  table:
-    max_children: 3
-    max_height: 1.5
-    min_wh_sum: 2
   target_object:
     categories:
       - can

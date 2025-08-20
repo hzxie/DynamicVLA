@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 18:09:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-17 18:06:26
+# @Last Modified at: 2025-08-19 18:25:26
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -16,10 +16,10 @@ import shutil
 import sys
 
 import h5py
-import isaaclab.app
 import numpy as np
 import torch
 import yaml
+from isaaclab.app import AppLauncher
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 sys.path.append(PROJECT_HOME)
@@ -270,7 +270,7 @@ if __name__ == "__main__":
         action="store_true",
         help="Save the data from camera at index specified by ``--camera_id``.",
     )
-    isaaclab.app.AppLauncher.add_app_launcher_args(parser)
+    AppLauncher.add_app_launcher_args(parser)
     isaaclab_args, script_args = parser.parse_known_args()
 
     # Arguments for the script
@@ -301,7 +301,7 @@ if __name__ == "__main__":
         if sp in isaaclab_args:
             setattr(args, sp, getattr(isaaclab_args, sp))
 
-    app_launcher = isaaclab.app.AppLauncher(isaaclab_args)
+    app_launcher = AppLauncher(isaaclab_args)
     # Pass "enable_cameras" to this script
     # Ref: https://isaac-sim.github.io/IsaacLab/main/_modules/isaaclab/app/app_launcher.html
     args.enable_cameras = app_launcher._enable_cameras
