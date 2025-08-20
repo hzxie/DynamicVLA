@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-29 05:56:43
+# @Last Modified at: 2025-08-20 15:41:15
 # @Email:  root@haozhexie.com
 
 import collections
@@ -95,8 +95,6 @@ class PickStateMachine:
         self.sm_state = torch.full((num_envs,), 0, dtype=torch.int32, device=device)
         self.sm_wait_time = torch.zeros((num_envs,), device=device)
 
-        # desired grasp state
-        self.grasp_position = torch.zeros((num_envs, 3), device=device)
         # next gripper state
         self.des_ee_pose = torch.zeros((num_envs, POSE_DIM), device=device)
         self.des_gripper_state = torch.full((num_envs,), 0.0, device=device)
@@ -258,23 +256,20 @@ class PickStateMachine:
         )
 
         # Determine the object position before lifting
-        self.grasp_position = self._get_grasp_position(
+        grasp_position = self._get_grasp_position(
             curr_state["object"]["size"],
             curr_state["object"]["pos"],
             curr_state["object"]["velocity"],
         )
-
         grasp_quat = self._get_grasp_quat(
             curr_state["object"]["size"],
             curr_state["object"]["velocity"],
         )
-
         pose_angle = self._get_pose_angle(
             grasp_quat[:, [3, 0, 1, 2]],
             curr_state["end_effector"]["quat"],
         )
-
-        grasp_pose = torch.cat([self.grasp_position, grasp_quat], dim=-1)
+        grasp_pose = torch.cat([grasp_position, grasp_quat], dim=-1)
         object_pose = torch.cat([curr_state["object"]["pos"], grasp_quat], dim=-1)
 
         # Convert to warp
@@ -317,8 +312,8 @@ class PickStateMachine:
         action = torch.cat([des_ee_pose, self.des_gripper_state.unsqueeze(-1)], dim=-1)
         return {
             "action": action,
-            "sm_state": self.sm_state,
-            "grasp_postion": self.grasp_position,
+            "sm_state": self.sm_state.clone(),
+            "grasp_position": grasp_position,
             "grasp_quat": grasp_quat,
         }
 
