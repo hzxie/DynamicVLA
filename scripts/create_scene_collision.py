@@ -4,23 +4,212 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-04 10:36:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-06 18:58:20
+# @Last Modified at: 2025-08-20 20:02:08
 # @Email:  root@haozhexie.com
 
 import argparse
 import logging
 import os
+import shutil
 import sys
+import uuid
 
-import isaaclab.app
+import numpy as np
+from omni.isaac.kit import SimulationApp
 from tqdm import tqdm
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 sys.path.append(os.path.dirname(__file__))
 
 
+def apply_collision(stage):
+    from pxr import UsdPhysics
+
+    for prim in tqdm(stage.Traverse(), leave=False):
+        if prim.GetTypeName() == "Mesh":
+            UsdPhysics.CollisionAPI.Apply(prim)
+
+
+def regularize_tables(stage):
+    from pxr import UsdGeom
+
+    ACCEPTED_ANGLES = [0, 90, 180]
+    ANGLE_THRESHOLD = 20
+    for prim in tqdm(stage.Traverse(), leave=False):
+        if prim.GetName().find("Table") == -1 or prim.GetTypeName() != "Xform":
+            continue
+
+        rot_op = [
+            op
+            for op in UsdGeom.Xformable(prim).GetOrderedXformOps()
+            if op.GetOpName() == "xformOp:rotateXYZ"
+        ]
+        rot_op = None if len(rot_op) == 0 else rot_op[0]
+        if rot_op is not None:
+            y_rotation = abs(rot_op.Get()[1]) % 180
+            # Check whether the y-axis-rotation is near 0, 90, 180 degrees
+            for angle in ACCEPTED_ANGLES:
+                diff = abs(y_rotation - angle)
+                if diff > 1e-3 and diff < ANGLE_THRESHOLD:
+                    rotation = rot_op.Get()
+                    rotation[1] = angle
+                    logging.debug(
+                        "Regularizing table: %s; Old rotation: %s; New rotation: %s",
+                        prim.GetPath(),
+                        rot_op.Get(),
+                        rotation,
+                    )
+                    rot_op.Set(rotation)
+                    break
+
+
+def remove_table_objects(stage):
+    from pxr import Usd, UsdGeom
+
+    DIFF_THRESHOLD = 0.1
+    bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    for prim in tqdm(stage.Traverse(), leave=False):
+        if prim.GetName().find("Table") == -1:
+            continue
+
+        children = prim.GetChildren()
+        if len(children) <= 1:
+            continue
+
+        bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
+        for child in children:
+            _bbox = bbox_cache.ComputeWorldBound(child).ComputeAlignedBox()
+            _bbox_diff = bbox.GetSize() - _bbox.GetSize()
+            if (
+                np.all(np.array(_bbox_diff) > DIFF_THRESHOLD)
+                and np.sum(_bbox_diff) >= DIFF_THRESHOLD
+            ):
+                assert stage.RemovePrim(child.GetPath())
+
+
+def get_table_heights(scene_usd_file):
+    import omni.usd
+    from pxr import Gf, Usd, UsdGeom
+
+    usd_context = omni.usd.get_context()
+    # Make current stage as the temporary stage to get the table assets
+    usd_context.open_stage(scene_usd_file)
+    stage = usd_context.get_stage()
+    default_prim = stage.GetDefaultPrim()
+    # Set z-axis as the up axis (to run the simulation)
+    xform = UsdGeom.Xformable(default_prim)
+    xform.AddOrientOp().Set(Gf.Quatf(0.7071068, 0.7071068, 0, 0))
+
+    heights = {}
+    bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    for prim in tqdm(stage.Traverse(), leave=False):
+        if prim.GetName().find("Table") == -1 or prim.GetTypeName() != "Xform":
+            continue
+
+        bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
+        height = _get_table_height(prim, bbox)
+        if height != -1:
+            heights[prim.GetPath()] = height
+        else:
+            logging.warning(
+                "Table height could not be determined for: %s", prim.GetPath()
+            )
+
+    return heights
+
+
+def _get_table_height(prim, bbox):
+    from isaacsim.core.api.objects.cuboid import DynamicCuboid
+    from isaacsim.core.utils.prims import delete_prim
+    from omni.isaac.core import SimulationContext
+
+    CUBE_SIZE = 0.05
+    sim = SimulationContext()
+    bbox_min, bbox_max = bbox.GetMin(), bbox.GetMax()
+    x_values = [
+        bbox_min[0] + CUBE_SIZE,
+        bbox_max[0] - CUBE_SIZE,
+        (bbox_min[0] + bbox_max[0]) / 2.0,
+    ]
+    y_values = [
+        bbox_min[1] + CUBE_SIZE,
+        bbox_max[1] - CUBE_SIZE,
+        (bbox_min[1] + bbox_max[1]) / 2.0,
+    ]
+    cube_positions = [
+        [x, y, bbox_max[2] + CUBE_SIZE] for x in x_values for y in y_values
+    ]
+
+    height_values = []
+    for cp in cube_positions:
+        cube_name = "Cube_%s" % str(uuid.uuid4())[-12:]
+        cube = DynamicCuboid(
+            prim_path="/World/%s" % cube_name,
+            name=cube_name,
+            position=cp,
+            size=CUBE_SIZE,
+        )
+        sim.reset()
+        # Simulation loop for each cube position
+        for _ in range(1000):
+            sim.step(render=False)
+            cube_vel = np.linalg.norm(cube.get_linear_velocity())
+            if cube_vel < 1e-3:
+                pos = cube.get_world_pose()[0]
+                height_values.append(pos[2] - CUBE_SIZE / 2.0)
+                break
+
+        delete_prim("/World/%s" % cube_name)
+
+    logging.debug("Table: %s; Height: %s" % (prim.GetPath(), height_values))
+    return np.mean(height_values) if np.std(height_values) < 1e-3 else -1
+
+
+def save_table_heights(stage, heights):
+    from pxr import Sdf
+
+    for prim_path, height in heights.items():
+        prim = stage.GetPrimAtPath(prim_path)
+        if height != -1:
+            prim.CreateAttribute("height", Sdf.ValueTypeNames.Float).Set(height)
+
+
+def add_table_planes(stage, heights):
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+
+    THICKNESS = 0.001
+    bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    for prim_path, height in heights.items():
+        prim = stage.GetPrimAtPath(prim_path)
+        bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
+        size = bbox.GetSize()
+        rot_op = [
+            op
+            for op in UsdGeom.Xformable(prim).GetOrderedXformOps()
+            if op.GetOpName() == "xformOp:rotateXYZ"
+        ]
+        rot_op = None if len(rot_op) == 0 else rot_op[0]
+        if rot_op is not None and abs(abs(rot_op.Get()[1]) - 90) < 1e-3:
+            # Ugly fix: If the table is rotated, swap the x and z axes
+            size = Gf.Vec3f(size[2], size[1], size[0])
+
+        plane = UsdGeom.Cube.Define(stage, "%s/TablePlane" % prim_path)
+        plane_prim = plane.GetPrim()
+        UsdPhysics.CollisionAPI.Apply(plane_prim)
+        # UsdPhysics.RigidBodyAPI.Apply(plane_prim)
+        # Set the translation and size of the plane
+        # NOTE:
+        # 1. The default size of the plane is 2.0
+        # 2. The y-axis is the up-axis in the USD
+        # 3. The translation is the relative position of the table bbox
+        plane.AddTranslateOp().Set(Gf.Vec3f(0.0, height + THICKNESS / 2.0, 0.0))
+        plane.AddScaleOp().Set(Gf.Vec3f(size[0] / 2.0, THICKNESS, size[2] / 2.0))
+        # Set the transparency of the plane
+        UsdGeom.Imageable(plane_prim).MakeInvisible()
+
+
 def main(input_dir, output_dir):
-    from pxr import Usd, UsdPhysics
+    from pxr import Usd
 
     usd_files = [f for f in os.listdir(input_dir) if f.endswith(".usd")]
     for uf in tqdm(usd_files):
@@ -33,12 +222,29 @@ def main(input_dir, output_dir):
 
         # Set the default prim to the house
         stage.SetDefaultPrim(stage.GetPrimAtPath("/house"))
-        # Create collision for all meshes in the stage
-        for prim in tqdm(stage.Traverse(), leave=False):
-            if prim.GetTypeName() == "Mesh":
-                UsdPhysics.CollisionAPI.Apply(prim)
 
+        # Create collision for all meshes in the stage
+        apply_collision(stage)
+        # Regularize tables
+        regularize_tables(stage)
+        # Remove objects on tables
+        remove_table_objects(stage)
+        # Save the edits to the output file
         stage.GetRootLayer().Export(output_file)
+
+        # Set the height of the table (temporarily set z-axis as the up axis)
+        temporary_usd_file = os.path.join(output_dir, "T%s" % uf)
+        shutil.copyfile(output_file, temporary_usd_file)
+        heights = get_table_heights(temporary_usd_file)
+        # Save the height values of the tables
+        stage = Usd.Stage.Open(output_file)
+        os.remove(temporary_usd_file)
+        save_table_heights(stage, heights)
+        # Add table planes
+        add_table_planes(stage, heights)
+        # Save the modified stage to the output file
+        stage.GetRootLayer().Export(output_file)
+        breakpoint()
 
 
 if __name__ == "__main__":
@@ -46,36 +252,18 @@ if __name__ == "__main__":
         format="[%(levelname)s] %(asctime)s %(message)s",
         level=logging.INFO,
     )
-    parser = argparse.ArgumentParser(description="Isaac Simulation Runner")
-    # Arguments for the IsaacLab
-    parser.add_argument(
-        "--disable_fabric",
-        action="store_true",
-        default=False,
-        help="Disable fabric and use USD I/O operations.",
-    )
-    parser.add_argument(
-        "--num_envs", type=int, default=1, help="Number of environments to simulate."
-    )
-    parser.add_argument(
-        "--save",
-        action="store_true",
-        default=False,
-        help="Save the data from camera at index specified by ``--camera_id``.",
-    )
     # IssacSim Environment Initialization
-    isaaclab.app.AppLauncher.add_app_launcher_args(parser)
-    isaaclab_args, script_args = parser.parse_known_args()
-    app_launcher = isaaclab.app.AppLauncher(isaaclab_args)
+    app = SimulationApp({"headless": True})
 
     # Arguments for the script
+    parser = argparse.ArgumentParser()
     parser.add_argument(
         "--input_dir", default=os.path.join(PROJECT_HOME, os.pardir, "USD")
     )
     parser.add_argument(
-        "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "objects")
+        "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "scenes")
     )
-    args = parser.parse_args(script_args)
+    args = parser.parse_args()
 
     main(args.input_dir, args.output_dir)
-    app_launcher.app.close()
+    app.close()

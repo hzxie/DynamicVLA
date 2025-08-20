@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-11 10:24:36
+# @Last Modified at: 2025-08-20 18:36:54
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -19,11 +19,11 @@ import cv2
 import gymnasium as gym
 import h5py
 import imageio.v3
-import isaaclab.app
 import numpy as np
 import scipy.spatial.transform
 import torch
 import yaml
+from isaaclab.app import AppLauncher
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 
@@ -40,9 +40,8 @@ def _get_object_size(usd_path):
         pxr.Usd.TimeCode.Default(), [pxr.UsdGeom.Tokens.default_]
     )
     bbox = bbox_cache.ComputeWorldBound(default_prim).ComputeAlignedBox()
-    size = bbox.max - bbox.min
     usd_context.new_stage()
-    return np.array([size[0], size[1], size[2]], dtype=np.float32)
+    return np.array(bbox.GetSize(), dtype=np.float32)
 
 
 def get_object_sizes(object_dir, target_categories=None):
@@ -93,7 +92,7 @@ def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, object_sizes, rob
             env_cfg.scene, os.path.join(scene_dir, usd_file)
         )
         tables = configs.scene_cfg.get_table_assets(
-            usd_file, sim_cfg["scene"]["table"], sim_cfg["scene"]["cameras"]
+            usd_file, sim_cfg["scene"]["cameras"]
         )
         if len(tables) == 0:
             scenes.remove(scene)
@@ -230,7 +229,7 @@ def _set_up_scene_objects(
                     sim_cfg["scene"]["target_object"]["moving_time"]
                 ),  # TODO
                 semantic_tags=[("class", "OBJECT_BG")],
-                object_name_id=(oi + 1)
+                object_name_id=(oi + 1),
             ),
         )
 
@@ -266,7 +265,7 @@ def _get_object_cfg(
     robot_pos=None,
     moving_time=None,
     semantic_tags=None,
-    object_name_id=None
+    object_name_id=None,
 ):
     import configs.object_cfg
 
@@ -413,10 +412,7 @@ def get_object_size(object_path, device="cpu"):
         pxr.Usd.TimeCode.Default(), [pxr.UsdGeom.Tokens.default_]
     )
     bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
-    size = bbox.max - bbox.min
-    return torch.tensor(
-        [[size[0], size[1], size[2]]], dtype=torch.float32, device=device
-    )
+    return torch.tensor([bbox.GetSize()], dtype=torch.float32, device=device)
 
 
 def get_rest_pose(robot, device="cpu"):
@@ -1110,7 +1106,7 @@ if __name__ == "__main__":
         default=False,
         help="Save the data from camera at index specified by ``--camera_id``.",
     )
-    isaaclab.app.AppLauncher.add_app_launcher_args(parser)
+    AppLauncher.add_app_launcher_args(parser)
     isaaclab_args, script_args = parser.parse_known_args()
 
     # Arguments for the script
@@ -1142,7 +1138,7 @@ if __name__ == "__main__":
         if sp in isaaclab_args:
             setattr(args, sp, getattr(isaaclab_args, sp))
 
-    app_launcher = isaaclab.app.AppLauncher(isaaclab_args)
+    app_launcher = AppLauncher(isaaclab_args)
     # Pass "enable_cameras" to this script
     # Ref: https://isaac-sim.github.io/IsaacLab/main/_modules/isaaclab/app/app_launcher.html
     args.enable_cameras = app_launcher._enable_cameras

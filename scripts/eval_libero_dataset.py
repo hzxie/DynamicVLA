@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-11 14:31:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-11 10:25:45
+# @Last Modified at: 2025-08-19 15:52:31
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/Physical-Intelligence/openpi/blob/main/examples/libero/main.py
 #
@@ -28,8 +28,6 @@ from libero.libero import get_libero_path
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 sys.path.append(PROJECT_HOME)
 import inference
-
-import utils.helpers
 
 
 def get_libero_env(env_name, task_id, seed):
