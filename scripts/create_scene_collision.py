@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-04 10:36:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-20 20:02:08
+# @Last Modified at: 2025-08-20 20:11:48
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -208,10 +208,15 @@ def add_table_planes(stage, heights):
         UsdGeom.Imageable(plane_prim).MakeInvisible()
 
 
-def main(input_dir, output_dir):
+def main(input_dir, output_dir, range=None):
     from pxr import Usd
 
-    usd_files = [f for f in os.listdir(input_dir) if f.endswith(".usd")]
+    usd_files = sorted([f for f in os.listdir(input_dir) if f.endswith(".usd")])
+    if range is not None:
+        start, end = range
+        logging.info("Processing USD files from %d to %d" % (start, end))
+        usd_files = usd_files[start:end]
+
     for uf in tqdm(usd_files):
         input_file = os.path.join(input_dir, uf)
         output_file = os.path.join(output_dir, uf)
@@ -244,7 +249,6 @@ def main(input_dir, output_dir):
         add_table_planes(stage, heights)
         # Save the modified stage to the output file
         stage.GetRootLayer().Export(output_file)
-        breakpoint()
 
 
 if __name__ == "__main__":
@@ -263,7 +267,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "scenes")
     )
+    parser.add_argument("--range", type=int, nargs=2, default=None)
     args = parser.parse_args()
 
-    main(args.input_dir, args.output_dir)
+    main(args.input_dir, args.output_dir, args.range)
     app.close()
