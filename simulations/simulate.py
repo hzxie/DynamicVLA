@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-11 10:24:36
+# @Last Modified at: 2025-08-20 20:27:10
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -443,11 +443,11 @@ def get_final_position(task, robot, device="cpu"):
     FINAL_POSITIONS = {
         "pick": {
             "franka": [0.3, 0, 0.3],
-            "piper": [0.3, 0, 0.3],
+            "piper": [0.373, 0.0, 0.271],
         },
         "place": {
             "franka": [0.3, 0, 0.3],
-            "piper": [0.3, 0, 0.3],
+            "piper": [0.373, 0.0, 0.271],
         },
     }
     if task in FINAL_POSITIONS:
@@ -804,7 +804,7 @@ def simulate(sim_cfg, object_sizes, task_cfg, dir_cfg, seed):
             curr_state["object"]["pos"],
             curr_state["end_effector"]["pos"],
             state_machine.final_object_pose[:, :3],
-            threshold=0.02,
+            threshold=0.035,
         )
         # Omit the sequence if the object is dropped or timeout
         if (

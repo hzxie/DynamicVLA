@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-11 19:50:33
+# @Last Modified at: 2025-08-18 10:54:37
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -536,8 +536,10 @@ def main(repo_id, input_dir, rot_fmt, remove_source, push_to_hub):
     dataset_tasks = []
     episode_length = []
     os.makedirs(os.path.join(output_dir, "meta"))
+
+    episodes = sorted([f for f in os.listdir(input_dir) if f.endswith(".stats")])
     for episode in tqdm(episodes):
-        episode = episode[:-3]  # Remove .h5 extension
+        episode = episode[:-6]  # Remove .stats extension
         if episode.find(episode_metadata["robot_type"]) == -1:
             logging.warning(
                 "Skipping episode %s as it does not match the robot type %s"
