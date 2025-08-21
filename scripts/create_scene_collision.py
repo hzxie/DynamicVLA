@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-04 10:36:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-20 20:11:48
+# @Last Modified at: 2025-08-21 23:02:25
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -22,11 +22,15 @@ PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.p
 sys.path.append(os.path.dirname(__file__))
 
 
-def apply_collision(stage):
+def apply_collision(stage, exclude_prim_keywords=[]):
     from pxr import UsdPhysics
 
     for prim in tqdm(stage.Traverse(), leave=False):
         if prim.GetTypeName() == "Mesh":
+            if any(keyword in prim.GetName() for keyword in exclude_prim_keywords):
+                logging.debug("Skipping collision for prim: %s", prim.GetPath())
+                continue
+
             UsdPhysics.CollisionAPI.Apply(prim)
 
 
@@ -228,22 +232,26 @@ def main(input_dir, output_dir, range=None):
         # Set the default prim to the house
         stage.SetDefaultPrim(stage.GetPrimAtPath("/house"))
 
+        temporary_usd_file = os.path.join(output_dir, "T%s" % uf)
         # Create collision for all meshes in the stage
         apply_collision(stage)
         # Regularize tables
         regularize_tables(stage)
         # Remove objects on tables
         remove_table_objects(stage)
-        # Save the edits to the output file
-        stage.GetRootLayer().Export(output_file)
-
         # Set the height of the table (temporarily set z-axis as the up axis)
-        temporary_usd_file = os.path.join(output_dir, "T%s" % uf)
-        shutil.copyfile(output_file, temporary_usd_file)
+        stage.GetRootLayer().Export(temporary_usd_file)
         heights = get_table_heights(temporary_usd_file)
-        # Save the height values of the tables
-        stage = Usd.Stage.Open(output_file)
+
+        stage = Usd.Stage.Open(input_file)
         os.remove(temporary_usd_file)
+        # Create collision for all meshes (excluding tables) in the stage
+        apply_collision(stage, exclude_prim_keywords=["Table"])
+        # Regularize tables
+        regularize_tables(stage)
+        # Remove objects on tables
+        remove_table_objects(stage)
+        # Save the height values of the tables
         save_table_heights(stage, heights)
         # Add table planes
         add_table_planes(stage, heights)
