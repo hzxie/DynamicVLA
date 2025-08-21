@@ -323,7 +323,11 @@ class DiffusionModel(nn.Module):
             "observation.environment_state": (B, n_obs_steps, environment_dim)
         }
         """
-        batch[OBS_STATE] = batch[OBS_STATE][None, :, :] if batch[OBS_STATE].ndim == 2 else batch[OBS_STATE]
+        batch[OBS_STATE] = (
+            batch[OBS_STATE][None, :, :]
+            if batch[OBS_STATE].ndim == 2
+            else batch[OBS_STATE]
+        )
         batch_size, n_obs_steps = batch[OBS_STATE].shape[:2]
         assert n_obs_steps == self.config.n_obs_steps
 

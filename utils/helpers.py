@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-16 11:00:12
+# @Last Modified at: 2025-08-21 15:38:21
 # @Email:  root@haozhexie.com
 
 import json
@@ -30,6 +30,8 @@ from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 
 from policies.diffusion.configuration_diffusion import DiffusionPolicyConfig
 from policies.diffusion.modeling_diffusion import DiffusionPolicy
+from policies.dynamicvla.configuration_dynamicvla import DynamicVLAConfig
+from policies.dynamicvla.modeling_dynamicvla import DynamicVLAPolicy
 
 
 def get_n_parameters(model: PreTrainedPolicy, trainable_only: bool = True) -> int:
@@ -198,6 +200,7 @@ def get_policy_class(policy_name: str) -> type[PreTrainedPolicy]:
         "pi0": PI0Policy,
         "pi0fast": PI0FASTPolicy,
         "smolvla": SmolVLAPolicy,
+        "dynamicvla": DynamicVLAPolicy,
     }
     if policy_name in policy_classes:
         return policy_classes[policy_name]
@@ -258,6 +261,8 @@ def get_policy_cfg(
         cfg_class = PI0FASTConfig
     elif policy_cfg.TYPE == "smolvla":
         cfg_class = SmolVLAConfig
+    elif policy_cfg.TYPE == "dynamicvla":
+        cfg_class = DynamicVLAConfig
     else:
         raise ValueError(f"Unknown policy: {policy_cfg.TYPE}")
 

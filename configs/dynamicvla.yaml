@@ -16,11 +16,10 @@ DATASET:
     - "action"
 
 POLICY:
-  TYPE: "smolvla"
+  TYPE: "dynamicvla"
   CHECKPOINT: "lerobot/smolvla_base"
   CHUNK_SIZE: 
   N_ACTION_STEPS: 
-  LOAD_VLM_WEIGHTS: false
   FREEZE_VISION_ENCODER: true
   TRAIN_EXPERT_ONLY: true
 
