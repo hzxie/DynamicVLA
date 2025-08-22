@@ -4,16 +4,15 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-04 10:36:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-22 10:51:53
+# @Last Modified at: 2025-08-22 18:49:59
 # @Email:  root@haozhexie.com
 
 import argparse
+import json
 import logging
 import os
-import shutil
 import sys
 import uuid
-import json
 
 import numpy as np
 from omni.isaac.kit import SimulationApp
@@ -24,24 +23,25 @@ sys.path.append(os.path.dirname(__file__))
 
 
 def apply_collision(stage, exclude_prim_keywords=[]):
-    from pxr import UsdPhysics, PhysxSchema
-    import omni.client
     from isaaclab.sim.utils import safe_set_attribute_on_usd_schema
+    from pxr import PhysxSchema, UsdPhysics
 
     for prim in tqdm(stage.Traverse(), leave=False):
         if prim.GetTypeName() == "Mesh":
             UsdPhysics.CollisionAPI.Apply(prim)
             usd_collision_api = UsdPhysics.CollisionAPI(prim)
-            
+
             physx_collision_api = PhysxSchema.PhysxCollisionAPI(prim)
             if not physx_collision_api:
                 physx_collision_api = PhysxSchema.PhysxCollisionAPI.Apply(prim)
-            
-            collision = not any(keyword in prim.GetName() for keyword in exclude_prim_keywords)
+
             # set into USD API
-            safe_set_attribute_on_usd_schema(usd_collision_api, "collision_enabled", collision, camel_case=True)
-            # set into PhysX API
-            # safe_set_attribute_on_usd_schema(physx_collision_api, "collision_enabled", coll, camel_case=True)
+            safe_set_attribute_on_usd_schema(
+                usd_collision_api,
+                "collision_enabled",
+                not any(keyword in prim.GetName() for keyword in exclude_prim_keywords),
+                camel_case=True,
+            )
 
 
 def regularize_tables(stage):
@@ -223,7 +223,7 @@ def add_table_planes(stage, heights):
         UsdGeom.Imageable(plane_prim).MakeInvisible()
 
 
-def main(input_dir, output_dir, table_config=None, range=None):
+def main(input_dir, output_dir, ignore_files=None, range=None):
     from pxr import Usd
 
     usd_files = sorted([f for f in os.listdir(input_dir) if f.endswith(".usd")])
@@ -231,19 +231,17 @@ def main(input_dir, output_dir, table_config=None, range=None):
         start, end = range
         logging.info("Processing USD files from %d to %d" % (start, end))
         usd_files = usd_files[start:end]
-    
-    if table_config is not None :
-        with open(table_config, "r") as tc :
-            table_config = json.load(tc)
-        logging.info("Loading config of %d tables" % len(table_config))
+
+    if ignore_files is not None:
+        with open(ignore_files, "r") as fp:
+            ignore_files = json.load(fp)
 
     for uf in tqdm(usd_files):
-        if table_config is not None and uf not in table_config :
+        if ignore_files is not None and uf in ignore_files:
             continue
 
         input_file = os.path.join(input_dir, uf)
         output_file = os.path.join(output_dir, uf)
-
         stage = Usd.Stage.Open(input_file)
         prim_names = [str(p.GetPath()) for p in stage.GetPseudoRoot().GetChildren()]
         assert "/house" in prim_names
@@ -298,10 +296,11 @@ if __name__ == "__main__":
         "--input_dir", default=os.path.join(PROJECT_HOME, os.pardir, "USD")
     )
     parser.add_argument(
-        "--table_config", type=str, default=None
+        "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "scenes")
     )
+    parser.add_argument("--ignore_files", type=str, default=None)
     parser.add_argument("--range", type=int, nargs=2, default=None)
     args = parser.parse_args()
 
-    main(args.input_dir, args.output_dir, args.table_config, args.range)
+    main(args.input_dir, args.output_dir, args.ignore_files, args.range)
     app.close()
