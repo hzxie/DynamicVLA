@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-21 15:33:06
+# @Last Modified at: 2025-08-22 15:06:26
 # @Email:  root@haozhexie.com
 
 import math
@@ -424,6 +424,7 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         if self.config.adapt_to_pi_aloha:
             batch[OBS_STATE] = self._pi_aloha_decode_state(batch[OBS_STATE])
             batch[ACTION] = self._pi_aloha_encode_actions_inv(batch[ACTION])
+
         batch = self.normalize_inputs(batch)
         batch = self.normalize_targets(batch)
         images, img_masks = self.prepare_images(batch)
@@ -436,7 +437,6 @@ class DynamicVLAPolicy(PreTrainedPolicy):
             images, img_masks, lang_tokens, lang_masks, state, actions, noise, time
         )
         loss_dict["losses_after_forward"] = losses.clone()
-
         if actions_is_pad is not None:
             in_episode_bound = ~actions_is_pad
             losses = losses * in_episode_bound.unsqueeze(-1)
@@ -465,37 +465,39 @@ class DynamicVLAPolicy(PreTrainedPolicy):
 
         if len(present_img_keys) == 0:
             raise ValueError(
-                f"All image features are missing from the batch. At least one expected. (batch: {batch.keys()}) (image_features:{self.config.image_features})"
+                "All image features are missing from the batch. At least one expected. "
+                f"(batch: {batch.keys()}) (image_features:{self.config.image_features})"
             )
         # Preprocess image features present in the batch
         for key in present_img_keys:
-            img = batch[key][:, -1, :, :, :] if batch[key].ndim == 5 else batch[key]
-            if self.config.resize_imgs_with_padding is not None:
-                img = resize_with_pad(
-                    img, *self.config.resize_imgs_with_padding, pad_value=0
-                )
+            imgs = batch[key][:, None, :, :, :] if batch[key].ndim == 4 else batch[key]
+            for i in range(imgs.shape[1]):  # iterate over the number of timesteps
+                img = imgs[:, i, :, :, :]
+                if self.config.resize_imgs_with_padding is not None:
+                    img = resize_with_pad(
+                        img, *self.config.resize_imgs_with_padding, pad_value=0
+                    )
+                # Normalize from range [0,1] to [-1,1] as expacted by siglip
+                img = img * 2.0 - 1.0
+                if f"{key}_padding_mask" in batch:
+                    mask = batch[f"{key}_padding_mask"].bool()
+                else:
+                    mask = torch.ones(img.shape[0], dtype=torch.bool, device=img.device)
 
-            # Normalize from range [0,1] to [-1,1] as expacted by siglip
-            img = img * 2.0 - 1.0
-
-            bsize = img.shape[0]
-            device = img.device
-            if f"{key}_padding_mask" in batch:
-                mask = batch[f"{key}_padding_mask"].bool()
-            else:
-                mask = torch.ones(bsize, dtype=torch.bool, device=device)
-            images.append(img)
-            img_masks.append(mask)
+                images.append(img)
+                img_masks.append(mask)
 
         # Create image features not present in the batch
         # as fully 0 padded images.
         for num_empty_cameras in range(len(missing_img_keys)):
             if num_empty_cameras >= self.config.empty_cameras:
                 break
+
             img = torch.ones_like(img) * -1
             mask = torch.zeros_like(mask)
             images.append(img)
             img_masks.append(mask)
+
         return images, img_masks
 
     def prepare_language(self, batch) -> tuple[Tensor, Tensor]:
@@ -531,6 +533,7 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         # Reverse the gripper transformation that is being applied by the Aloha runtime.
         for motor_idx in [6, 13]:
             state[:, motor_idx] = aloha_gripper_to_angular(state[:, motor_idx])
+
         return state
 
     def _pi_aloha_encode_actions(self, actions):
@@ -697,10 +700,7 @@ class VLAFlowMatching(nn.Module):
         embs = []
         pad_masks = []
         att_masks = []
-        for _img_idx, (
-            img,
-            img_mask,
-        ) in enumerate(zip(images, img_masks, strict=False)):
+        for img, img_mask in zip(images, img_masks, strict=False):
             if self.add_image_special_tokens:
                 image_start_token = (
                     self.vlm_with_expert.embed_language_tokens(
@@ -864,7 +864,6 @@ class VLAFlowMatching(nn.Module):
 
         pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
         att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
-
         att_2d_masks = make_att_2d_masks(pad_masks, att_masks)
         position_ids = torch.cumsum(pad_masks, dim=1) - 1
         (_, suffix_out), _ = self.vlm_with_expert.forward(
@@ -923,6 +922,7 @@ class VLAFlowMatching(nn.Module):
             # Euler step
             x_t += dt * v_t
             time += dt
+
         return x_t
 
     def denoise_step(
@@ -945,7 +945,6 @@ class VLAFlowMatching(nn.Module):
         )
 
         suffix_att_2d_masks = make_att_2d_masks(suffix_pad_masks, suffix_att_masks)
-
         full_att_2d_masks = torch.cat([prefix_pad_2d_masks, suffix_att_2d_masks], dim=2)
         prefix_offsets = torch.sum(prefix_pad_masks, dim=-1)[:, None]
         position_ids = prefix_offsets + torch.cumsum(suffix_pad_masks, dim=1) - 1
