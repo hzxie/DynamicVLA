@@ -881,6 +881,26 @@ class VLAFlowMatching(nn.Module):
         losses = F.mse_loss(u_t, v_t, reduction="none")
         return losses
 
+    def sample_vlm_embedding(self, images, img_masks, lang_tokens, lang_masks, state, noise=None) -> Tensor:
+        """Do a half inference forward and compute the VLM embedding"""
+
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
+            images, img_masks, lang_tokens, lang_masks, state=state
+        )
+        prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
+        prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
+        # Compute image and language key value cache
+        _, past_key_values = self.vlm_with_expert.forward(
+            attention_mask=prefix_att_2d_masks,
+            position_ids=prefix_position_ids,
+            past_key_values=None,
+            inputs_embeds=[prefix_embs, None],
+            use_cache=self.config.use_cache,
+            fill_kv_cache=True,
+        )
+
+        return past_key_values
+
     def sample_actions(
         self, images, img_masks, lang_tokens, lang_masks, state, noise=None
     ) -> Tensor:
