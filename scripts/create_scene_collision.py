@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-04 10:36:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-21 23:02:25
+# @Last Modified at: 2025-08-22 10:51:53
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import uuid
+import json
 
 import numpy as np
 from omni.isaac.kit import SimulationApp
@@ -23,15 +24,24 @@ sys.path.append(os.path.dirname(__file__))
 
 
 def apply_collision(stage, exclude_prim_keywords=[]):
-    from pxr import UsdPhysics
+    from pxr import UsdPhysics, PhysxSchema
+    import omni.client
+    from isaaclab.sim.utils import safe_set_attribute_on_usd_schema
 
     for prim in tqdm(stage.Traverse(), leave=False):
         if prim.GetTypeName() == "Mesh":
-            if any(keyword in prim.GetName() for keyword in exclude_prim_keywords):
-                logging.debug("Skipping collision for prim: %s", prim.GetPath())
-                continue
-
             UsdPhysics.CollisionAPI.Apply(prim)
+            usd_collision_api = UsdPhysics.CollisionAPI(prim)
+            
+            physx_collision_api = PhysxSchema.PhysxCollisionAPI(prim)
+            if not physx_collision_api:
+                physx_collision_api = PhysxSchema.PhysxCollisionAPI.Apply(prim)
+            
+            collision = not any(keyword in prim.GetName() for keyword in exclude_prim_keywords)
+            # set into USD API
+            safe_set_attribute_on_usd_schema(usd_collision_api, "collision_enabled", collision, camel_case=True)
+            # set into PhysX API
+            # safe_set_attribute_on_usd_schema(physx_collision_api, "collision_enabled", coll, camel_case=True)
 
 
 def regularize_tables(stage):
@@ -95,6 +105,7 @@ def get_table_heights(scene_usd_file):
     import omni.usd
     from pxr import Gf, Usd, UsdGeom
 
+    HEIGHT_THRESHOLDS = (0.1, 2.0)
     usd_context = omni.usd.get_context()
     # Make current stage as the temporary stage to get the table assets
     usd_context.open_stage(scene_usd_file)
@@ -112,7 +123,7 @@ def get_table_heights(scene_usd_file):
 
         bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
         height = _get_table_height(prim, bbox)
-        if height != -1:
+        if height >= HEIGHT_THRESHOLDS[0] and height <= HEIGHT_THRESHOLDS[1]:
             heights[prim.GetPath()] = height
         else:
             logging.warning(
@@ -212,7 +223,7 @@ def add_table_planes(stage, heights):
         UsdGeom.Imageable(plane_prim).MakeInvisible()
 
 
-def main(input_dir, output_dir, range=None):
+def main(input_dir, output_dir, table_config=None, range=None):
     from pxr import Usd
 
     usd_files = sorted([f for f in os.listdir(input_dir) if f.endswith(".usd")])
@@ -220,8 +231,16 @@ def main(input_dir, output_dir, range=None):
         start, end = range
         logging.info("Processing USD files from %d to %d" % (start, end))
         usd_files = usd_files[start:end]
+    
+    if table_config is not None :
+        with open(table_config, "r") as tc :
+            table_config = json.load(tc)
+        logging.info("Loading config of %d tables" % len(table_config))
 
     for uf in tqdm(usd_files):
+        if table_config is not None and uf not in table_config :
+            continue
+
         input_file = os.path.join(input_dir, uf)
         output_file = os.path.join(output_dir, uf)
 
@@ -243,8 +262,14 @@ def main(input_dir, output_dir, range=None):
         stage.GetRootLayer().Export(temporary_usd_file)
         heights = get_table_heights(temporary_usd_file)
 
+        # Remove the temporary USD file
         stage = Usd.Stage.Open(input_file)
+        # The file cannot be removed while it is opened (on Windows)
         os.remove(temporary_usd_file)
+        if len(heights) == 0:
+            logging.warning("No tables found in the scene: %s", input_file)
+            continue
+
         # Create collision for all meshes (excluding tables) in the stage
         apply_collision(stage, exclude_prim_keywords=["Table"])
         # Regularize tables
@@ -273,10 +298,10 @@ if __name__ == "__main__":
         "--input_dir", default=os.path.join(PROJECT_HOME, os.pardir, "USD")
     )
     parser.add_argument(
-        "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "scenes")
+        "--table_config", type=str, default=None
     )
     parser.add_argument("--range", type=int, nargs=2, default=None)
     args = parser.parse_args()
 
-    main(args.input_dir, args.output_dir, args.range)
+    main(args.input_dir, args.output_dir, args.table_config, args.range)
     app.close()
