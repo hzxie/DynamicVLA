@@ -9,6 +9,7 @@ DATASET:
   USE_DELTA_ACTION: true
   IMG_SIZE: [224, 224]
   DELTA_TIMESTAMPS:
+    observation: [-2, 0]
   REQUIRED_FEATURES:
     - "observation.images.side_cam"
     - "observation.images.gripper_cam"
@@ -19,10 +20,10 @@ POLICY:
   TYPE: "dynamicvla"
   CHECKPOINT: "lerobot/smolvla_base"
   CHUNK_SIZE: 
+  N_OBS_STEPS: 2
   N_ACTION_STEPS: 
   FREEZE_VISION_ENCODER: true
   TRAIN_EXPERT_ONLY: true
-
 DIR:
   OUTPUT: "./runs"
 

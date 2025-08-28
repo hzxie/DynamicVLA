@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-22 15:06:26
+# @Last Modified at: 2025-08-28 11:01:36
 # @Email:  root@haozhexie.com
 
 import math
@@ -471,21 +471,26 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         # Preprocess image features present in the batch
         for key in present_img_keys:
             imgs = batch[key][:, None, :, :, :] if batch[key].ndim == 4 else batch[key]
-            for i in range(imgs.shape[1]):  # iterate over the number of timesteps
-                img = imgs[:, i, :, :, :]
-                if self.config.resize_imgs_with_padding is not None:
-                    img = resize_with_pad(
-                        img, *self.config.resize_imgs_with_padding, pad_value=0
-                    )
-                # Normalize from range [0,1] to [-1,1] as expacted by siglip
-                img = img * 2.0 - 1.0
-                if f"{key}_padding_mask" in batch:
-                    mask = batch[f"{key}_padding_mask"].bool()
-                else:
-                    mask = torch.ones(img.shape[0], dtype=torch.bool, device=img.device)
+            # Option 1: Concatenate along the batch dimension (too slow)
+            # for i in range(imgs.shape[1]):
+            # img = imgs[:, i, :, :, :]
+            # Option 2: Concatenate along the channel dimension
+            b, n, c, h, w = imgs.shape
+            assert n == self.config.n_obs_steps
+            img = imgs.view(b, n * c, h, w)
+            if self.config.resize_imgs_with_padding is not None:
+                img = resize_with_pad(
+                    img, *self.config.resize_imgs_with_padding, pad_value=0
+                )
+            # Normalize from range [0,1] to [-1,1] as expacted by siglip
+            img = img * 2.0 - 1.0
+            if f"{key}_padding_mask" in batch:
+                mask = batch[f"{key}_padding_mask"].bool()
+            else:
+                mask = torch.ones(img.shape[0], dtype=torch.bool, device=img.device)
 
-                images.append(img)
-                img_masks.append(mask)
+            images.append(img)
+            img_masks.append(mask)
 
         # Create image features not present in the batch
         # as fully 0 padded images.
@@ -625,28 +630,28 @@ class VLAFlowMatching(nn.Module):
         super().__init__()
         self.config = config
 
+        self.mults_proj = nn.Conv2d(config.n_obs_steps * 3, 3, kernel_size=7, padding=3)
         self.vlm_with_expert = SmolVLMWithExpertModel(
-            model_id=self.config.vlm_model_name,
-            freeze_vision_encoder=self.config.freeze_vision_encoder,
-            train_expert_only=self.config.train_expert_only,
-            load_vlm_weights=self.config.load_vlm_weights,
-            attention_mode=self.config.attention_mode,
-            num_expert_layers=self.config.num_expert_layers,
+            model_id=config.vlm_model_name,
+            freeze_vision_encoder=config.freeze_vision_encoder,
+            train_expert_only=config.train_expert_only,
+            load_vlm_weights=config.load_vlm_weights,
+            attention_mode=config.attention_mode,
+            num_expert_layers=config.num_expert_layers,
             num_vlm_layers=self.config.num_vlm_layers,
             self_attn_every_n_layers=self.config.self_attn_every_n_layers,
             expert_width_multiplier=self.config.expert_width_multiplier,
         )
         self.state_proj = nn.Linear(
-            self.config.max_state_dim,
+            config.max_state_dim,
             self.vlm_with_expert.config.text_config.hidden_size,
         )
         self.action_in_proj = nn.Linear(
-            self.config.max_action_dim, self.vlm_with_expert.expert_hidden_size
+            config.max_action_dim, self.vlm_with_expert.expert_hidden_size
         )
         self.action_out_proj = nn.Linear(
-            self.vlm_with_expert.expert_hidden_size, self.config.max_action_dim
+            self.vlm_with_expert.expert_hidden_size, config.max_action_dim
         )
-
         self.action_time_mlp_in = nn.Linear(
             self.vlm_with_expert.expert_hidden_size * 2,
             self.vlm_with_expert.expert_hidden_size,
@@ -720,8 +725,7 @@ class VLAFlowMatching(nn.Module):
                 embs.append(image_start_token)
                 pad_masks.append(image_start_mask)
 
-            img_emb = self.vlm_with_expert.embed_image(img)
-            img_emb = img_emb
+            img_emb = self.vlm_with_expert.embed_image(self.mults_proj(img))
 
             # Normalize image embeddings
             img_emb_dim = img_emb.shape[-1]
@@ -881,7 +885,9 @@ class VLAFlowMatching(nn.Module):
         losses = F.mse_loss(u_t, v_t, reduction="none")
         return losses
 
-    def sample_vlm_embedding(self, images, img_masks, lang_tokens, lang_masks, state, noise=None) -> Tensor:
+    def sample_vlm_embedding(
+        self, images, img_masks, lang_tokens, lang_masks, state, noise=None
+    ) -> Tensor:
         """Do a half inference forward and compute the VLM embedding"""
 
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
