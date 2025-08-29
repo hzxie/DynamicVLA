@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-18 10:54:37
+# @Last Modified at: 2025-08-29 09:58:34
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -236,7 +236,7 @@ def is_video_valid(video_path, video_length):
             video_path,
             seek_mode="approximate",
         )
-        video_decoder.get_frames_in_range(0, video_length - 1)
+        video_decoder.get_frames_in_range(0, video_length)
     except Exception as ex:
         return False
 

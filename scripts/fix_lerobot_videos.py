@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-25 18:53:11
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-21 08:04:39
+# @Last Modified at: 2025-08-28 21:09:12
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -89,9 +89,9 @@ def main(repo_id, h5_dir):
                         vf,
                         str(e),
                     )
-                    # fix_lerobot_video(
-                    #     episode_index, video_path, video_length, h5_dir, output_dir
-                    # )
+                    fix_lerobot_video(
+                        episode_index, video_path, video_length, h5_dir, output_dir
+                    )
 
 
 if __name__ == "__main__":
