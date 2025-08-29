@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-13 14:44:41
+# @Last Modified at: 2025-08-29 19:35:18
 # @Email:  root@haozhexie.com
 
 import logging
@@ -197,10 +197,13 @@ def train(cfg):
                 batch["task"] = batch["task"][0]
 
             loss, _ = policy.forward(batch)
+            loss = loss / cfg.TRAIN.GRAD_ACCUM_STEPS
             loss.backward()
-            lr_scheduler.step()
-            optimizer.step()
-            optimizer.zero_grad()
+            if batch_idx % cfg.TRAIN.GRAD_ACCUM_STEPS == 0:
+                optimizer.step()
+                lr_scheduler.step()
+                optimizer.zero_grad()
+
             train_losses.update(loss.item())
             batch_time.update(time.perf_counter() - batch_end_time)
             batch_end_time = time.perf_counter()
