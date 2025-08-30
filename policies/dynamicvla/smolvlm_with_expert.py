@@ -4,7 +4,7 @@
 # @Author: The HuggingFace Inc. team.
 # @Date:   2025-08-21 15:26:40
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-30 21:09:08
+# @Last Modified at: 2025-08-30 21:54:20
 # @Email:  root@haozhexie.com
 
 import copy
@@ -66,6 +66,7 @@ class SmolVLMWithExpertModel(nn.Module):
         num_expert_layers: int = -1,
         vlm_input_channels: int = 3,
         vlm_patch_size: int = 16,
+        vlm_attention_heads: int = 12,
         vlm_hidden_size: int = 768,
         vlm_intermediate_size: int = 3072,
         num_vlm_layers: int = -1,
@@ -77,6 +78,7 @@ class SmolVLMWithExpertModel(nn.Module):
         # Override values in SmolVLMConfig
         config.vision_config.num_channels = vlm_input_channels
         config.vision_config.patch_size = vlm_patch_size
+        config.vision_config.num_attention_heads = vlm_attention_heads
         config.vision_config.hidden_size = vlm_hidden_size
         config.vision_config.intermediate_size = vlm_intermediate_size
 

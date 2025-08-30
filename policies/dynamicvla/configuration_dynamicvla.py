@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:22:31
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-30 21:13:16
+# @Last Modified at: 2025-08-30 21:56:21
 # @Email:  root@haozhexie.com
 
 from dataclasses import dataclass, field
@@ -47,6 +47,7 @@ class DynamicVLAConfig(PreTrainedConfig):
     use_delta_joint_actions_aloha: bool = False
     # VLM
     vlm_patch_size: int = 16
+    vlm_attention_heads: int = 12
     vlm_hidden_size: int = 768
     vlm_intermediate_size: int = 3072
     # Tokenizer

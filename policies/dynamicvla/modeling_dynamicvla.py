@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-30 21:11:32
+# @Last Modified at: 2025-08-30 21:56:06
 # @Email:  root@haozhexie.com
 
 import math
@@ -637,6 +637,7 @@ class VLAFlowMatching(nn.Module):
             attention_mode=config.attention_mode,
             vlm_input_channels=3 * config.n_obs_steps,  # Support multi-timestep images
             vlm_patch_size=config.vlm_patch_size,
+            vlm_attention_heads=config.vlm_attention_heads,
             vlm_hidden_size=config.vlm_hidden_size,
             vlm_intermediate_size=config.vlm_intermediate_size,
             num_expert_layers=config.num_expert_layers,
