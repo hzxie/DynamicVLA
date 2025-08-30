@@ -4,7 +4,7 @@
 # @Author: NVIDIA
 # @Date:   2023-04-29 11:50:12
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-05-15 20:15:09
+# @Last Modified at: 2025-08-30 19:59:11
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/NVlabs/imaginaire
 
@@ -97,6 +97,12 @@ def get_rank():
             rank = torch.distributed.get_rank()
 
     return rank
+
+
+def get_local_rank():
+    r"""Get local rank of the thread."""
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    return local_rank
 
 
 def get_world_size():

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-29 19:35:18
+# @Last Modified at: 2025-08-30 20:10:39
 # @Email:  root@haozhexie.com
 
 import logging
@@ -26,7 +26,7 @@ import utils.summary_writer
 def train(cfg):
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
-    local_rank = utils.distributed.get_rank()
+    rank, local_rank = utils.distributed.get_rank(), utils.distributed.get_local_rank()
 
     # Set up datasets
     # train_dataset = lerobot.datasets.lerobot_dataset.LeRobotDataset(
@@ -58,10 +58,10 @@ def train(cfg):
     test_sampler = None
     if torch.cuda.is_available():
         train_sampler = torch.utils.data.distributed.DistributedSampler(
-            train_dataset, rank=local_rank, shuffle=True, drop_last=True
+            train_dataset, rank=rank, shuffle=True, drop_last=True
         )
         test_sampler = torch.utils.data.distributed.DistributedSampler(
-            test_dataset, rank=local_rank, shuffle=False, drop_last=True
+            test_dataset, rank=rank, shuffle=False, drop_last=True
         )
 
     train_data_loader = torch.utils.data.DataLoader(
@@ -88,7 +88,7 @@ def train(cfg):
         cfg.DATASET.IMG_SIZE,
         cfg.DATASET.REQUIRED_FEATURES,
     )
-    if utils.distributed.is_master():
+    if utils.distributed.is_local_master():
         logging.info(
             "Using policy: %s with config %s" % (cfg.POLICY.TYPE, policy.config)
         )
@@ -209,6 +209,12 @@ def train(cfg):
             batch_end_time = time.perf_counter()
             if utils.distributed.is_master():
                 tb_writer.add_scalars({"Loss/Batch": train_losses.val()}, n_itr)
+                # Save the model checkpoint every few batches
+                if batch_idx % cfg.TRAIN.CKPT_SAVE_FREQ.BATCH == 0:
+                    logging.info("Saving checkpoint to %s ..." % cfg.DIR.CHECKPOINTS)
+                    policy.module.save_pretrained(cfg.DIR.CHECKPOINTS)
+
+            if utils.distributed.is_local_master():
                 logging.info(
                     "[Epoch %d/%d][Batch %d/%d] BatchTime = %.3f (s) DataTime = %.3f (s) Loss = %.4f"
                     % (
@@ -221,14 +227,12 @@ def train(cfg):
                         train_losses.val(),
                     )
                 )
-                # Save the model checkpoint every few batches
-                if batch_idx % cfg.TRAIN.CKPT_SAVE_FREQ.BATCH == 0:
-                    logging.info("Saving checkpoint to %s ..." % cfg.DIR.CHECKPOINTS)
-                    policy.module.save_pretrained(cfg.DIR.CHECKPOINTS)
 
         epoch_end_time = time.perf_counter()
         if utils.distributed.is_master():
             tb_writer.add_scalars({"Loss/Epoch/Train": train_losses.avg()}, epoch_idx)
+
+        if utils.distributed.is_local_master():
             logging.info(
                 "[Epoch %d/%d] EpochTime = %.3f (s) Losses = %.4f"
                 % (
