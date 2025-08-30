@@ -7,11 +7,11 @@ DATASET:
   NAME: "lerobot/hzxie/dynamic-objects"
   PIN_MEMORY: false
   USE_DELTA_ACTION: true
-  IMG_SIZE: [224, 224]
+  IMG_SIZE:
   DELTA_TIMESTAMPS:
   REQUIRED_FEATURES:
-    - "observation.images.side_cam"
-    - "observation.images.gripper_cam"
+    - "observation.images.opst_cam"
+    - "observation.images.wrist_cam"
     - "observation.state"
     - "action"
 

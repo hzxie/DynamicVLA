@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:22:31
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-28 10:58:19
+# @Last Modified at: 2025-08-30 21:13:16
 # @Email:  root@haozhexie.com
 
 from dataclasses import dataclass, field
@@ -45,6 +45,10 @@ class DynamicVLAConfig(PreTrainedConfig):
     # Converts joint dimensions to deltas with respect to the current state before passing to the model.
     # Gripper dimensions will remain in absolute values.
     use_delta_joint_actions_aloha: bool = False
+    # VLM
+    vlm_patch_size: int = 16
+    vlm_hidden_size: int = 768
+    vlm_intermediate_size: int = 3072
     # Tokenizer
     tokenizer_max_length: int = 48
     # Decoding
@@ -66,9 +70,6 @@ class DynamicVLAConfig(PreTrainedConfig):
     scheduler_decay_lr: float = 2.5e-6
     # Select the VLM backbone.
     vlm_model_name: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
-    # Set to True in case of training the expert from scratch. True when init from pretrained dynamicvla weights
-    load_vlm_weights: bool = False
-    # Whether to use special image tokens around image features.
     add_image_special_tokens: bool = False
 
     attention_mode: str = "cross_attn"

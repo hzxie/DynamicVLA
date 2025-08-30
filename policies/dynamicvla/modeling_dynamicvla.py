@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-28 11:01:36
+# @Last Modified at: 2025-08-30 21:11:32
 # @Email:  root@haozhexie.com
 
 import math
@@ -630,13 +630,15 @@ class VLAFlowMatching(nn.Module):
         super().__init__()
         self.config = config
 
-        self.mults_proj = nn.Conv2d(config.n_obs_steps * 3, 3, kernel_size=7, padding=3)
         self.vlm_with_expert = SmolVLMWithExpertModel(
             model_id=config.vlm_model_name,
             freeze_vision_encoder=config.freeze_vision_encoder,
             train_expert_only=config.train_expert_only,
-            load_vlm_weights=config.load_vlm_weights,
             attention_mode=config.attention_mode,
+            vlm_input_channels=3 * config.n_obs_steps,  # Support multi-timestep images
+            vlm_patch_size=config.vlm_patch_size,
+            vlm_hidden_size=config.vlm_hidden_size,
+            vlm_intermediate_size=config.vlm_intermediate_size,
             num_expert_layers=config.num_expert_layers,
             num_vlm_layers=self.config.num_vlm_layers,
             self_attn_every_n_layers=self.config.self_attn_every_n_layers,
@@ -725,8 +727,7 @@ class VLAFlowMatching(nn.Module):
                 embs.append(image_start_token)
                 pad_masks.append(image_start_mask)
 
-            img_emb = self.vlm_with_expert.embed_image(self.mults_proj(img))
-
+            img_emb = self.vlm_with_expert.embed_image(img)
             # Normalize image embeddings
             img_emb_dim = img_emb.shape[-1]
             img_emb = img_emb * torch.tensor(

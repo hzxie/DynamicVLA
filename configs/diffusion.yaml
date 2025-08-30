@@ -9,8 +9,8 @@ DATASET:
   IMG_SIZE: [224, 224]
   DELTA_TIMESTAMPS:
   REQUIRED_FEATURES:
-    - "observation.images.gripper_cam"
-    - "observation.images.side_cam"
+    - "observation.images.opst_cam"
+    - "observation.images.wrist_cam"
     - "observation.state"
     - "action"
 

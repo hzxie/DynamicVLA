@@ -4,7 +4,7 @@
 # @Author: The HuggingFace Inc. team.
 # @Date:   2025-08-21 15:26:40
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-21 15:27:05
+# @Last Modified at: 2025-08-30 21:09:08
 # @Email:  root@haozhexie.com
 
 import copy
@@ -14,7 +14,6 @@ from torch import nn
 from transformers import (
     AutoConfig,
     AutoModel,
-    AutoModelForImageTextToText,
     AutoProcessor,
     SmolVLMForConditionalGeneration,
 )
@@ -61,34 +60,34 @@ class SmolVLMWithExpertModel(nn.Module):
     def __init__(
         self,
         model_id: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct",
-        load_vlm_weights: bool = True,
         train_expert_only: bool = True,
         freeze_vision_encoder: bool = False,
         attention_mode: str = "self_attn",
         num_expert_layers: int = -1,
+        vlm_input_channels: int = 3,
+        vlm_patch_size: int = 16,
+        vlm_hidden_size: int = 768,
+        vlm_intermediate_size: int = 3072,
         num_vlm_layers: int = -1,
         self_attn_every_n_layers: int = -1,
         expert_width_multiplier: float = 0.5,
     ):
         super().__init__()
-        if load_vlm_weights:
-            print(f"Loading  {model_id} weights ...")
-            self.vlm = AutoModelForImageTextToText.from_pretrained(
-                model_id,
-                device_map="auto",
-                torch_dtype="bfloat16",
-                low_cpu_mem_usage=True,
-            )
-            config = self.vlm.config
-        else:
-            config = AutoConfig.from_pretrained(model_id)
-            self.vlm = SmolVLMForConditionalGeneration(config=config)
+        config = AutoConfig.from_pretrained(model_id)
+        # Override values in SmolVLMConfig
+        config.vision_config.num_channels = vlm_input_channels
+        config.vision_config.patch_size = vlm_patch_size
+        config.vision_config.hidden_size = vlm_hidden_size
+        config.vision_config.intermediate_size = vlm_intermediate_size
+
+        self.vlm = SmolVLMForConditionalGeneration(config=config)
         self.processor = AutoProcessor.from_pretrained(model_id)
         if num_vlm_layers > 0:
             print(f"Reducing the number of VLM layers to {num_vlm_layers} ...")
             self.get_vlm_model().text_model.layers = (
                 self.get_vlm_model().text_model.layers[:num_vlm_layers]
             )
+
         self.num_vlm_layers = len(self.get_vlm_model().text_model.layers)
         self.config = config
         # Smaller lm expert
@@ -106,8 +105,8 @@ class SmolVLMWithExpertModel(nn.Module):
                 len(self.get_vlm_model().text_model.layers) % num_expert_layers == 0
             ), f"Number of layers in the VLM {len(self.get_vlm_model().text_model.layers)} are not multiple of num_expert_layers {num_expert_layers}"
             lm_expert_config.num_hidden_layers = num_expert_layers
-        self.lm_expert = AutoModel.from_config(lm_expert_config)
 
+        self.lm_expert = AutoModel.from_config(lm_expert_config)
         self.num_expert_layers = len(self.lm_expert.layers)
         self.self_attn_every_n_layers = self_attn_every_n_layers
         if "cross" in attention_mode:
