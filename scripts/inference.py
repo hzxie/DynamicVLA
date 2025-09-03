@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-16 11:08:56
+# @Last Modified at: 2025-09-03 11:28:43
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -67,14 +67,185 @@ def get_zmq_sockets(host, img_port, act_port):
 
 
 def get_latest_observation(obs_socket):
-    image = None
+    observation = None
     while True:
         try:
-            image = obs_socket.recv_pyobj(flags=zmq.NOBLOCK)
+            observation = obs_socket.recv_pyobj(flags=zmq.NOBLOCK)
         except zmq.Again:
             break
 
-    return image
+    return observation
+
+
+def run_tests(
+    obs_socket,
+    act_socket,
+    vla_cfg,
+    vla_model,
+    vla_weights,
+    vla_epoch_idx,
+    rotation,
+    use_delta_action,
+    output_dir,
+):
+    n_tests = 0
+    test_results = {}
+    instruction = None
+    actions = []
+    observations = []
+    while True:
+        observation = get_latest_observation(obs_socket)
+        if observation is None:
+            continue
+
+        # Test case or test suite is done
+        if "success_rates" in observation:
+            logging.info(
+                "Test suite done with success rates: %s" % observation["success_rates"]
+            )
+            break
+        elif "success" in observation:
+            _handle_test_case_finished(
+                observation,
+                test_results,
+                vla_model,
+                vla_weights,
+                vla_epoch_idx,
+                actions,
+                output_dir,
+            )
+            n_tests += 1
+            logging.info(
+                "[Test%02d] Test done with %s in %d steps and %d actions."
+                % (
+                    n_tests,
+                    "SUCCESS" if observation["success"] else "FAILURE",
+                    len(observation["ee_path"]),
+                    len(observation["actions"]),
+                )
+            )
+            continue
+
+        if "task" in observation:
+            instruction = observation["task"]
+            logging.info(
+                "[Test%02d] Received new task: %s" % (n_tests, instruction.strip())
+            )
+            # Reset the model with the new instruction
+            action = None
+            actions = []
+            observations = []
+            vla_model.reset()
+            setattr(_get_action, "states", [])
+            if hasattr(_get_action, "count"):
+                delattr(_get_action, "count")
+        elif instruction is not None:
+            observation["task"] = instruction
+        else:
+            print("Never reach here?")
+            continue
+
+        observations.append(observation)
+        # Generate and send an action
+        action = _get_action(
+            vla_model,
+            _get_observations(observations, vla_cfg["delta_timestamps"]),
+            rotation,
+            use_delta_action,
+            output_dir is not None,
+        )
+        if action is not None:
+            act_socket.send_pyobj({"action": action}, flags=zmq.NOBLOCK)
+            logging.debug("Sending action: %s", np.round(action, 2))
+            actions.append(action)
+
+    return n_tests, test_results
+
+
+def _handle_test_case_finished(
+    observation,
+    test_results,
+    vla_model,
+    vla_weights,
+    vla_epoch_idx,
+    actions,
+    output_dir,
+):
+    observation["actions"] = actions
+    env_name = observation["env_name"]
+    if env_name not in test_results:
+        test_results[env_name] = []
+
+    test_results[env_name].append(observation)
+    # Save the debug states/actions
+    if output_dir:
+        _output_dir = os.path.join(
+            output_dir, os.path.basename(vla_weights), "%04d" % vla_epoch_idx
+        )
+        os.makedirs(_output_dir, exist_ok=True)
+        _dump_vla_states(
+            observation["eps_name"],
+            vla_model.config,
+            getattr(_get_action, "states", []),
+            actions,
+            _output_dir,
+        )
+
+
+def _dump_vla_states(episode_name, vla_cfg, states, actions, output_dir):
+    output_path = os.path.join(output_dir, "%s.pkl" % episode_name)
+    with open(output_path, "wb") as fp:
+        pickle.dump({"vla": vla_cfg, "state": states, "action": actions}, fp)
+
+
+def _get_observations(observations, delta_timestamps):
+    selected_observations = []
+    last_idx = len(observations) - 1
+    for dt in delta_timestamps:
+        idx = last_idx + dt
+        idx = max(0, min(last_idx, idx))
+        selected_observations.append(observations[idx])
+
+    return selected_observations
+
+
+def _get_action(vla_model, observations, rotation, use_delta_action, debug=False):
+    N_DUMMY_STEPS = 5
+    _count = getattr(_get_action, "count", -N_DUMMY_STEPS)
+    _state = getattr(_get_action, "state", None)
+    for ifk in vla_model.config.input_features.keys():
+        for observation in observations:
+            if ifk not in observation:
+                logging.warning("Ignoring observation without key: %s" % ifk)
+                return None
+
+    setattr(_get_action, "count", _count + 1)
+    # Skip the first few steps to allow model to warm up
+    if _count < 0:
+        return None
+
+    observations = _get_transformed_observations(
+        observations, rotation, vla_model.config.input_features
+    )
+    # Update the state every chunk_size steps
+    if _count % vla_model.config.n_action_steps == 0:
+        _state = observations["observation.state"][:, -1, :].cpu().numpy()
+        setattr(_get_action, "state", _state)
+        if debug:
+            states = getattr(_get_action, "states", [])
+            states.append(_state)
+            setattr(_get_action, "states", states)
+
+    action = vla_model.select_action(observations).cpu().numpy()
+    if use_delta_action:
+        action_dim = action.shape[-1] - 1
+        action[:, :action_dim] += _state[:, :action_dim]
+
+    ee_pos = action[:, :3]
+    ee_quat = utils.helpers.get_quaternion(action[:, 3:-1], rotation)
+    gripper = action[:, -1:]
+    action = np.concatenate([ee_pos, ee_quat, gripper], axis=-1)
+    return action
 
 
 def get_vla_model(pretrained_model):
@@ -98,10 +269,42 @@ def get_vla_model(pretrained_model):
         vla_model = vla_model.cuda()
 
     vla_model.eval()
-    return vla_model
+    if (
+        "delta_timestamps" not in model_cfg
+        or model_cfg["delta_timestamps"] is None
+        or "observation" not in model_cfg["delta_timestamps"]
+    ):
+        assert vla_model.config.n_obs_steps == 1
+        # Use current observation by default
+        model_cfg["delta_timestamps"] = [0]
+    else:
+        assert vla_model.config.n_obs_steps == len(
+            model_cfg["delta_timestamps"]["observation"]
+        )
+        model_cfg["delta_timestamps"] = model_cfg["delta_timestamps"]["observation"]
+
+    logging.info("Observation timestamps: %s" % model_cfg["delta_timestamps"])
+    return vla_model, {"delta_timestamps": model_cfg["delta_timestamps"]}
 
 
-def get_transformed_observation(observation, rotation, feat_cfg, device="cuda"):
+def _get_transformed_observations(observations, rotation, feat_cfg, device="cuda"):
+    tr_observations = {}
+    for o in observations:
+        tr_o = _get_transformed_observation(o, rotation, feat_cfg, device)
+        for k, v in tr_o.items():
+            if k not in tr_observations:
+                tr_observations[k] = []
+
+            tr_observations[k].append(v)
+
+    tr_observations = {
+        k: torch.stack(v, dim=1) for k, v in tr_observations.items() if k != "task"
+    }
+    tr_observations["task"] = observations[-1]["task"]
+    return tr_observations
+
+
+def _get_transformed_observation(observation, rotation, feat_cfg, device="cuda"):
     images = {
         k: v.astype(np.float32) / 255.0
         for k, v in observation.items()
@@ -128,50 +331,6 @@ def get_transformed_observation(observation, rotation, feat_cfg, device="cuda"):
         "observation.state": torch.from_numpy(ee_pose).to(device),
         "task": [observation["task"]],
     }
-
-
-def get_action(vla_model, observation, rotation, use_delta_action, debug=False):
-    N_DUMMY_STEPS = 5
-    _count = getattr(get_action, "count", -N_DUMMY_STEPS)
-    _state = getattr(get_action, "state", None)
-    for ifk in vla_model.config.input_features.keys():
-        if ifk not in observation:
-            logging.warning("Ignoring observation without key: %s" % ifk)
-            return None
-
-    setattr(get_action, "count", _count + 1)
-    # Skip the first few steps to allow model to warm up
-    if _count < 0:
-        return None
-
-    observation = get_transformed_observation(
-        observation, rotation, vla_model.config.input_features
-    )
-    # Update the state every chunk_size steps
-    if _count % vla_model.config.n_action_steps == 0:
-        _state = observation["observation.state"].cpu().numpy()
-        setattr(get_action, "state", _state)
-        if debug:
-            states = getattr(get_action, "states", [])
-            states.append(_state)
-            setattr(get_action, "states", states)
-
-    action = vla_model.select_action(observation).cpu().numpy()
-    if use_delta_action:
-        action_dim = action.shape[-1] - 1
-        action[:, :action_dim] += _state[:, :action_dim]
-
-    ee_pos = action[:, :3]
-    ee_quat = utils.helpers.get_quaternion(action[:, 3:-1], rotation)
-    gripper = action[:, -1:]
-    action = np.concatenate([ee_pos, ee_quat, gripper], axis=-1)
-    return action
-
-
-def dump_vla_states(episode_name, vla_cfg, states, actions, output_dir):
-    output_path = os.path.join(output_dir, "%s.pkl" % episode_name)
-    with open(output_path, "wb") as fp:
-        pickle.dump({"vla": vla_cfg, "state": states, "action": actions}, fp)
 
 
 def get_test_stats(test_results):
@@ -216,7 +375,7 @@ def main(
 ):
     # Initialize the VLA model
     logging.info("Loading VLA model with weights: %s" % (vla_weights))
-    vla_model = get_vla_model(vla_weights)
+    vla_model, vla_cfg = get_vla_model(vla_weights)
     vla_model.reset()
     logging.info(
         "Input features: %s; Output features: %s"
@@ -248,79 +407,18 @@ def main(
         },
         flags=zmq.NOBLOCK,
     )
-
-    actions = []
-    n_tests = 0
-    test_results = {}
-    instruction = None
-    while True:
-        observation = get_latest_observation(obs_socket)
-        if observation is None:
-            continue
-
-        if "success_rates" in observation:
-            logging.info(
-                "Test suite done with success rates: %s" % observation["success_rates"]
-            )
-            break
-        elif "success" in observation:
-            observation["actions"] = actions
-            env_name = observation["env_name"]
-            if env_name not in test_results:
-                test_results[env_name] = []
-
-            test_results[env_name].append(observation)
-            # Save the debug states/actions
-            if output_dir:
-                _output_dir = os.path.join(
-                    output_dir, os.path.basename(vla_weights), "%04d" % vla_epoch_idx
-                )
-                os.makedirs(_output_dir, exist_ok=True)
-                dump_vla_states(
-                    observation["eps_name"],
-                    vla_model.config,
-                    getattr(get_action, "states", []),
-                    actions,
-                    _output_dir,
-                )
-
-            logging.info(
-                "[Test%02d] Test done with %s in %d steps and %d actions."
-                % (
-                    n_tests,
-                    "SUCCESS" if observation["success"] else "FAILURE",
-                    len(observation["ee_path"]),
-                    len(observation["actions"]),
-                )
-            )
-            n_tests += 1
-            continue
-        elif "task" in observation:
-            instruction = observation["task"]
-            logging.info(
-                "[Test%02d] Received new task: %s" % (n_tests, instruction.strip())
-            )
-            # Reset the model with the new instruction
-            action = None
-            actions = []
-            vla_model.reset()
-            setattr(get_action, "states", [])
-            if hasattr(get_action, "count"):
-                delattr(get_action, "count")
-        elif instruction is not None:
-            observation["task"] = instruction
-        else:
-            continue
-
-        assert "task" in observation, "Observation must contain 'task' key"
-        action = get_action(
-            vla_model, observation, rotation, use_delta_action, output_dir is not None
-        )
-        if action is not None:
-            act_socket.send_pyobj({"action": action}, flags=zmq.NOBLOCK)
-            logging.debug("Sending action: %s" % (np.round(action, 2),))
-            actions.append(action)
-
+    # Start the evaluation
+    n_tests, test_results = run_tests(
+        obs_socket,
+        act_socket,
+        vla_cfg,
+        vla_model,
+        vla_weights,
+        vla_epoch_idx,
+        rotation,
+        use_delta_action,
+        output_dir,
+    )
     logging.info("Evaluation completed. Total tests run: %d" % n_tests)
     logging.info("Test results: %s" % get_test_stats(test_results))
 

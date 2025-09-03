@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-21 15:38:21
+# @Last Modified at: 2025-09-02 15:14:44
 # @Email:  root@haozhexie.com
 
 import json
@@ -51,6 +51,18 @@ def get_formatted_big_number(num: int, precision: int = 0) -> str:
         num /= divisor
 
     return num
+
+
+def save_checkpoint(cfg: dict, policy: PreTrainedPolicy, save_dir: str, epoch: int):
+    policy.module.save_pretrained(save_dir)
+    # Append additional information to config.json
+    model_cfg_path = os.path.join(save_dir, "config.json")
+    with open(model_cfg_path, "r") as fp:
+        model_cfg = json.load(fp)
+    with open(model_cfg_path, "w") as fp:
+        model_cfg["delta_timestamps"] = cfg.DATASET.DELTA_TIMESTAMPS
+        model_cfg["epoch"] = epoch
+        json.dump(model_cfg, fp, indent=2, sort_keys=False)
 
 
 def get_rotation_vector(quat, format="quat", scalar_first=True):

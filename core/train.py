@@ -4,9 +4,10 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-30 20:10:39
+# @Last Modified at: 2025-09-02 15:17:52
 # @Email:  root@haozhexie.com
 
+import json
 import logging
 import os
 import shutil
@@ -115,9 +116,10 @@ def train(cfg):
             cfg.CONST.CKPT = cfg.POLICY.CHECKPOINT
 
         if cfg.CONST.CKPT is not None:
-            if os.path.exists(os.path.join(cfg.CONST.CKPT, "epoch.txt")):
-                with open(os.path.join(cfg.CONST.CKPT, "epoch.txt")) as fp:
-                    init_epoch = int(fp.read().strip())
+            if os.path.exists(os.path.join(cfg.CONST.CKPT, "config.json")):
+                with open(os.path.join(cfg.CONST.CKPT, "config.json")) as fp:
+                    model_cfg = json.load(fp)
+                    init_epoch = model_cfg.get("epoch", 0)
             # Save the normalizers to enable migration to the new datasets
             normalizers = {
                 n: getattr(policy, n)
@@ -210,9 +212,14 @@ def train(cfg):
             if utils.distributed.is_master():
                 tb_writer.add_scalars({"Loss/Batch": train_losses.val()}, n_itr)
                 # Save the model checkpoint every few batches
-                if batch_idx % cfg.TRAIN.CKPT_SAVE_FREQ.BATCH == 0:
+                if (
+                    batch_idx % cfg.TRAIN.CKPT_SAVE_FREQ.BATCH == 0
+                    and cfg.TRAIN.CKPT_SAVE_FREQ.BATCH != 0
+                ):
                     logging.info("Saving checkpoint to %s ..." % cfg.DIR.CHECKPOINTS)
-                    policy.module.save_pretrained(cfg.DIR.CHECKPOINTS)
+                    utils.helpers.save_checkpoint(
+                        cfg, policy, cfg.DIR.CHECKPOINTS, epoch_idx + 1
+                    )
 
             if utils.distributed.is_local_master():
                 logging.info(
@@ -255,10 +262,9 @@ def train(cfg):
         # Save the model checkpoint
         if utils.distributed.is_master():
             logging.info("Saving checkpoint to %s ..." % cfg.DIR.CHECKPOINTS)
-            policy.module.save_pretrained(cfg.DIR.CHECKPOINTS)
-            with open(os.path.join(cfg.DIR.CHECKPOINTS, "epoch.txt"), "w") as fp:
-                fp.write(str(epoch_idx + 1))
-
+            utils.helpers.save_checkpoint(
+                cfg, policy, cfg.DIR.CHECKPOINTS, epoch_idx + 1
+            )
             if epoch_idx % cfg.TRAIN.CKPT_SAVE_FREQ.EPOCH == 0:
                 shutil.copy(
                     os.path.join(cfg.DIR.CHECKPOINTS, "model.safetensors"),
