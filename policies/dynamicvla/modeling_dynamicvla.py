@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-30 21:56:06
+# @Last Modified at: 2025-09-09 19:17:46
 # @Email:  root@haozhexie.com
 
 import math
@@ -14,6 +14,7 @@ from collections import deque
 
 import safetensors
 import torch
+import torch.multiprocessing as mp
 import torch.nn.functional as F  # noqa: N812
 from lerobot.constants import ACTION, OBS_STATE
 from lerobot.policies.normalize import Normalize, Unnormalize
@@ -283,6 +284,7 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         self,
         config: DynamicVLAConfig,
         dataset_stats: dict[str, dict[str, Tensor]] | None = None,
+        ckpt_filename: str | None = None,
     ):
         """
         Args:
@@ -290,6 +292,9 @@ class DynamicVLAPolicy(PreTrainedPolicy):
                     the configuration class is used.
             dataset_stats: Dataset statistics to be used for normalization. If not passed here, it is expected
                 that they will be passed with a call to `load_state_dict` before the policy is used.
+            ckpt_filename: The file path of the pretrained model checkpoint. This is only used when
+                `config.enable_streaming` is set to True, in which case a separate process
+                is spawned to run the VLA model for streaming inference.
         """
 
         super().__init__(config)
@@ -304,20 +309,104 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         self.unnormalize_outputs = Unnormalize(
             config.output_features, config.normalization_mapping, dataset_stats
         )
-
         self.language_tokenizer = AutoProcessor.from_pretrained(
             self.config.vlm_model_name
         ).tokenizer
         self.model = VLAFlowMatching(config)
         self.reset()
 
+        # ckpt_filename is used to initlialize the streaming process.
+        # The variable is only set once in the get_streaming_model function.
+        if config.enable_streaming and ckpt_filename is not None:
+            # The initialization of the wrapper process of _inference_loop
+            ctx = mp.get_context("spawn")
+            self.q_in = ctx.Manager().dict()
+            self.q_out = ctx.Queue(maxsize=1)
+            self.worker = ctx.Process(
+                target=self._inference_loop,
+                args=(ckpt_filename, config, self.q_in, self.q_out),
+            )
+            self.worker.daemon = True
+            self.worker.start()
+            # Wait for the VLA model to be initialized
+            _ = self.q_out.get()
+            assert "initialized" in _
+
     def reset(self):
         """This should be called whenever the environment is reset."""
-        self._queues = {
-            ACTION: deque(maxlen=self.config.n_action_steps),
-        }
+        self._queues = {ACTION: deque(maxlen=self.config.n_action_steps)}
+        if hasattr(self, "q_in"):
+            self.q_in.clear()  # Clear the input queue
+        if hasattr(self, "q_out") and not self.q_out.empty():
+            self.q_out.get_nowait()  # Clear the output queue
 
-    # HACK(aliberts, danaaubakirova): we overwrite this classmethod here to fix DynamicVLA-specific issues
+    @staticmethod
+    def get_streaming_model(pretrained_model: str, vla_cfg: DynamicVLAConfig):
+        wrapper = DynamicVLAPolicy.from_pretrained(
+            pretrained_model, config=vla_cfg, ckpt_filename=pretrained_model
+        )
+        # Remove unnecessary components to reduce VRAM
+        del wrapper.language_tokenizer, wrapper.model
+        torch.cuda.empty_cache()
+
+        return wrapper
+
+    @staticmethod
+    @torch.no_grad()
+    def _inference_loop(
+        pretrained_model: str, vla_cfg: DynamicVLAConfig, q_in: dict, q_out: mp.Queue
+    ):
+        # Initialization
+        vla_model = DynamicVLAPolicy.from_pretrained(pretrained_model, config=vla_cfg)
+        vla_model.eval()
+        if torch.cuda.is_available():
+            vla_model = vla_model.cuda()
+        # Warm-up (to accelerate the first inference)
+        dummy_batch = {
+            k: torch.zeros(
+                1,
+                vla_cfg.n_obs_steps,
+                *vla_cfg.input_features[k].shape,
+                dtype=torch.float32,
+                device="cuda" if torch.cuda.is_available() else "cpu",
+            )
+            for k in vla_cfg.input_features
+        }
+        dummy_batch["task"] = ["dummy text input"]
+        vla_model._get_action_chunk(dummy_batch)
+        q_out.put({"initialized": True})
+
+        # The streaming inference loop
+        while True:
+            latest_obs = q_in.get("obs", None)
+            if latest_obs is None:
+                continue
+
+            q_in.clear()
+            noise = latest_obs[1].cuda() if latest_obs[1] is not None else None
+            batch = {}
+            for k, v in latest_obs[0].items():
+                if isinstance(v, torch.Tensor):
+                    batch[k] = v.cuda() if torch.cuda.is_available() else v
+                else:
+                    batch[k] = v
+
+            index = batch["index"]
+            latest_state = batch[OBS_STATE][:, -1:, :]
+            batch = vla_model._prepare_batch(batch)
+
+            actions = vla_model._get_action_chunk(batch, noise)
+            if vla_model.config.use_delta_action:
+                action_dim = actions.shape[-1] - 1
+                actions[..., :action_dim] += latest_state[..., :action_dim]
+
+            if q_out.full():
+                print("The output queue is full. Skipping an action.")
+                continue
+            # NOTE: All tensors are on CPU if streaming is enabled. Because IPC with
+            #       CUDA tensors is not supported.
+            q_out.put_nowait({"actions": actions.transpose(0, 1).cpu(), "index": index})
+
     @classmethod
     def _load_as_safetensor(
         cls,
@@ -342,11 +431,6 @@ class DynamicVLAPolicy(PreTrainedPolicy):
     def _get_action_chunk(
         self, batch: dict[str, Tensor], noise: Tensor | None = None
     ) -> Tensor:
-        # TODO: Check if this for loop is needed.
-        # Context: In fact, self.queues contains only ACTION field, and in inference, we don't have action in the batch
-        # In the case of offline inference, we have the action in the batch
-        # that why without the k != ACTION check, it will raise an error because we are trying to stack
-        # on an empty container.
         for k in batch:
             if k in self._queues and k != ACTION:
                 batch[k] = torch.stack(list(self._queues[k]), dim=1)
@@ -362,7 +446,6 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         # Unpad actions
         original_action_dim = self.config.action_feature.shape[0]
         actions = actions[:, :, :original_action_dim]
-
         actions = self.unnormalize_outputs({ACTION: actions})[ACTION]
 
         if self.config.adapt_to_pi_aloha:
@@ -374,16 +457,13 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         if self.config.adapt_to_pi_aloha:
             batch[OBS_STATE] = self._pi_aloha_decode_state(batch[OBS_STATE])
 
-        batch = self.normalize_inputs(batch)
-
-        return batch
+        return self.normalize_inputs(batch)
 
     @torch.no_grad()
     def predict_action_chunk(
         self, batch: dict[str, Tensor], noise: Tensor | None = None
     ) -> Tensor:
         self.eval()
-
         batch = self._prepare_batch(batch)
         self._queues = populate_queues(self._queues, batch, exclude_keys=[ACTION])
 
@@ -394,23 +474,77 @@ class DynamicVLAPolicy(PreTrainedPolicy):
     def select_action(
         self, batch: dict[str, Tensor], noise: Tensor | None = None
     ) -> Tensor:
-        """Select a single action given environment observations.
+        if self.config.enable_streaming:
+            return self._get_streaming_action(batch, noise)
+        else:
+            return self._get_non_streaming_action(batch, noise)
 
-        This method wraps `select_actions` in order to return one action at a time for execution in the
-        environment. It works by managing the actions in a queue and only calling `select_actions` when the
-        queue is empty.
-        """
+    @torch.no_grad()
+    def _get_streaming_action(
+        self, batch: dict[str, Tensor], noise: Tensor | None = None
+    ) -> Tensor:
+        # NOTE: This function does not do any GPU computation.
+        assert "index" in batch
+        # Put the latest observation into the input dict
+        self.q_in.update({"obs": (batch, noise)})
+
+        actions = None
+        if len(self._queues[ACTION]) == 0:
+            # Wait for the action from the streaming process
+            actions = self.q_out.get()
+        elif not self.q_out.empty():
+            actions = self.q_out.get_nowait()
+
+        # Merge actions into the queue
+        if actions is not None:
+            assert actions["actions"].size(0) == self.config.n_action_steps
+            prev_action_chunk = list(self._queues[ACTION])
+            curr_action_chunk = [
+                {"index": actions["index"] + i, "action": a}
+                for i, a in enumerate(actions["actions"])
+            ]
+            if not prev_action_chunk:
+                # The action queue is empty
+                self._queues[ACTION].extend(curr_action_chunk)
+            else:
+                self._queues[ACTION].clear()
+                prev_index_start = prev_action_chunk[0]["index"]
+                prev_index_end = prev_action_chunk[-1]["index"]
+                curr_index_start = curr_action_chunk[0]["index"]
+                if curr_index_start > prev_index_end:
+                    self._queues[ACTION].extend(curr_action_chunk)
+                elif curr_index_start > prev_index_start:
+                    keeplen = curr_index_start - prev_index_end
+                    self._queues[ACTION].extend(
+                        prev_action_chunk[:keeplen] + curr_action_chunk
+                    )
+                elif curr_index_start <= prev_index_start:
+                    droplen = prev_index_start - curr_index_start
+                    self._queues[ACTION].extend(curr_action_chunk[droplen:])
+
+        action = self._queues[ACTION].popleft()
+        return action["action"]
+
+    @torch.no_grad()
+    def _get_non_streaming_action(
+        self, batch: dict[str, Tensor], noise: Tensor | None = None
+    ) -> Tensor:
         self.eval()
+        # Save the state before normalization
+        latest_state = batch[OBS_STATE][:, -1:, :]
+
         batch = self._prepare_batch(batch)
         self._queues = populate_queues(self._queues, batch, exclude_keys=[ACTION])
-
         # Action queue logic for n_action_steps > 1. When the action_queue is depleted, populate it by
         # querying the policy.
         if len(self._queues[ACTION]) == 0:
             actions = self._get_action_chunk(batch, noise)
-
             # `self.predict_action_chunk` returns a (batch_size, n_action_steps, action_dim) tensor, but the queue
             # effectively has shape (n_action_steps, batch_size, *), hence the transpose.
+            if self.config.use_delta_action:
+                action_dim = actions.shape[-1] - 1
+                actions[..., :action_dim] += latest_state[..., :action_dim]
+
             self._queues[ACTION].extend(
                 actions.transpose(0, 1)[: self.config.n_action_steps]
             )

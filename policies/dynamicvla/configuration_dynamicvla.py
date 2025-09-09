@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:22:31
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-30 21:56:21
+# @Last Modified at: 2025-09-08 16:51:16
 # @Email:  root@haozhexie.com
 
 from dataclasses import dataclass, field
@@ -45,6 +45,10 @@ class DynamicVLAConfig(PreTrainedConfig):
     # Converts joint dimensions to deltas with respect to the current state before passing to the model.
     # Gripper dimensions will remain in absolute values.
     use_delta_joint_actions_aloha: bool = False
+    # Use delta action prediction (relative to the current robot state)
+    use_delta_action: bool = True
+    # Streaming inference
+    enable_streaming: bool = False
     # VLM
     vlm_patch_size: int = 16
     vlm_attention_heads: int = 12

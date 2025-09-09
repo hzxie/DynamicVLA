@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-03 11:28:43
+# @Last Modified at: 2025-09-09 15:22:02
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -27,6 +27,54 @@ sys.path.append(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), os.path.pardir)
 )
 import utils.helpers
+
+
+def get_vla_model(pretrained_model, use_delta_action, streaming):
+    pretrained_cfg = None
+    if not os.path.exists(pretrained_model):
+        raise FileNotFoundError(
+            "Pretrained model path does not exist: %s" % pretrained_model
+        )
+
+    logging.info("Loading VLA model from local path: %s" % pretrained_model)
+    pretrained_model = pathlib.Path(pretrained_model).expanduser().resolve()
+    pretrained_cfg = pretrained_model / "config.json"
+    with open(pretrained_cfg, "r") as fp:
+        model_cfg = json.load(fp)
+
+    vla_cfg = utils.helpers.get_policy_cfg(cfg_file=pretrained_cfg)
+    # Check whether the delta action setting is consistent
+    if hasattr(vla_cfg, "use_delta_action"):
+        assert vla_cfg.use_delta_action == use_delta_action
+
+    vla_model_class = utils.helpers.get_policy_class(model_cfg["type"])
+    # Enable streaming inference if needed
+    if streaming and hasattr(vla_cfg, "enable_streaming"):
+        vla_cfg.enable_streaming = True
+        vla_model = vla_model_class.get_streaming_model(pretrained_model, vla_cfg)
+        logging.info("Enable streaming inference for the VLA model.")
+    else:
+        vla_model = vla_model_class.from_pretrained(pretrained_model, config=vla_cfg)
+        vla_model.eval()
+        if torch.cuda.is_available():
+            vla_model = vla_model.cuda()
+
+    if (
+        "delta_timestamps" not in model_cfg
+        or model_cfg["delta_timestamps"] is None
+        or "observation" not in model_cfg["delta_timestamps"]
+    ):
+        assert vla_model.config.n_obs_steps == 1
+        # Use current observation by default
+        model_cfg["delta_timestamps"] = [0]
+    else:
+        assert vla_model.config.n_obs_steps == len(
+            model_cfg["delta_timestamps"]["observation"]
+        )
+        model_cfg["delta_timestamps"] = model_cfg["delta_timestamps"]["observation"]
+
+    logging.info("Observation timestamps: %s" % model_cfg["delta_timestamps"])
+    return vla_model, {"delta_timestamps": model_cfg["delta_timestamps"]}
 
 
 def is_socket_connected(context, sock, timeout=1000):
@@ -210,7 +258,7 @@ def _get_observations(observations, delta_timestamps):
 
 
 def _get_action(vla_model, observations, rotation, use_delta_action, debug=False):
-    N_DUMMY_STEPS = 5
+    N_DUMMY_STEPS = 2
     _count = getattr(_get_action, "count", -N_DUMMY_STEPS)
     _state = getattr(_get_action, "state", None)
     for ifk in vla_model.config.input_features.keys():
@@ -224,9 +272,17 @@ def _get_action(vla_model, observations, rotation, use_delta_action, debug=False
     if _count < 0:
         return None
 
+    # NOTE: All tensors are on CPU if streaming is enabled.
+    #       Because IPC with CUDA tensors is not supported.
+    device = "cuda" if not vla_model.config.enable_streaming else "cpu"
+    # Use the observation's index if available
+    index = observations[-1]["index"] if "index" in observations[-1] else None
     observations = _get_transformed_observations(
-        observations, rotation, vla_model.config.input_features
+        observations, rotation, vla_model.config.input_features, device
     )
+    if index is not None:
+        observations["index"] = index
+
     # Update the state every chunk_size steps
     if _count % vla_model.config.n_action_steps == 0:
         _state = observations["observation.state"][:, -1, :].cpu().numpy()
@@ -236,8 +292,10 @@ def _get_action(vla_model, observations, rotation, use_delta_action, debug=False
             states.append(_state)
             setattr(_get_action, "states", states)
 
+    print(index, _count, device)
     action = vla_model.select_action(observations).cpu().numpy()
-    if use_delta_action:
+    # If the model does not support delta action, we manually convert it here
+    if not hasattr(vla_model.config, "use_delta_action") and use_delta_action:
         action_dim = action.shape[-1] - 1
         action[:, :action_dim] += _state[:, :action_dim]
 
@@ -246,45 +304,6 @@ def _get_action(vla_model, observations, rotation, use_delta_action, debug=False
     gripper = action[:, -1:]
     action = np.concatenate([ee_pos, ee_quat, gripper], axis=-1)
     return action
-
-
-def get_vla_model(pretrained_model):
-    pretrained_cfg = None
-    if not os.path.exists(pretrained_model):
-        raise FileNotFoundError(
-            "Pretrained model path does not exist: %s" % pretrained_model
-        )
-
-    logging.info("Loading VLA model from local path: %s" % pretrained_model)
-    pretrained_model = pathlib.Path(pretrained_model).expanduser().resolve()
-    pretrained_cfg = pretrained_model / "config.json"
-    with open(pretrained_cfg, "r") as fp:
-        model_cfg = json.load(fp)
-
-    vla_cfg = utils.helpers.get_policy_cfg(cfg_file=pretrained_cfg)
-    vla_model = utils.helpers.get_policy_class(model_cfg["type"]).from_pretrained(
-        pretrained_model, config=vla_cfg
-    )
-    if torch.cuda.is_available():
-        vla_model = vla_model.cuda()
-
-    vla_model.eval()
-    if (
-        "delta_timestamps" not in model_cfg
-        or model_cfg["delta_timestamps"] is None
-        or "observation" not in model_cfg["delta_timestamps"]
-    ):
-        assert vla_model.config.n_obs_steps == 1
-        # Use current observation by default
-        model_cfg["delta_timestamps"] = [0]
-    else:
-        assert vla_model.config.n_obs_steps == len(
-            model_cfg["delta_timestamps"]["observation"]
-        )
-        model_cfg["delta_timestamps"] = model_cfg["delta_timestamps"]["observation"]
-
-    logging.info("Observation timestamps: %s" % model_cfg["delta_timestamps"])
-    return vla_model, {"delta_timestamps": model_cfg["delta_timestamps"]}
 
 
 def _get_transformed_observations(observations, rotation, feat_cfg, device="cuda"):
@@ -368,6 +387,7 @@ def main(
     vla_epoch_idx,
     rotation,
     use_delta_action,
+    streaming,
     host,
     img_port,
     act_port,
@@ -375,7 +395,7 @@ def main(
 ):
     # Initialize the VLA model
     logging.info("Loading VLA model with weights: %s" % (vla_weights))
-    vla_model, vla_cfg = get_vla_model(vla_weights)
+    vla_model, vla_cfg = get_vla_model(vla_weights, use_delta_action, streaming)
     vla_model.reset()
     logging.info(
         "Input features: %s; Output features: %s"
@@ -449,6 +469,11 @@ if __name__ == "__main__":
         action="store_true",
     )
     parser.add_argument(
+        "-s",
+        "--streaming",
+        action="store_true",
+    )
+    parser.add_argument(
         "-p",
         "--weights",
         type=str,
@@ -483,6 +508,7 @@ if __name__ == "__main__":
         args.epoch,
         args.rotation,
         args.delta,
+        args.streaming,
         args.host,
         args.img_port,
         args.act_port,

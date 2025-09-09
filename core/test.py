@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-16 05:52:37
+# @Last Modified at: 2025-09-06 17:56:15
 # @Email:  root@haozhexie.com
 
 import logging
@@ -72,17 +72,10 @@ def test(cfg, test_data_loader=None, policy=None):
             ):
                 batch["task"] = batch["task"][0]
 
-            pred_actions = []
             gt_actions = batch["action"]
-            n_action_steps = policy.module.config.n_action_steps
-            for _ in range(n_action_steps):
-                pred_actions.append(policy.module.select_action(batch))
+            pred_actions = policy.module.predict_action_chunk(batch)
 
-            test_losses.update(
-                l1_loss(
-                    torch.stack(pred_actions, dim=1), gt_actions[:, :n_action_steps, :]
-                ).item()
-            )
+            test_losses.update(l1_loss(pred_actions, gt_actions).item())
             if utils.distributed.is_master():
                 logging.info(
                     "Test[%d/%d] Losses = %.4f"

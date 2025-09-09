@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-19 18:25:26
+# @Last Modified at: 2025-09-08 15:04:04
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -301,6 +301,7 @@ def simulate(
         sim_results["ee_path"].append(curr_state["end_effector"]["pos"].cpu().numpy())
         obs_socket.send_pyobj(
             {
+                "index": len(sim_results["cam_views"]) - 1,
                 "observation.state": {
                     "end_effector": {
                         k: v.cpu().numpy()
@@ -534,6 +535,8 @@ def main(simulation_app, args):
                         ),
                         episode_file_path,
                     )
+                # TODO: Wait for VLA client to acknowledge the end of this episode
+
             # Calcuate the success rate for this env
             success_rates[env_name] /= n_tests
 
