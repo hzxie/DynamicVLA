@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-02 15:17:52
+# @Last Modified at: 2025-09-10 19:33:04
 # @Email:  root@haozhexie.com
 
 import json
@@ -213,8 +213,8 @@ def train(cfg):
                 tb_writer.add_scalars({"Loss/Batch": train_losses.val()}, n_itr)
                 # Save the model checkpoint every few batches
                 if (
-                    batch_idx % cfg.TRAIN.CKPT_SAVE_FREQ.BATCH == 0
-                    and cfg.TRAIN.CKPT_SAVE_FREQ.BATCH != 0
+                    cfg.TRAIN.CKPT_SAVE_FREQ.BATCH != 0
+                    and batch_idx % cfg.TRAIN.CKPT_SAVE_FREQ.BATCH == 0
                 ):
                     logging.info("Saving checkpoint to %s ..." % cfg.DIR.CHECKPOINTS)
                     utils.helpers.save_checkpoint(

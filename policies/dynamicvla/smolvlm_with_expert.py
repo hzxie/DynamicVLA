@@ -4,13 +4,12 @@
 # @Author: The HuggingFace Inc. team.
 # @Date:   2025-08-21 15:26:40
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-30 21:54:20
+# @Last Modified at: 2025-09-11 09:39:25
 # @Email:  root@haozhexie.com
 
 import copy
 
 import torch
-from torch import nn
 from transformers import (
     AutoConfig,
     AutoModel,
@@ -56,7 +55,7 @@ def get_intermediate_size(hidden_dim, ffn_dim_multiplier=4, multiple_of=256):
     return hidden_dim
 
 
-class SmolVLMWithExpertModel(nn.Module):
+class SmolVLMWithExpertModel(torch.nn.Module):
     def __init__(
         self,
         model_id: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct",
@@ -119,13 +118,13 @@ class SmolVLMWithExpertModel(nn.Module):
                     and layer_idx % self.self_attn_every_n_layers == 0
                 ):
                     continue
-                self.lm_expert.layers[layer_idx].self_attn.k_proj = nn.Linear(
+                self.lm_expert.layers[layer_idx].self_attn.k_proj = torch.nn.Linear(
                     config.text_config.num_key_value_heads
                     * config.text_config.head_dim,
                     lm_expert_config.num_key_value_heads * lm_expert_config.head_dim,
                     bias=lm_expert_config.attention_bias,
                 )
-                self.lm_expert.layers[layer_idx].self_attn.v_proj = nn.Linear(
+                self.lm_expert.layers[layer_idx].self_attn.v_proj = torch.nn.Linear(
                     config.text_config.num_key_value_heads
                     * config.text_config.head_dim,
                     lm_expert_config.num_key_value_heads * lm_expert_config.head_dim,
@@ -601,7 +600,7 @@ class SmolVLMWithExpertModel(nn.Module):
         masked_att_weights = torch.where(
             attention_mask[:, None, :, :], att_weights, big_neg
         )
-        probs = nn.functional.softmax(masked_att_weights, dim=-1)
+        probs = torch.nn.functional.softmax(masked_att_weights, dim=-1)
         probs = probs.to(dtype=value_states.dtype)
 
         att_output = torch.matmul(probs, value_states.permute(0, 2, 1, 3))

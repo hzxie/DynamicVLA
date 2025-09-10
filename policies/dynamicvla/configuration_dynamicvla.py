@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:22:31
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-08 16:51:16
+# @Last Modified at: 2025-09-10 19:43:32
 # @Email:  root@haozhexie.com
 
 from dataclasses import dataclass, field
@@ -49,11 +49,8 @@ class DynamicVLAConfig(PreTrainedConfig):
     use_delta_action: bool = True
     # Streaming inference
     enable_streaming: bool = False
-    # VLM
-    vlm_patch_size: int = 16
-    vlm_attention_heads: int = 12
-    vlm_hidden_size: int = 768
-    vlm_intermediate_size: int = 3072
+    # Multi-timestep fusion ("conv" or "attn")
+    temporal_fusion: str = "conv"
     # Tokenizer
     tokenizer_max_length: int = 48
     # Decoding
@@ -82,8 +79,13 @@ class DynamicVLAConfig(PreTrainedConfig):
     pad_language_to: str = "longest"  # "max_length"
     # Less or equal to 0 is the default where the action expert has the same number of layers of VLM. Otherwise the expert have less layers.
     num_expert_layers: int = -1
-    # Number of layers used in the VLM (first num_vlm_layers layers)
+    # VLM settings
+    # SmolVLM Settings
     num_vlm_layers: int = 16
+    vlm_patch_size: int = 16
+    vlm_attention_heads: int = 12
+    vlm_hidden_size: int = 768
+    vlm_intermediate_size: int = 3072
     # Interleave SA layers each self_attn_every_n_layers
     self_attn_every_n_layers: int = 2
     # The action expert hidden size (wrt to the VLM)

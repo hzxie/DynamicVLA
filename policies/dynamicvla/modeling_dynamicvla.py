@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-09 19:17:46
+# @Last Modified at: 2025-09-11 07:27:09
 # @Email:  root@haozhexie.com
 
 import math
@@ -378,7 +378,11 @@ class DynamicVLAPolicy(PreTrainedPolicy):
 
         # The streaming inference loop
         while True:
-            latest_obs = q_in.get("obs", None)
+            try:
+                latest_obs = q_in.get("obs")
+            except:
+                latest_obs = None
+
             if latest_obs is None:
                 continue
 
@@ -491,7 +495,7 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         actions = None
         if len(self._queues[ACTION]) == 0:
             # Wait for the action from the streaming process
-            actions = self.q_out.get()
+            actions = self.q_out.get(timeout=5)
         elif not self.q_out.empty():
             actions = self.q_out.get_nowait()
 
@@ -564,6 +568,7 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         images, img_masks = self.prepare_images(batch)
         state = self.prepare_state(batch)
         lang_tokens, lang_masks = self.prepare_language(batch)
+
         actions = self.prepare_action(batch)
         actions_is_pad = batch.get("actions_id_pad")
         loss_dict = {}
@@ -605,10 +610,6 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         # Preprocess image features present in the batch
         for key in present_img_keys:
             imgs = batch[key][:, None, :, :, :] if batch[key].ndim == 4 else batch[key]
-            # Option 1: Concatenate along the batch dimension (too slow)
-            # for i in range(imgs.shape[1]):
-            # img = imgs[:, i, :, :, :]
-            # Option 2: Concatenate along the channel dimension
             b, n, c, h, w = imgs.shape
             assert n == self.config.n_obs_steps
             img = imgs.view(b, n * c, h, w)
@@ -764,21 +765,38 @@ class VLAFlowMatching(nn.Module):
         super().__init__()
         self.config = config
 
-        self.vlm_with_expert = SmolVLMWithExpertModel(
-            model_id=config.vlm_model_name,
-            freeze_vision_encoder=config.freeze_vision_encoder,
-            train_expert_only=config.train_expert_only,
-            attention_mode=config.attention_mode,
-            vlm_input_channels=3 * config.n_obs_steps,  # Support multi-timestep images
-            vlm_patch_size=config.vlm_patch_size,
-            vlm_attention_heads=config.vlm_attention_heads,
-            vlm_hidden_size=config.vlm_hidden_size,
-            vlm_intermediate_size=config.vlm_intermediate_size,
-            num_expert_layers=config.num_expert_layers,
-            num_vlm_layers=self.config.num_vlm_layers,
-            self_attn_every_n_layers=self.config.self_attn_every_n_layers,
-            expert_width_multiplier=self.config.expert_width_multiplier,
-        )
+        if config.temporal_fusion == "conv":
+            self.mults_proj = nn.Sequential(
+                nn.Conv2d(3 * config.n_obs_steps, 3, kernel_size=7, padding=3),
+                nn.GELU(),
+            )
+            vlm_input_channels = 3
+        elif config.temporal_fusion == "attn":
+            vlm_input_channels = 3 * config.n_obs_steps
+        else:
+            raise ValueError(f"Unknown temporal_fusion: {config.temporal_fusion}")
+
+        if config.vlm_model_name.startswith("HuggingFaceTB/SmolVLM2"):
+            self.vlm_with_expert = SmolVLMWithExpertModel(
+                model_id=config.vlm_model_name,
+                freeze_vision_encoder=config.freeze_vision_encoder,
+                train_expert_only=config.train_expert_only,
+                attention_mode=config.attention_mode,
+                vlm_input_channels=vlm_input_channels,
+                vlm_patch_size=config.vlm_patch_size,
+                vlm_attention_heads=config.vlm_attention_heads,
+                vlm_hidden_size=config.vlm_hidden_size,
+                vlm_intermediate_size=config.vlm_intermediate_size,
+                num_expert_layers=config.num_expert_layers,
+                num_vlm_layers=self.config.num_vlm_layers,
+                self_attn_every_n_layers=self.config.self_attn_every_n_layers,
+                expert_width_multiplier=self.config.expert_width_multiplier,
+            )
+        elif config.vlm_model_name.startswith("apple/FastVLM"):
+            raise NotImplementedError
+        else:
+            raise ValueError(f"Unknown vlm_model_name: {config.vlm_model_name}")
+
         self.state_proj = nn.Linear(
             config.max_state_dim,
             self.vlm_with_expert.config.text_config.hidden_size,
@@ -862,13 +880,16 @@ class VLAFlowMatching(nn.Module):
                 embs.append(image_start_token)
                 pad_masks.append(image_start_mask)
 
+            # Temporal fusion of image frames with Conv2d
+            if self.config.temporal_fusion == "conv":
+                img = self.mults_proj(img)
+
             img_emb = self.vlm_with_expert.embed_image(img)
             # Normalize image embeddings
             img_emb_dim = img_emb.shape[-1]
             img_emb = img_emb * torch.tensor(
                 img_emb_dim**0.5, dtype=img_emb.dtype, device=img_emb.device
             )
-
             bsize, num_img_embs = img_emb.shape[:2]
             img_mask = img_mask[:, None].expand(bsize, num_img_embs)
 

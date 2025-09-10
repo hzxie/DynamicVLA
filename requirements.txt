@@ -10,8 +10,9 @@ PyYAML
 pyzmq
 scipy
 tensorboard
+timm
 torch
 torchvision
 tqdm
-transformers==4.52.4
+transformers==4.53.0
 wandb
