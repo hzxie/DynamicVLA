@@ -4,7 +4,7 @@
 # @Author: The HuggingFace Inc. team.
 # @Date:   2025-08-21 15:26:40
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-11 09:39:25
+# @Last Modified at: 2025-09-15 15:47:06
 # @Email:  root@haozhexie.com
 
 import copy
@@ -63,11 +63,11 @@ class SmolVLMWithExpertModel(torch.nn.Module):
         freeze_vision_encoder: bool = False,
         attention_mode: str = "self_attn",
         num_expert_layers: int = -1,
-        vlm_input_channels: int = 3,
-        vlm_patch_size: int = 16,
-        vlm_attention_heads: int = 12,
-        vlm_hidden_size: int = 768,
-        vlm_intermediate_size: int = 3072,
+        ve_input_channels: int = 3,
+        ve_patch_size: int = 16,
+        ve_attention_heads: int = 12,
+        ve_hidden_size: int = 768,
+        ve_intermediate_size: int = 3072,
         num_vlm_layers: int = -1,
         self_attn_every_n_layers: int = -1,
         expert_width_multiplier: float = 0.5,
@@ -75,14 +75,14 @@ class SmolVLMWithExpertModel(torch.nn.Module):
         super().__init__()
         config = AutoConfig.from_pretrained(model_id)
         # Override values in SmolVLMConfig
-        config.vision_config.num_channels = vlm_input_channels
-        config.vision_config.patch_size = vlm_patch_size
-        config.vision_config.num_attention_heads = vlm_attention_heads
-        config.vision_config.hidden_size = vlm_hidden_size
-        config.vision_config.intermediate_size = vlm_intermediate_size
+        config.vision_config.num_channels = ve_input_channels
+        config.vision_config.patch_size = ve_patch_size
+        config.vision_config.num_attention_heads = ve_attention_heads
+        config.vision_config.hidden_size = ve_hidden_size
+        config.vision_config.intermediate_size = ve_intermediate_size
 
         self.vlm = SmolVLMForConditionalGeneration(config=config)
-        self.processor = AutoProcessor.from_pretrained(model_id)
+        self.tokenizer = AutoProcessor.from_pretrained(model_id).tokenizer
         if num_vlm_layers > 0:
             print(f"Reducing the number of VLM layers to {num_vlm_layers} ...")
             self.get_vlm_model().text_model.layers = (
@@ -104,7 +104,8 @@ class SmolVLMWithExpertModel(torch.nn.Module):
         if num_expert_layers > 0:
             assert (
                 len(self.get_vlm_model().text_model.layers) % num_expert_layers == 0
-            ), f"Number of layers in the VLM {len(self.get_vlm_model().text_model.layers)} are not multiple of num_expert_layers {num_expert_layers}"
+            ), f"Number of layers in the VLM {len(self.get_vlm_model().text_model.layers)}"
+            f"are not multiple of num_expert_layers {num_expert_layers}"
             lm_expert_config.num_hidden_layers = num_expert_layers
 
         self.lm_expert = AutoModel.from_config(lm_expert_config)
@@ -162,6 +163,7 @@ class SmolVLMWithExpertModel(torch.nn.Module):
                 and self.num_vlm_layers % self.num_expert_layers == 0
             ):
                 last_layers.append(self.num_vlm_layers - 2)
+
             frozen_layers = [
                 "lm_head",
                 "text_model.model.norm.weight",
@@ -187,19 +189,14 @@ class SmolVLMWithExpertModel(torch.nn.Module):
             self.vlm.eval()
 
     def embed_image(self, image: torch.Tensor):
-        patch_attention_mask = None
-        # Get sequence from the vision encoder
-        image_hidden_states = (
-            self.get_vlm_model()
-            .vision_model(
-                pixel_values=image.to(dtype=self.get_vlm_model().vision_model.dtype),
-                patch_attention_mask=patch_attention_mask,
-            )
-            .last_hidden_state
-        )
-        # Modality projection & resampling
-        image_hidden_states = self.get_vlm_model().connector(image_hidden_states)
-        return image_hidden_states
+        assert len(image.shape) in [
+            4,
+            5,
+        ], f"Image should be [B, C, H, W] or [B, N, C, H, W], got {image.shape}"
+        if len(image.shape) == 4:
+            image = image.unsqueeze(1)  # [B, 1, C, H, W]
+
+        return self.get_vlm_model().get_image_features(image)
 
     def embed_language_tokens(self, tokens: torch.Tensor):
         return self.get_vlm_model().text_model.get_input_embeddings()(tokens)
@@ -422,7 +419,7 @@ class SmolVLMWithExpertModel(torch.nn.Module):
         # att_output = att_output.to(dtype=models[i].dtype)
         return att_outputs, past_key_values
 
-    def get_model_layers(self, models: list) -> list:
+    def _get_model_layers(self, models: list) -> list:
         vlm_layers = []
         expert_layers = []
         multiple_of = self.num_vlm_layers // self.num_expert_layers
@@ -434,6 +431,7 @@ class SmolVLMWithExpertModel(torch.nn.Module):
                 expert_layer = models[1].layers[expert_layer_index]
             vlm_layers.append(models[0].layers[i])
             expert_layers.append(expert_layer)
+
         return [vlm_layers, expert_layers]
 
     def forward(
@@ -446,7 +444,7 @@ class SmolVLMWithExpertModel(torch.nn.Module):
         fill_kv_cache: bool | None = None,
     ):
         models = [self.get_vlm_model().text_model, self.lm_expert]
-        model_layers = self.get_model_layers(models)
+        model_layers = self._get_model_layers(models)
         for hidden_states in inputs_embeds:
             # TODO this is very inefficient
             # dtype is always the same, batch size too (if > 1 len)

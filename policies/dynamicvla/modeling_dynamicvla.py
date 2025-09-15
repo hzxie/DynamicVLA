@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-11 07:27:09
+# @Last Modified at: 2025-09-15 15:58:26
 # @Email:  root@haozhexie.com
 
 import math
@@ -21,10 +21,9 @@ from lerobot.policies.normalize import Normalize, Unnormalize
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import populate_queues
 from lerobot.utils.utils import get_safe_dtype
-from torch import Tensor, nn
-from transformers import AutoProcessor
 
 from policies.dynamicvla.configuration_dynamicvla import DynamicVLAConfig
+from policies.dynamicvla.fastvlm_with_expert import FastVLMWithExpertModel
 from policies.dynamicvla.smolvlm_with_expert import SmolVLMWithExpertModel
 
 # Matches ".soNNN", optionally followed by "-something", up to the "_buffer_" marker
@@ -130,13 +129,15 @@ def create_sinusoidal_pos_embedding(
     min_period: float,
     max_period: float,
     device="cpu",
-) -> Tensor:
+) -> torch.Tensor:
     """Computes sine-cosine positional embedding vectors for scalar positions."""
     if dimension % 2 != 0:
         raise ValueError(f"dimension ({dimension}) must be divisible by 2")
 
     if time.ndim != 1:
-        raise ValueError("The time tensor is expected to be of shape `(batch_size, )`.")
+        raise ValueError(
+            "The time torch.Tensor is expected to be of shape `(batch_size, )`."
+        )
 
     dtype = get_safe_dtype(torch.float64, device.type)
     fraction = torch.linspace(0.0, 1.0, dimension // 2, dtype=dtype, device=device)
@@ -283,7 +284,7 @@ class DynamicVLAPolicy(PreTrainedPolicy):
     def __init__(
         self,
         config: DynamicVLAConfig,
-        dataset_stats: dict[str, dict[str, Tensor]] | None = None,
+        dataset_stats: dict[str, dict[str, torch.Tensor]] | None = None,
         ckpt_filename: str | None = None,
     ):
         """
@@ -309,10 +310,8 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         self.unnormalize_outputs = Unnormalize(
             config.output_features, config.normalization_mapping, dataset_stats
         )
-        self.language_tokenizer = AutoProcessor.from_pretrained(
-            self.config.vlm_model_name
-        ).tokenizer
         self.model = VLAFlowMatching(config)
+        self.language_tokenizer = self.model.vlm_with_expert.tokenizer
         self.reset()
 
         # ckpt_filename is used to initlialize the streaming process.
@@ -407,8 +406,8 @@ class DynamicVLAPolicy(PreTrainedPolicy):
             if q_out.full():
                 print("The output queue is full. Skipping an action.")
                 continue
-            # NOTE: All tensors are on CPU if streaming is enabled. Because IPC with
-            #       CUDA tensors is not supported.
+            # NOTE: All torch.Tensors are on CPU if streaming is enabled. Because IPC with
+            #       CUDA torch.Tensors is not supported.
             q_out.put_nowait({"actions": actions.transpose(0, 1).cpu(), "index": index})
 
     @classmethod
@@ -433,8 +432,8 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         return self.parameters()
 
     def _get_action_chunk(
-        self, batch: dict[str, Tensor], noise: Tensor | None = None
-    ) -> Tensor:
+        self, batch: dict[str, torch.Tensor], noise: torch.Tensor | None = None
+    ) -> torch.Tensor:
         for k in batch:
             if k in self._queues and k != ACTION:
                 batch[k] = torch.stack(list(self._queues[k]), dim=1)
@@ -457,7 +456,7 @@ class DynamicVLAPolicy(PreTrainedPolicy):
 
         return actions
 
-    def _prepare_batch(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
+    def _prepare_batch(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         if self.config.adapt_to_pi_aloha:
             batch[OBS_STATE] = self._pi_aloha_decode_state(batch[OBS_STATE])
 
@@ -465,8 +464,8 @@ class DynamicVLAPolicy(PreTrainedPolicy):
 
     @torch.no_grad()
     def predict_action_chunk(
-        self, batch: dict[str, Tensor], noise: Tensor | None = None
-    ) -> Tensor:
+        self, batch: dict[str, torch.Tensor], noise: torch.Tensor | None = None
+    ) -> torch.Tensor:
         self.eval()
         batch = self._prepare_batch(batch)
         self._queues = populate_queues(self._queues, batch, exclude_keys=[ACTION])
@@ -476,8 +475,8 @@ class DynamicVLAPolicy(PreTrainedPolicy):
 
     @torch.no_grad()
     def select_action(
-        self, batch: dict[str, Tensor], noise: Tensor | None = None
-    ) -> Tensor:
+        self, batch: dict[str, torch.Tensor], noise: torch.Tensor | None = None
+    ) -> torch.Tensor:
         if self.config.enable_streaming:
             return self._get_streaming_action(batch, noise)
         else:
@@ -485,8 +484,8 @@ class DynamicVLAPolicy(PreTrainedPolicy):
 
     @torch.no_grad()
     def _get_streaming_action(
-        self, batch: dict[str, Tensor], noise: Tensor | None = None
-    ) -> Tensor:
+        self, batch: dict[str, torch.Tensor], noise: torch.Tensor | None = None
+    ) -> torch.Tensor:
         # NOTE: This function does not do any GPU computation.
         assert "index" in batch
         # Put the latest observation into the input dict
@@ -531,8 +530,8 @@ class DynamicVLAPolicy(PreTrainedPolicy):
 
     @torch.no_grad()
     def _get_non_streaming_action(
-        self, batch: dict[str, Tensor], noise: Tensor | None = None
-    ) -> Tensor:
+        self, batch: dict[str, torch.Tensor], noise: torch.Tensor | None = None
+    ) -> torch.Tensor:
         self.eval()
         # Save the state before normalization
         latest_state = batch[OBS_STATE][:, -1:, :]
@@ -543,7 +542,7 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         # querying the policy.
         if len(self._queues[ACTION]) == 0:
             actions = self._get_action_chunk(batch, noise)
-            # `self.predict_action_chunk` returns a (batch_size, n_action_steps, action_dim) tensor, but the queue
+            # `self.predict_action_chunk` returns a (batch_size, n_action_steps, action_dim) torch.Tensor, but the queue
             # effectively has shape (n_action_steps, batch_size, *), hence the transpose.
             if self.config.use_delta_action:
                 action_dim = actions.shape[-1] - 1
@@ -556,8 +555,8 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         return self._queues[ACTION].popleft()
 
     def forward(
-        self, batch: dict[str, Tensor], noise=None, time=None
-    ) -> dict[str, Tensor]:
+        self, batch: dict[str, torch.Tensor], noise=None, time=None
+    ) -> dict[str, torch.Tensor]:
         """Do a full training forward pass to compute the loss"""
         if self.config.adapt_to_pi_aloha:
             batch[OBS_STATE] = self._pi_aloha_decode_state(batch[OBS_STATE])
@@ -640,7 +639,7 @@ class DynamicVLAPolicy(PreTrainedPolicy):
 
         return images, img_masks
 
-    def prepare_language(self, batch) -> tuple[Tensor, Tensor]:
+    def prepare_language(self, batch) -> tuple[torch.Tensor, torch.Tensor]:
         """Tokenize the text input"""
         device = batch[OBS_STATE].device
         tasks = batch["task"]
@@ -663,7 +662,6 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         lang_masks = tokenized_prompt["attention_mask"].to(
             device=device, dtype=torch.bool
         )
-
         return lang_tokens, lang_masks
 
     def _pi_aloha_decode_state(self, state):
@@ -716,31 +714,31 @@ class DynamicVLAPolicy(PreTrainedPolicy):
 
 def pad_tensor(tensor, max_len, pad_value=0):
     """
-    Efficiently pads a tensor along sequence dimension to match max_len.
+    Efficiently pads a torch.Tensor along sequence dimension to match max_len.
 
     Args:
-        tensor (torch.Tensor): Shape (B, L, ...) or (B, L).
+        torch.Tensor (torch.Tensor): Shape (B, L, ...) or (B, L).
         max_len (int): Fixed sequence length.
         pad_value (int/float): Value for padding.
 
     Returns:
         torch.Tensor: Shape (B, max_len, ...) or (B, max_len).
     """
-    b, d = tensor.shape[:2]
+    b, d = torch.Tensor.shape[:2]
 
-    # Create a padded tensor of max_len and copy the existing values
+    # Create a padded torch.Tensor of max_len and copy the existing values
     padded_tensor = torch.full(
         (b, max_len, *tensor.shape[2:]),
         pad_value,
         dtype=tensor.dtype,
         device=tensor.device,
     )
-    padded_tensor[:, :d] = tensor  # Efficient in-place copy
+    padded_tensor[:, :d] = torch.Tensor  # Efficient in-place copy
 
     return padded_tensor
 
 
-class VLAFlowMatching(nn.Module):
+class VLAFlowMatching(torch.nn.Module):
     """
     ┌──────────────────────────────┐
     │                 actions      │
@@ -766,9 +764,9 @@ class VLAFlowMatching(nn.Module):
         self.config = config
 
         if config.temporal_fusion == "conv":
-            self.mults_proj = nn.Sequential(
-                nn.Conv2d(3 * config.n_obs_steps, 3, kernel_size=7, padding=3),
-                nn.GELU(),
+            self.mults_proj = torch.nn.Sequential(
+                torch.nn.Conv2d(3 * config.n_obs_steps, 3, kernel_size=7, padding=3),
+                torch.nn.GELU(),
             )
             vlm_input_channels = 3
         elif config.temporal_fusion == "attn":
@@ -782,54 +780,48 @@ class VLAFlowMatching(nn.Module):
                 freeze_vision_encoder=config.freeze_vision_encoder,
                 train_expert_only=config.train_expert_only,
                 attention_mode=config.attention_mode,
-                vlm_input_channels=vlm_input_channels,
-                vlm_patch_size=config.vlm_patch_size,
-                vlm_attention_heads=config.vlm_attention_heads,
-                vlm_hidden_size=config.vlm_hidden_size,
-                vlm_intermediate_size=config.vlm_intermediate_size,
-                num_expert_layers=config.num_expert_layers,
+                ve_input_channels=vlm_input_channels,
+                ve_patch_size=config.smol_vis_enc_patch_size,
+                ve_attention_heads=config.smol_vis_enc_attention_heads,
+                ve_hidden_size=config.smol_vis_enc_hidden_size,
+                ve_intermediate_size=config.smol_vis_enc_intermediate_size,
                 num_vlm_layers=self.config.num_vlm_layers,
+                num_expert_layers=config.num_expert_layers,
                 self_attn_every_n_layers=self.config.self_attn_every_n_layers,
                 expert_width_multiplier=self.config.expert_width_multiplier,
             )
-        elif config.vlm_model_name.startswith("apple/FastVLM"):
-            raise NotImplementedError
+        elif config.vlm_model_name.startswith("apple/FastVLM-0.5B"):
+            self.vlm_with_expert = FastVLMWithExpertModel(
+                model_id=config.vlm_model_name,
+                ve_input_channels=vlm_input_channels,
+                inference_mode=config.fastvlm_inference_mode,
+                freeze_vision_encoder=config.freeze_vision_encoder,
+                train_expert_only=config.train_expert_only,
+                num_vlm_layers=self.config.num_vlm_layers,
+                num_expert_layers=config.num_expert_layers,
+            )
         else:
-            raise ValueError(f"Unknown vlm_model_name: {config.vlm_model_name}")
+            raise ValueError(f"Unknown VLM: {config.vlm_model_name}")
 
-        self.state_proj = nn.Linear(
+        self.state_proj = torch.nn.Linear(
             config.max_state_dim,
             self.vlm_with_expert.config.text_config.hidden_size,
         )
-        self.action_in_proj = nn.Linear(
+        self.action_in_proj = torch.nn.Linear(
             config.max_action_dim, self.vlm_with_expert.expert_hidden_size
         )
-        self.action_out_proj = nn.Linear(
+        self.action_out_proj = torch.nn.Linear(
             self.vlm_with_expert.expert_hidden_size, config.max_action_dim
         )
-        self.action_time_mlp_in = nn.Linear(
+        self.action_time_mlp_in = torch.nn.Linear(
             self.vlm_with_expert.expert_hidden_size * 2,
             self.vlm_with_expert.expert_hidden_size,
         )
-        self.action_time_mlp_out = nn.Linear(
+        self.action_time_mlp_out = torch.nn.Linear(
             self.vlm_with_expert.expert_hidden_size,
             self.vlm_with_expert.expert_hidden_size,
         )
-
         self.set_requires_grad()
-        self.fake_image_token = (
-            self.vlm_with_expert.processor.tokenizer.fake_image_token_id
-        )
-        self.global_image_token = (
-            self.vlm_with_expert.processor.tokenizer.global_image_token_id
-        )
-        self.global_image_start_token = torch.tensor(
-            [self.fake_image_token, self.global_image_token], dtype=torch.long
-        )
-
-        self.add_image_special_tokens = self.config.add_image_special_tokens
-        self.image_end_token = torch.tensor([self.fake_image_token], dtype=torch.long)
-        self.prefix_length = self.config.prefix_length
 
     def set_requires_grad(self):
         for params in self.state_proj.parameters():
@@ -855,101 +847,65 @@ class VLAFlowMatching(nn.Module):
         self, images, img_masks, lang_tokens, lang_masks, state: torch.Tensor = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Embed images with SigLIP and language tokens with embedding layer to prepare
-        for SmolVLM transformer processing.
+        for vision encoder processing.
         """
         embs = []
         pad_masks = []
         att_masks = []
         for img, img_mask in zip(images, img_masks, strict=False):
-            if self.add_image_special_tokens:
-                image_start_token = (
-                    self.vlm_with_expert.embed_language_tokens(
-                        self.global_image_start_token.to(
-                            device=self.vlm_with_expert.vlm.device
-                        )
-                    )
-                    .unsqueeze(0)
-                    .expand(img.shape[0], -1, -1)
-                )
-                image_start_mask = torch.ones_like(
-                    image_start_token[:, :, 0],
-                    dtype=torch.bool,
-                    device=image_start_token.device,
-                )
-                att_masks += [0] * (image_start_mask.shape[-1])
-                embs.append(image_start_token)
-                pad_masks.append(image_start_mask)
-
             # Temporal fusion of image frames with Conv2d
             if self.config.temporal_fusion == "conv":
                 img = self.mults_proj(img)
 
             img_emb = self.vlm_with_expert.embed_image(img)
-            # Normalize image embeddings
             img_emb_dim = img_emb.shape[-1]
             img_emb = img_emb * torch.tensor(
                 img_emb_dim**0.5, dtype=img_emb.dtype, device=img_emb.device
             )
+
             bsize, num_img_embs = img_emb.shape[:2]
             img_mask = img_mask[:, None].expand(bsize, num_img_embs)
-
             embs.append(img_emb)
             pad_masks.append(img_mask)
-
             att_masks += [0] * (num_img_embs)
-            if self.add_image_special_tokens:
-                image_end_token = (
-                    self.vlm_with_expert.embed_language_tokens(
-                        self.image_end_token.to(device=self.vlm_with_expert.vlm.device)
-                    )
-                    .unsqueeze(0)
-                    .expand(img.shape[0], -1, -1)
-                )
-                image_end_mask = torch.ones_like(
-                    image_end_token[:, :, 0],
-                    dtype=torch.bool,
-                    device=image_end_token.device,
-                )
-                embs.append(image_end_token)
-                pad_masks.append(image_end_mask)
-                att_masks += [0] * (image_end_mask.shape[1])
 
         lang_emb = self.vlm_with_expert.embed_language_tokens(lang_tokens)
         # Normalize language embeddings
         lang_emb_dim = lang_emb.shape[-1]
         lang_emb = lang_emb * math.sqrt(lang_emb_dim)
-
         embs.append(lang_emb)
         pad_masks.append(lang_masks)
 
         num_lang_embs = lang_emb.shape[1]
         att_masks += [0] * num_lang_embs
 
-        state_emb = self.state_proj(state)
-        state_emb = state_emb[:, None, :] if state_emb.ndim == 2 else state_emb
-        embs.append(state_emb)
-        bsize = state_emb.shape[0]
-        device = state_emb.device
+        if state is not None:
+            state_emb = self.state_proj(state)
+            state_emb = state_emb[:, None, :] if state_emb.ndim == 2 else state_emb
+            embs.append(state_emb)
+            states_seq_len = state_emb.shape[1]
+            state_mask = torch.ones(
+                state_emb.shape[0],
+                states_seq_len,
+                dtype=torch.bool,
+                device=state_emb.device,
+            )
+            pad_masks.append(state_mask)
+            # Set attention masks so that image and language inputs do not attend to state or actions
+            att_masks += [1] * (states_seq_len)
 
-        states_seq_len = state_emb.shape[1]
-        state_mask = torch.ones(bsize, states_seq_len, dtype=torch.bool, device=device)
-        pad_masks.append(state_mask)
-
-        # Set attention masks so that image and language inputs do not attend to state or actions
-        att_masks += [1] * (states_seq_len)
         embs = torch.cat(embs, dim=1)
         pad_masks = torch.cat(pad_masks, dim=1)
         att_masks = torch.tensor(att_masks, dtype=torch.bool, device=pad_masks.device)
         att_masks = att_masks[None, :]
 
         seq_len = pad_masks.shape[1]
-        if seq_len < self.prefix_length:
-            embs = pad_tensor(embs, self.prefix_length, pad_value=0)
-            pad_masks = pad_tensor(pad_masks, self.prefix_length, pad_value=0)
-            att_masks = pad_tensor(att_masks, self.prefix_length, pad_value=0)
+        if seq_len < self.config.prefix_length:
+            embs = pad_tensor(embs, self.config.prefix_length, pad_value=0)
+            pad_masks = pad_tensor(pad_masks, self.config.prefix_length, pad_value=0)
+            att_masks = pad_tensor(att_masks, self.config.prefix_length, pad_value=0)
 
         att_masks = att_masks.expand(bsize, -1)
-
         return embs, pad_masks, att_masks
 
     def embed_suffix(self, noisy_actions, timestep):
@@ -1007,7 +963,7 @@ class VLAFlowMatching(nn.Module):
         actions,
         noise=None,
         time=None,
-    ) -> Tensor:
+    ) -> torch.Tensor:
         """Do a full training forward pass and compute the loss (batch_size x num_steps x num_motors)"""
         if noise is None:
             noise = self.sample_noise(actions.shape, actions.device)
@@ -1044,7 +1000,7 @@ class VLAFlowMatching(nn.Module):
 
     def sample_vlm_embedding(
         self, images, img_masks, lang_tokens, lang_masks, state, noise=None
-    ) -> Tensor:
+    ) -> torch.Tensor:
         """Do a half inference forward and compute the VLM embedding"""
 
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
@@ -1066,7 +1022,7 @@ class VLAFlowMatching(nn.Module):
 
     def sample_actions(
         self, images, img_masks, lang_tokens, lang_masks, state, noise=None
-    ) -> Tensor:
+    ) -> torch.Tensor:
         """Do a full inference forward and compute the action (batch_size x num_steps x num_motors)"""
         bsize = state.shape[0]
         device = state.device

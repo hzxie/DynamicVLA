@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:22:31
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-10 19:43:32
+# @Last Modified at: 2025-09-12 14:47:22
 # @Email:  root@haozhexie.com
 
 from dataclasses import dataclass, field
@@ -71,21 +71,21 @@ class DynamicVLAConfig(PreTrainedConfig):
     scheduler_decay_steps: int = 30_000
     scheduler_decay_lr: float = 2.5e-6
     # Select the VLM backbone.
-    vlm_model_name: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
-    add_image_special_tokens: bool = False
-
     attention_mode: str = "cross_attn"
     prefix_length: int = -1
     pad_language_to: str = "longest"  # "max_length"
     # Less or equal to 0 is the default where the action expert has the same number of layers of VLM. Otherwise the expert have less layers.
     num_expert_layers: int = -1
     # VLM settings
-    # SmolVLM Settings
+    vlm_model_name: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
     num_vlm_layers: int = 16
-    vlm_patch_size: int = 16
-    vlm_attention_heads: int = 12
-    vlm_hidden_size: int = 768
-    vlm_intermediate_size: int = 3072
+    # SmolVLM Settings
+    smol_vis_enc_patch_size: int = 16
+    smol_vis_enc_attention_heads: int = 12
+    smol_vis_enc_hidden_size: int = 768
+    smol_vis_enc_intermediate_size: int = 3072
+    # FastVLM Settings
+    fastvlm_inference_mode: bool = False
     # Interleave SA layers each self_attn_every_n_layers
     self_attn_every_n_layers: int = 2
     # The action expert hidden size (wrt to the VLM)
