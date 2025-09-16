@@ -1,20 +1,21 @@
 # -*- coding: utf-8 -*-
 #
-# @File:   smolvlm_with_expert.py
-# @Author: The HuggingFace Inc. team.
-# @Date:   2025-08-21 15:26:40
+# @File:   modeling_vlm_with_expert.py
+# @Author: Haozhe Xie
+# @Date:   2025-09-16 11:23:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-15 15:47:06
+# @Last Modified at: 2025-09-16 19:16:42
 # @Email:  root@haozhexie.com
 
 import copy
+import gc
 
 import torch
 from transformers import (
-    AutoConfig,
     AutoModel,
-    AutoProcessor,
-    SmolVLMForConditionalGeneration,
+    AutoTokenizer,
+    PretrainedConfig,
+    PreTrainedModel,
 )
 
 
@@ -48,94 +49,48 @@ def apply_rope(x, positions, max_wavelength=10_000):
     return res.to(dtype)
 
 
-def get_intermediate_size(hidden_dim, ffn_dim_multiplier=4, multiple_of=256):
-    hidden_dim = int(2 * hidden_dim / 3)
-    hidden_dim = int(ffn_dim_multiplier * hidden_dim)
-    hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
-    return hidden_dim
-
-
-class SmolVLMWithExpertModel(torch.nn.Module):
+class VLMWithExpertModel(torch.nn.Module):
     def __init__(
         self,
-        model_id: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct",
+        model_id: str,
+        vlm: PreTrainedModel,
         train_expert_only: bool = True,
         freeze_vision_encoder: bool = False,
         attention_mode: str = "self_attn",
         num_expert_layers: int = -1,
-        ve_input_channels: int = 3,
-        ve_patch_size: int = 16,
-        ve_attention_heads: int = 12,
-        ve_hidden_size: int = 768,
-        ve_intermediate_size: int = 3072,
         num_vlm_layers: int = -1,
         self_attn_every_n_layers: int = -1,
         expert_width_multiplier: float = 0.5,
-    ):
+    ) -> None:
         super().__init__()
-        config = AutoConfig.from_pretrained(model_id)
-        # Override values in SmolVLMConfig
-        config.vision_config.num_channels = ve_input_channels
-        config.vision_config.patch_size = ve_patch_size
-        config.vision_config.num_attention_heads = ve_attention_heads
-        config.vision_config.hidden_size = ve_hidden_size
-        config.vision_config.intermediate_size = ve_intermediate_size
-
-        self.vlm = SmolVLMForConditionalGeneration(config=config)
-        self.tokenizer = AutoProcessor.from_pretrained(model_id).tokenizer
+        # Tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
+        # VLM
+        self.vlm = vlm
+        self.vlm_config = self.vlm.config
         if num_vlm_layers > 0:
             print(f"Reducing the number of VLM layers to {num_vlm_layers} ...")
-            self.get_vlm_model().text_model.layers = (
-                self.get_vlm_model().text_model.layers[:num_vlm_layers]
+            self.get_vlm_model().text_model.layers = torch.nn.ModuleList(
+                list(self.get_vlm_model().text_model.layers[:num_vlm_layers])
             )
+            gc.collect()
+            torch.cuda.empty_cache()
 
         self.num_vlm_layers = len(self.get_vlm_model().text_model.layers)
-        self.config = config
-        # Smaller lm expert
-        lm_expert_config = copy.deepcopy(config.text_config)
-        hidden_size = lm_expert_config.hidden_size
-        lm_expert_config.hidden_size = int(
-            hidden_size * expert_width_multiplier
-        )  # hidden_size // 2
-        lm_expert_config.intermediate_size = get_intermediate_size(
-            int(hidden_size * expert_width_multiplier)
+        # Action Expert
+        lm_expert_config = self._get_expert_config(
+            self.vlm_config.text_config, num_expert_layers, expert_width_multiplier
         )
-        lm_expert_config.num_hidden_layers = self.num_vlm_layers
-        if num_expert_layers > 0:
-            assert (
-                len(self.get_vlm_model().text_model.layers) % num_expert_layers == 0
-            ), f"Number of layers in the VLM {len(self.get_vlm_model().text_model.layers)}"
-            f"are not multiple of num_expert_layers {num_expert_layers}"
-            lm_expert_config.num_hidden_layers = num_expert_layers
-
-        self.lm_expert = AutoModel.from_config(lm_expert_config)
-        self.num_expert_layers = len(self.lm_expert.layers)
-        self.self_attn_every_n_layers = self_attn_every_n_layers
-        if "cross" in attention_mode:
-            # Reshape qkv projections to have the same input dimension as the vlm
-            for layer_idx in range(len(self.lm_expert.layers)):
-                if (
-                    self.self_attn_every_n_layers > 0
-                    and layer_idx % self.self_attn_every_n_layers == 0
-                ):
-                    continue
-                self.lm_expert.layers[layer_idx].self_attn.k_proj = torch.nn.Linear(
-                    config.text_config.num_key_value_heads
-                    * config.text_config.head_dim,
-                    lm_expert_config.num_key_value_heads * lm_expert_config.head_dim,
-                    bias=lm_expert_config.attention_bias,
-                )
-                self.lm_expert.layers[layer_idx].self_attn.v_proj = torch.nn.Linear(
-                    config.text_config.num_key_value_heads
-                    * config.text_config.head_dim,
-                    lm_expert_config.num_key_value_heads * lm_expert_config.head_dim,
-                    bias=lm_expert_config.attention_bias,
-                )
-        # Remove unused embed_tokens
+        self.lm_expert = self._get_expert_model(
+            lm_expert_config, attention_mode, self_attn_every_n_layers
+        )
         self.lm_expert.embed_tokens = None
 
-        self.num_attention_heads = self.config.text_config.num_attention_heads
-        self.num_key_value_heads = self.config.text_config.num_key_value_heads
+        self.num_attention_heads = self.vlm_config.text_config.num_attention_heads
+        self.num_key_value_heads = self.vlm_config.text_config.num_key_value_heads
+        self.num_vlm_layers = len(self.get_vlm_model().text_model.layers)
+        self.num_expert_layers = len(self.lm_expert.layers)
+        self.self_attn_every_n_layers = self_attn_every_n_layers
 
         self.freeze_vision_encoder = freeze_vision_encoder
         self.train_expert_only = train_expert_only
@@ -143,10 +98,70 @@ class SmolVLMWithExpertModel(torch.nn.Module):
         self.expert_hidden_size = lm_expert_config.hidden_size
         self.set_requires_grad()
 
-    def get_vlm_model(self):
+    def _get_expert_config(
+        self, text_config: PretrainedConfig, num_layers: int, width_multiplier: float
+    ) -> PretrainedConfig:
+        expert_config = copy.deepcopy(text_config)
+        hidden_size = expert_config.hidden_size
+        expert_config.hidden_size = int(hidden_size * width_multiplier)
+        expert_config.intermediate_size = self._get_intermediate_size(
+            expert_config.hidden_size
+        )
+
+        num_vlm_layers = len(self.get_vlm_model().text_model.layers)
+        expert_config.num_hidden_layers = num_vlm_layers
+        if num_layers > 0:
+            assert (
+                len(num_vlm_layers) % num_layers == 0
+            ), f"Number of layers in the VLM {num_vlm_layers}"
+            f"are not multiple of num_expert_layers {num_layers}"
+            expert_config.num_hidden_layers = num_layers
+
+        return expert_config
+
+    def _get_intermediate_size(
+        self, hidden_dim, ffn_dim_multiplier=4, multiple_of=256
+    ) -> int:
+        hidden_dim = int(2 * hidden_dim / 3)
+        hidden_dim = int(ffn_dim_multiplier * hidden_dim)
+        hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
+        return hidden_dim
+
+    def _get_expert_model(
+        self,
+        expert_config: PretrainedConfig,
+        attention_mode: str,
+        self_attn_every_n_layers: int,
+    ) -> PreTrainedModel:
+        expert_model = AutoModel.from_config(expert_config)
+        if "cross" in attention_mode:
+            # Reshape qkv projections to have the same input dimension as the vlm
+            for layer_idx in range(len(self.lm_expert.layers)):
+                if (
+                    self_attn_every_n_layers > 0
+                    and layer_idx % self_attn_every_n_layers == 0
+                ):
+                    continue
+
+                self.lm_expert.layers[layer_idx].self_attn.k_proj = torch.nn.Linear(
+                    self.vlm_config.text_config.num_key_value_heads
+                    * self.vlm_config.text_config.head_dim,
+                    expert_config.num_key_value_heads * expert_config.head_dim,
+                    bias=expert_config.attention_bias,
+                )
+                self.lm_expert.layers[layer_idx].self_attn.v_proj = torch.nn.Linear(
+                    self.vlm_config.text_config.num_key_value_heads
+                    * self.vlm_config.text_config.head_dim,
+                    expert_config.num_key_value_heads * expert_config.head_dim,
+                    bias=expert_config.attention_bias,
+                )
+
+        return expert_model
+
+    def get_vlm_model(self) -> PreTrainedModel:
         return self.vlm.model
 
-    def set_requires_grad(self):
+    def set_requires_grad(self) -> None:
         if self.freeze_vision_encoder:
             self.get_vlm_model().vision_model.eval()
             for params in self.get_vlm_model().vision_model.parameters():
@@ -174,12 +189,13 @@ class SmolVLMWithExpertModel(torch.nn.Module):
             for name, params in self.vlm.named_parameters():
                 if any(k in name for k in frozen_layers):
                     params.requires_grad = False
+
         # To avoid unused params issue with distributed training
         for name, params in self.lm_expert.named_parameters():
             if "lm_head" in name:
                 params.requires_grad = False
 
-    def train(self, mode: bool = True):
+    def train(self, mode: bool = True) -> None:
         super().train(mode)
 
         if self.freeze_vision_encoder:
@@ -188,7 +204,7 @@ class SmolVLMWithExpertModel(torch.nn.Module):
         if self.train_expert_only:
             self.vlm.eval()
 
-    def embed_image(self, image: torch.Tensor):
+    def embed_image(self, image: torch.Tensor) -> torch.Tensor:
         assert len(image.shape) in [
             4,
             5,
@@ -198,7 +214,7 @@ class SmolVLMWithExpertModel(torch.nn.Module):
 
         return self.get_vlm_model().get_image_features(image)
 
-    def embed_language_tokens(self, tokens: torch.Tensor):
+    def embed_language_tokens(self, tokens: torch.Tensor) -> torch.Tensor:
         return self.get_vlm_model().text_model.get_input_embeddings()(tokens)
 
     def forward_attn_layer(
@@ -264,10 +280,11 @@ class SmolVLMWithExpertModel(torch.nn.Module):
                     "value_states": value_states,
                 }
             else:
-                # TODO here, some optimization can be done - similar to a `StaticCache` we can declare the `max_len` before.
-                # so we create an empty cache, with just one cuda malloc, and if (in autoregressive case) we reach
-                # the max len, then we (for instance) double the cache size. This implementation already exists
-                # in `transformers`. (molbap)
+                # TODO here, some optimization can be done - similar to a `StaticCache`
+                # we can declare the `max_len` before. So we create an empty cache, with
+                # just one cuda malloc, and if (in autoregressive case) we reach the max
+                # len, then we (for instance) double the cache size. This implementation
+                # already exists in `transformers`. (molbap)
                 key_states = torch.cat(
                     [past_key_values[layer_idx]["key_states"], key_states], dim=1
                 )
@@ -275,8 +292,7 @@ class SmolVLMWithExpertModel(torch.nn.Module):
                     [past_key_values[layer_idx]["value_states"], value_states], dim=1
                 )
 
-        attention_interface = self.get_attention_interface()
-
+        attention_interface = self._get_attention_interface()
         att_output = attention_interface(
             attention_mask_,
             batch_size,
@@ -300,8 +316,7 @@ class SmolVLMWithExpertModel(torch.nn.Module):
         fill_kv_cache: bool = True,
         past_key_values=None,
     ) -> list[torch.Tensor]:
-        attention_interface = self.get_attention_interface()
-
+        attention_interface = self._get_attention_interface()
         att_outputs = []
         assert len(inputs_embeds) == 2 or (
             use_cache and past_key_values is not None and not fill_kv_cache
@@ -403,7 +418,6 @@ class SmolVLMWithExpertModel(torch.nn.Module):
             ]  # take into account kv
 
             expert_query_states = apply_rope(expert_query_state, expert_position_id)
-
             att_output = attention_interface(
                 expert_attention_mask,
                 batch_size,
@@ -442,7 +456,7 @@ class SmolVLMWithExpertModel(torch.nn.Module):
         inputs_embeds: list[torch.FloatTensor] = None,
         use_cache: bool | None = None,
         fill_kv_cache: bool | None = None,
-    ):
+    ) -> tuple[list[torch.FloatTensor], list[torch.FloatTensor] | None]:
         models = [self.get_vlm_model().text_model, self.lm_expert]
         model_layers = self._get_model_layers(models)
         for hidden_states in inputs_embeds:
@@ -451,12 +465,15 @@ class SmolVLMWithExpertModel(torch.nn.Module):
             # device could be trickier in multi gpu edge cases but that's it
             if hidden_states is None:
                 continue
+
             batch_size = hidden_states.shape[0]
 
         # RMSNorm
-        num_layers = self.num_vlm_layers
-        head_dim = self.vlm.config.text_config.head_dim
-        for layer_idx in range(num_layers):
+        head_dim = (
+            self.vlm.config.text_config.hidden_size
+            // self.vlm.config.text_config.num_attention_heads
+        )
+        for layer_idx in range(self.num_vlm_layers):
             if (
                 fill_kv_cache
                 or "cross" not in self.attention_mode
@@ -532,13 +549,14 @@ class SmolVLMWithExpertModel(torch.nn.Module):
                 outputs_embeds.append(out_emb)
             else:
                 outputs_embeds.append(None)
+
         return outputs_embeds, past_key_values
 
-    def get_attention_interface(self):
-        attention_interface = self.eager_attention_forward
+    def _get_attention_interface(self) -> callable:
+        attention_interface = self._eager_attention_forward
         return attention_interface
 
-    def eager_attention_forward(
+    def _eager_attention_forward(
         self,
         attention_mask,
         batch_size,
@@ -546,13 +564,12 @@ class SmolVLMWithExpertModel(torch.nn.Module):
         query_states,
         key_states,
         value_states,
-    ):
+    ) -> torch.Tensor:
         num_att_heads = self.num_attention_heads
         num_key_value_heads = self.num_key_value_heads
         num_key_value_groups = num_att_heads // num_key_value_heads
 
         sequence_length = key_states.shape[1]
-
         key_states = key_states[:, :, :, None, :].expand(
             batch_size,
             sequence_length,
@@ -608,5 +625,4 @@ class SmolVLMWithExpertModel(torch.nn.Module):
         att_output = att_output.reshape(
             batch_size, -1, num_key_value_heads * num_key_value_groups * head_dim
         )
-
         return att_output

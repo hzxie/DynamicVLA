@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-15 15:58:26
+# @Last Modified at: 2025-09-16 18:54:40
 # @Email:  root@haozhexie.com
 
 import math
@@ -21,10 +21,15 @@ from lerobot.policies.normalize import Normalize, Unnormalize
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import populate_queues
 from lerobot.utils.utils import get_safe_dtype
+from transformers import AutoConfig, SmolVLMForConditionalGeneration
 
 from policies.dynamicvla.configuration_dynamicvla import DynamicVLAConfig
-from policies.dynamicvla.fastvlm_with_expert import FastVLMWithExpertModel
-from policies.dynamicvla.smolvlm_with_expert import SmolVLMWithExpertModel
+from policies.dynamicvla.modeling_vlm_with_expert import VLMWithExpertModel
+from policies.dynamicvla.modeling_fastvlm import (
+    FastViTConfig,
+    FastVLMConfig,
+    FastVLMForConditionalGeneration,
+)
 
 # Matches ".soNNN", optionally followed by "-something", up to the "_buffer_" marker
 _VARIANT_RE = re.compile(r"\.so\d+(?:-[\w]+)?_buffer_")
@@ -774,38 +779,12 @@ class VLAFlowMatching(torch.nn.Module):
         else:
             raise ValueError(f"Unknown temporal_fusion: {config.temporal_fusion}")
 
-        if config.vlm_model_name.startswith("HuggingFaceTB/SmolVLM2"):
-            self.vlm_with_expert = SmolVLMWithExpertModel(
-                model_id=config.vlm_model_name,
-                freeze_vision_encoder=config.freeze_vision_encoder,
-                train_expert_only=config.train_expert_only,
-                attention_mode=config.attention_mode,
-                ve_input_channels=vlm_input_channels,
-                ve_patch_size=config.smol_vis_enc_patch_size,
-                ve_attention_heads=config.smol_vis_enc_attention_heads,
-                ve_hidden_size=config.smol_vis_enc_hidden_size,
-                ve_intermediate_size=config.smol_vis_enc_intermediate_size,
-                num_vlm_layers=self.config.num_vlm_layers,
-                num_expert_layers=config.num_expert_layers,
-                self_attn_every_n_layers=self.config.self_attn_every_n_layers,
-                expert_width_multiplier=self.config.expert_width_multiplier,
-            )
-        elif config.vlm_model_name.startswith("apple/FastVLM-0.5B"):
-            self.vlm_with_expert = FastVLMWithExpertModel(
-                model_id=config.vlm_model_name,
-                ve_input_channels=vlm_input_channels,
-                inference_mode=config.fastvlm_inference_mode,
-                freeze_vision_encoder=config.freeze_vision_encoder,
-                train_expert_only=config.train_expert_only,
-                num_vlm_layers=self.config.num_vlm_layers,
-                num_expert_layers=config.num_expert_layers,
-            )
-        else:
-            raise ValueError(f"Unknown VLM: {config.vlm_model_name}")
-
+        self.vlm_with_expert: VLMWithExpertModel = self._get_vlm_with_expert(
+            config, config.vlm_model_name, vlm_input_channels
+        )
         self.state_proj = torch.nn.Linear(
             config.max_state_dim,
-            self.vlm_with_expert.config.text_config.hidden_size,
+            self.vlm_with_expert.vlm_config.text_config.hidden_size,
         )
         self.action_in_proj = torch.nn.Linear(
             config.max_action_dim, self.vlm_with_expert.expert_hidden_size
@@ -821,29 +800,78 @@ class VLAFlowMatching(torch.nn.Module):
             self.vlm_with_expert.expert_hidden_size,
             self.vlm_with_expert.expert_hidden_size,
         )
-        self.set_requires_grad()
+        self._set_requires_grad()
 
-    def set_requires_grad(self):
+    def _get_vlm_with_expert(
+        self, config: DynamicVLAConfig, vlm_model_name: str, vlm_input_channels: int
+    ):
+        vlm_config = AutoConfig.from_pretrained(vlm_model_name)
+
+        if vlm_model_name.startswith("HuggingFaceTB/SmolVLM2"):
+            vlm_config = AutoConfig.from_pretrained(vlm_model_name)
+            vlm_config.vision_config.num_channels = vlm_input_channels
+            vlm_config.vision_config.patch_size = config.smol_vis_enc_patch_size
+            vlm_config.vision_config.num_attention_heads = (
+                config.smol_vis_enc_attention_heads
+            )
+            vlm_config.vision_config.hidden_size = config.smol_vis_enc_hidden_size
+            vlm_config.vision_config.intermediate_size = (
+                config.smol_vis_enc_intermediate_size
+            )
+            vlm = SmolVLMForConditionalGeneration(config=vlm_config)
+        elif vlm_model_name.startswith("Qwen/Qwen2"):
+            text_config = AutoConfig.from_pretrained(vlm_model_name)
+            vision_config = FastViTConfig(
+                in_channels=vlm_input_channels,
+                position_embeddings=[
+                    None,
+                    None,
+                    None,
+                    {"name": "RepCPE", "spatial_shape": (7, 7)},
+                    {"name": "RepCPE", "spatial_shape": (7, 7)},
+                ],
+                inference_mode=config.fastvlm_inference_mode,
+            )
+            vlm_config = FastVLMConfig(
+                text_config=text_config,
+                vision_config=vision_config,
+            )
+            vlm = FastVLMForConditionalGeneration(config=vlm_config)
+        else:
+            raise ValueError(f"Unknown VLM: {vlm_model_name}")
+
+        return VLMWithExpertModel(
+            model_id=config.vlm_model_name,
+            vlm=vlm,
+            freeze_vision_encoder=config.freeze_vision_encoder,
+            train_expert_only=config.train_expert_only,
+            num_vlm_layers=self.config.num_vlm_layers,
+            num_expert_layers=config.num_expert_layers,
+            self_attn_every_n_layers=self.config.self_attn_every_n_layers,
+            expert_width_multiplier=self.config.expert_width_multiplier,
+        )
+
+    def _set_requires_grad(self):
         for params in self.state_proj.parameters():
             params.requires_grad = self.config.train_state_proj
 
-    def sample_noise(self, shape, device):
+    def _sample_noise(self, shape, device, dtype=torch.float32):
         noise = torch.normal(
             mean=0.0,
             std=1.0,
             size=shape,
-            dtype=torch.float32,
+            dtype=dtype,
             device=device,
         )
         return noise
 
-    def sample_time(self, bsize, device):
+    def _sample_time(self, bsize, device, dtype=torch.float32):
         beta_dist = torch.distributions.Beta(concentration1=1.5, concentration0=1.0)
-        time_beta = beta_dist.sample((bsize,)).to(device=device, dtype=torch.float32)
+        time_beta = beta_dist.sample((bsize,)).to(device=device, dtype=dtype)
         time = time_beta * 0.999 + 0.001
         return time
 
-    def embed_prefix(
+    def _embed_prefix(
         self, images, img_masks, lang_tokens, lang_masks, state: torch.Tensor = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Embed images with SigLIP and language tokens with embedding layer to prepare
@@ -908,7 +936,7 @@ class VLAFlowMatching(torch.nn.Module):
         att_masks = att_masks.expand(bsize, -1)
         return embs, pad_masks, att_masks
 
-    def embed_suffix(self, noisy_actions, timestep):
+    def _embed_suffix(self, noisy_actions, timestep):
         """Embed state, noisy_actions, timestep to prepare for Expert Gemma processing."""
         embs = []
         pad_masks = []
@@ -966,18 +994,18 @@ class VLAFlowMatching(torch.nn.Module):
     ) -> torch.Tensor:
         """Do a full training forward pass and compute the loss (batch_size x num_steps x num_motors)"""
         if noise is None:
-            noise = self.sample_noise(actions.shape, actions.device)
+            noise = self._sample_noise(actions.shape, actions.device)
 
         if time is None:
-            time = self.sample_time(actions.shape[0], actions.device)
+            time = self._sample_time(actions.shape[0], actions.device)
 
         time_expanded = time[:, None, None]
         x_t = time_expanded * noise + (1 - time_expanded) * actions
         u_t = noise - actions
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self._embed_prefix(
             images, img_masks, lang_tokens, lang_masks, state=state
         )
-        suffix_embs, suffix_pad_masks, suffix_att_masks = self.embed_suffix(x_t, time)
+        suffix_embs, suffix_pad_masks, suffix_att_masks = self._embed_suffix(x_t, time)
 
         pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
         att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
@@ -1003,7 +1031,7 @@ class VLAFlowMatching(torch.nn.Module):
     ) -> torch.Tensor:
         """Do a half inference forward and compute the VLM embedding"""
 
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self._embed_prefix(
             images, img_masks, lang_tokens, lang_masks, state=state
         )
         prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
@@ -1029,9 +1057,9 @@ class VLAFlowMatching(torch.nn.Module):
 
         if noise is None:
             actions_shape = (bsize, self.config.chunk_size, self.config.max_action_dim)
-            noise = self.sample_noise(actions_shape, device)
+            noise = self._sample_noise(actions_shape, device)
 
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self._embed_prefix(
             images, img_masks, lang_tokens, lang_masks, state=state
         )
         prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
@@ -1072,7 +1100,7 @@ class VLAFlowMatching(torch.nn.Module):
         timestep,
     ):
         """Apply one denoising step of the noise `x_t` at a given timestep."""
-        suffix_embs, suffix_pad_masks, suffix_att_masks = self.embed_suffix(
+        suffix_embs, suffix_pad_masks, suffix_att_masks = self._embed_suffix(
             x_t, timestep
         )
 

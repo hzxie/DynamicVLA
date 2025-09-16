@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 #
-# @File:   fastvlm_with_expert.py
+# @File:   modeling_fastvlm.py
 # @Author: Haozhe Xie
 # @Date:   2025-09-10 20:19:11
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-15 16:10:16
+# @Last Modified at: 2025-09-16 18:35:55
 # @Email:  root@haozhexie.com
 
+import copy
 import functools
 import typing
 
@@ -25,11 +26,17 @@ from transformers import (
 )
 from transformers.cache_utils import DynamicCache
 from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
-from transformers.modeling_outputs import BaseModelOutputWithPast
+from transformers.models.smolvlm.modeling_smolvlm import (
+    SmolVLMBaseModelOutputWithPast,
+    SmolVLMCausalLMOutputWithPast,
+)
 from transformers.processing_utils import Unpack
-from transformers.utils import logging
+from transformers.utils import LossKwargs, logging
 
 logger = logging.get_logger(__name__)
+
+
+class KwargsForCausalLM(FlashAttentionKwargs, LossKwargs): ...
 
 
 class FastViTConfig(PretrainedConfig):
@@ -92,7 +99,7 @@ class FastVLMConfig(PretrainedConfig):
         self,
         use_cache=True,
         image_token_id=151_646,
-        tie_word_embeddings=False,
+        tie_word_embeddings=True,
         max_position_embeddings=32768,
         text_config=None,
         vision_config=None,
@@ -122,107 +129,184 @@ class FastVLMConfig(PretrainedConfig):
         self.image_token_id = image_token_id
         self.tie_word_embeddings = tie_word_embeddings
         self.text_config.max_position_embeddings = max_position_embeddings
-        self.text_config.eos_token_id = 151645  # Aligned with apple/FastVLM-0.5B
 
         super().__init__(**kwargs, tie_word_embeddings=tie_word_embeddings)
-
-
-class FastVLMWithExpertModel(torch.nn.Module):
-    def __init__(
-        self,
-        model_id: str = "apple/FastVLM-0.5B",
-        train_expert_only: bool = True,
-        freeze_vision_encoder: bool = False,
-        ve_input_channels: int = 3,
-        num_vlm_layers: int = -1,
-        num_expert_layers: int = -1,
-        inference_mode: bool = False,
-    ) -> None:
-        super().__init__()
-        # Tokenizer initialization
-        self.tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-        self.tokenizer.add_special_tokens({"additional_special_tokens": ["<image>"]})
-        image_token_id = self.tokenizer.convert_tokens_to_ids("<image>")
-        # VLM Configuration
-        model_size = model_id.split("-")[-1]
-        text_config = AutoConfig.from_pretrained(f"Qwen/Qwen2-{model_size}")
-        vision_config = FastViTConfig(
-            in_channels=ve_input_channels,
-            position_embeddings=[
-                None,
-                None,
-                None,
-                {"name": "RepCPE", "spatial_shape": (7, 7)},
-                {"name": "RepCPE", "spatial_shape": (7, 7)},
-            ],
-            inference_mode=inference_mode,
-        )
-        config = FastVLMConfig(
-            image_token_id=image_token_id,
-            text_config=text_config,
-            vision_config=vision_config,
-        )
-        self.vlm = FastVLMForConditionalGeneration(config)
-
-        if num_vlm_layers > 0:
-            print(f"Reducing the number of VLM layers to {num_vlm_layers} ...")
-            self.get_vlm_model().text_model.layers = (
-                self.get_vlm_model().text_model.layers[:num_vlm_layers]
-            )
-
-        self.freeze_vision_encoder = freeze_vision_encoder
-        self.train_expert_only = train_expert_only
-        self._set_requires_grad()
-
-    def _set_requires_grad(self) -> None:
-        if self.freeze_vision_encoder:
-            self.get_vlm_model().vision_model.eval()
-            for params in self.get_vlm_model().vision_model.parameters():
-                params.requires_grad = False
-
-        if self.train_expert_only:
-            self.vlm.eval()
-            for params in self.vlm.parameters():
-                params.requires_grad = False
-        else:
-            pass  # TODO
-
-    def get_vlm_model(self) -> PreTrainedModel:
-        return self.vlm.model
-
-    def train(self, mode: bool = True) -> None:
-        super().train(mode)
-        if self.freeze_vision_encoder:
-            self.get_vlm_model().vision_model.eval()
-        if self.train_expert_only:
-            self.vlm.eval()
-
-    def embed_image(self, image: torch.Tensor):
-        assert len(image.shape) in [
-            4,
-            5,
-        ], f"Image should be [B, C, H, W] or [B, N, C, H, W], got {image.shape}"
-        if len(image.shape) == 4:
-            image = image.unsqueeze(1)  # [B, 1, C, H, W]
-
-        return self.get_vlm_model().get_image_features(image)
-
-    def embed_language_tokens(self, tokens):
-        return self.get_vlm_model().text_model.get_input_embeddings()(tokens)
 
 
 class FastVLMForConditionalGeneration(PreTrainedModel, GenerationMixin):
     def __init__(self, config):
         super().__init__(config)
         self.model = FastVLMModel(config)
-        # self.image_token_id = self.config.image_token_id
-        # self.lm_head = torch.nn.Linear(
-        #     config.text_config.hidden_size, config.text_config.vocab_size, bias=False
-        # )
-        # self.vocab_size = config.text_config.vocab_size
-
+        self.lm_head = torch.nn.Linear(
+            config.text_config.hidden_size, config.text_config.vocab_size, bias=False
+        )
         # Initialize weights and apply final processing
         self.post_init()
+
+    def enable_input_require_grads(self):
+        """
+        Enables the gradients for the input embeddings. This is useful for fine-tuning adapter weights while keeping
+        the model weights fixed.
+        """
+
+        def make_inputs_require_grads(module, input, output):
+            output.requires_grad_(True)
+
+        self._text_require_grads_hook = (
+            self.get_input_embeddings().register_forward_hook(make_inputs_require_grads)
+        )
+        self._vision_require_grads_hook = (
+            self.model.vision_model.get_input_embeddings().register_forward_hook(
+                make_inputs_require_grads
+            )
+        )
+
+    def disable_input_require_grads(self):
+        self._text_require_grads_hook.remove()
+        self._vision_require_grads_hook.remove()
+
+    def get_input_embeddings(self):
+        return self.model.text_model.get_input_embeddings()
+
+    def set_input_embeddings(self, value):
+        self.model.text_model.set_input_embeddings(value)
+
+    def get_output_embeddings(self):
+        return self.lm_head
+
+    def set_output_embeddings(self, new_embeddings):
+        self.lm_head = new_embeddings
+
+    def forward(
+        self,
+        input_ids: typing.Optional[torch.LongTensor] = None,
+        attention_mask: typing.Optional[torch.Tensor] = None,
+        position_ids: typing.Optional[torch.LongTensor] = None,
+        past_key_values: typing.Optional[typing.List[torch.FloatTensor]] = None,
+        inputs_embeds: typing.Optional[torch.FloatTensor] = None,
+        pixel_values: typing.Optional[torch.FloatTensor] = None,
+        pixel_attention_mask: typing.Optional[torch.BoolTensor] = None,
+        image_hidden_states: typing.Optional[torch.FloatTensor] = None,
+        labels: typing.Optional[torch.LongTensor] = None,
+        use_cache: typing.Optional[bool] = None,
+        output_attentions: typing.Optional[bool] = None,
+        output_hidden_states: typing.Optional[bool] = None,
+        cache_position: typing.Optional[torch.LongTensor] = None,
+        return_dict: typing.Optional[bool] = None,
+        logits_to_keep: typing.Union[int, torch.Tensor] = 0,
+        **kwargs: Unpack[KwargsForCausalLM],
+    ) -> typing.Union[typing.Tuple, SmolVLMCausalLMOutputWithPast]:
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
+        )
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
+
+        # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
+        outputs = self.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            pixel_values=pixel_values,
+            pixel_attention_mask=pixel_attention_mask,
+            image_hidden_states=image_hidden_states,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            cache_position=cache_position,
+            return_dict=True,
+            **kwargs,
+        )
+
+        hidden_states = outputs[0]
+        # Only compute necessary logits, and do not upcast them to float if we are not
+        # computing the loss
+        slice_indices = (
+            slice(-logits_to_keep, None)
+            if isinstance(logits_to_keep, int)
+            else logits_to_keep
+        )
+        logits = self.lm_head(hidden_states[:, slice_indices, :])
+
+        loss = None
+        if labels is not None:
+            loss = self.loss_function(
+                logits=logits,
+                labels=labels,
+                vocab_size=self.config.text_config.vocab_size,
+                **kwargs,
+            )
+
+        return SmolVLMCausalLMOutputWithPast(
+            loss=loss,
+            logits=logits,
+            past_key_values=outputs.past_key_values,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+            image_hidden_states=outputs.image_hidden_states,
+        )
+
+    def prepare_inputs_for_generation(
+        self,
+        input_ids,
+        past_key_values=None,
+        attention_mask=None,
+        inputs_embeds=None,
+        cache_position=None,
+        pixel_values=None,
+        pixel_attention_mask=None,
+        image_hidden_states=None,
+        logits_to_keep=None,
+        **kwargs,
+    ):
+        # Overwritten -- there are mutually exclusive inputs (if the logic to make
+        # `image_hidden_states` takeprecedence is moved to the model, we can remove
+        # this fn)
+        model_inputs = super().prepare_inputs_for_generation(
+            input_ids,
+            past_key_values=past_key_values,
+            attention_mask=attention_mask,
+            inputs_embeds=inputs_embeds,
+            cache_position=cache_position,
+            pixel_values=pixel_values,
+            pixel_attention_mask=pixel_attention_mask,
+            image_hidden_states=image_hidden_states,
+            logits_to_keep=logits_to_keep,
+            **kwargs,
+        )
+        # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
+        # but IDEFICS requires both ids and embeds to be present
+        if inputs_embeds is not None and cache_position[0] == 0:
+            model_inputs["input_ids"] = input_ids
+
+        if image_hidden_states is not None:
+            model_inputs["pixel_values"] = None
+            model_inputs["pixel_attention_mask"] = None
+
+        return model_inputs
+
+    def _update_model_kwargs_for_generation(
+        self, outputs, model_kwargs, is_encoder_decoder, **kwargs
+    ):
+        model_kwargs = super()._update_model_kwargs_for_generation(
+            outputs=outputs,
+            model_kwargs=model_kwargs,
+            is_encoder_decoder=is_encoder_decoder,
+            **kwargs,
+        )
+        # Get the precomputed image_hidden_states
+        model_kwargs["image_hidden_states"] = outputs.image_hidden_states
+        return model_kwargs
 
 
 class FastVLMModel(PreTrainedModel):
@@ -328,10 +412,10 @@ class FastVLMModel(PreTrainedModel):
         use_cache: typing.Optional[bool] = None,
         output_attentions: typing.Optional[bool] = None,
         output_hidden_states: typing.Optional[bool] = None,
-        return_dict: typing.Optional[bool] = None,
         cache_position: typing.Optional[torch.LongTensor] = None,
+        return_dict: typing.Optional[bool] = None,
         **kwargs: Unpack[FlashAttentionKwargs],
-    ) -> BaseModelOutputWithPast:
+    ) -> SmolVLMBaseModelOutputWithPast:
         output_attentions = (
             output_attentions
             if output_attentions is not None
@@ -412,11 +496,12 @@ class FastVLMModel(PreTrainedModel):
             cache_position=cache_position,
             **kwargs,
         )
-        return BaseModelOutputWithPast(
+        return SmolVLMBaseModelOutputWithPast(
             last_hidden_state=outputs.last_hidden_state,
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
+            image_hidden_states=image_hidden_states,
         )
 
 
@@ -1021,9 +1106,9 @@ class SEBlock(torch.nn.Module):
         )
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        b, c, h, w = inputs.size()
-        # x = F.avg_pool2d(inputs, kernel_size=[h, w])
-        x = F.avg_pool2d(inputs, kernel_size=[16, 16])
+        _, c, h, w = inputs.size()
+        x = F.avg_pool2d(inputs, kernel_size=[h, w])
+        # x = F.avg_pool2d(inputs, kernel_size=[16, 16])
         x = self.reduce(x)
         x = F.relu(x)
         x = self.expand(x)
