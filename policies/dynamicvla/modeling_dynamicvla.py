@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-17 15:20:46
+# @Last Modified at: 2025-09-17 18:15:34
 # @Email:  root@haozhexie.com
 
 import math
@@ -775,6 +775,8 @@ class VLAFlowMatching(torch.nn.Module):
             vlm_input_channels = 3
         elif config.temporal_fusion == "attn":
             vlm_input_channels = 3 * config.n_obs_steps
+        elif config.temporal_fusion == "flat":
+            vlm_input_channels = 3
         else:
             raise ValueError(f"Unknown temporal_fusion: {config.temporal_fusion}")
 
@@ -884,17 +886,25 @@ class VLAFlowMatching(torch.nn.Module):
         pad_masks = []
         att_masks = []
         for img, img_mask in zip(images, img_masks, strict=False):
-            # Temporal fusion of image frames with Conv2d
+            bsize = img.size(0)
             if self.config.temporal_fusion == "conv":
+                # Temporal fusion of image frames with Conv2d
                 img = self.mults_proj(img)
+            elif self.config.temporal_fusion == "flat":
+                # Flatten temporal dimension into batch dimension
+                img = img.view(-1, 3, img.shape[2], img.shape[3])
 
             img_emb = self.vlm_with_expert.embed_image(img)
-            img_emb_dim = img_emb.shape[-1]
+            img_emb_dim = img_emb.size(-1)
+            if self.config.temporal_fusion == "flat":
+                # Reshape back to (batch_size, n_obs_steps * 3, emb_dim)
+                img_emb = img_emb.view(bsize, -1, img_emb_dim)
+
+            # Normalize image embeddings
             img_emb = img_emb * torch.tensor(
                 img_emb_dim**0.5, dtype=img_emb.dtype, device=img_emb.device
             )
-
-            bsize, num_img_embs = img_emb.shape[:2]
+            num_img_embs = img_emb.size(1)
             img_mask = img_mask[:, None].expand(bsize, num_img_embs)
             embs.append(img_emb)
             pad_masks.append(img_mask)
