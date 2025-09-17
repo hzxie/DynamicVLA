@@ -4,11 +4,11 @@
 # @Author: Haozhe Xie
 # @Date:   2025-09-16 11:23:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-16 19:16:42
+# @Last Modified at: 2025-09-17 15:22:55
 # @Email:  root@haozhexie.com
 
 import copy
-import gc
+import logging
 
 import torch
 from transformers import (
@@ -54,8 +54,9 @@ class VLMWithExpertModel(torch.nn.Module):
         self,
         model_id: str,
         vlm: PreTrainedModel,
-        train_expert_only: bool = True,
-        freeze_vision_encoder: bool = False,
+        freeze_text_model: bool = False,
+        freeze_connector: bool = False,
+        freeze_vision_model: bool = False,
         attention_mode: str = "self_attn",
         num_expert_layers: int = -1,
         num_vlm_layers: int = -1,
@@ -65,16 +66,22 @@ class VLMWithExpertModel(torch.nn.Module):
         super().__init__()
         # Tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(model_id)
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
         # VLM
         self.vlm = vlm
         self.vlm_config = self.vlm.config
+        if hasattr(self.vlm, "lm_head"):
+            del self.vlm.lm_head
         if num_vlm_layers > 0:
-            print(f"Reducing the number of VLM layers to {num_vlm_layers} ...")
-            self.get_vlm_model().text_model.layers = torch.nn.ModuleList(
-                list(self.get_vlm_model().text_model.layers[:num_vlm_layers])
+            logging.info(
+                "Reducing the number of VLM layers from %d to %d ..."
+                % (
+                    len(self.get_vlm_model().text_model.layers),
+                    num_vlm_layers,
+                )
             )
-            gc.collect()
-            torch.cuda.empty_cache()
+            del self.get_vlm_model().text_model.layers[num_vlm_layers:]
 
         self.num_vlm_layers = len(self.get_vlm_model().text_model.layers)
         # Action Expert
@@ -84,7 +91,8 @@ class VLMWithExpertModel(torch.nn.Module):
         self.lm_expert = self._get_expert_model(
             lm_expert_config, attention_mode, self_attn_every_n_layers
         )
-        self.lm_expert.embed_tokens = None
+        if hasattr(self.lm_expert, "embed_tokens"):
+            del self.lm_expert.embed_tokens
 
         self.num_attention_heads = self.vlm_config.text_config.num_attention_heads
         self.num_key_value_heads = self.vlm_config.text_config.num_key_value_heads
@@ -92,11 +100,12 @@ class VLMWithExpertModel(torch.nn.Module):
         self.num_expert_layers = len(self.lm_expert.layers)
         self.self_attn_every_n_layers = self_attn_every_n_layers
 
-        self.freeze_vision_encoder = freeze_vision_encoder
-        self.train_expert_only = train_expert_only
+        self.freeze_vision_model = freeze_vision_model
+        self.freeze_connector = freeze_connector
+        self.freeze_text_model = freeze_text_model
         self.attention_mode = attention_mode
         self.expert_hidden_size = lm_expert_config.hidden_size
-        self.set_requires_grad()
+        self._set_requires_grad()
 
     def _get_expert_config(
         self, text_config: PretrainedConfig, num_layers: int, width_multiplier: float
@@ -107,14 +116,15 @@ class VLMWithExpertModel(torch.nn.Module):
         expert_config.intermediate_size = self._get_intermediate_size(
             expert_config.hidden_size
         )
-
         num_vlm_layers = len(self.get_vlm_model().text_model.layers)
         expert_config.num_hidden_layers = num_vlm_layers
         if num_layers > 0:
             assert (
                 len(num_vlm_layers) % num_layers == 0
-            ), f"Number of layers in the VLM {num_vlm_layers}"
-            f"are not multiple of num_expert_layers {num_layers}"
+            ), "Number of layers in the VLM %d are not multiple of %d " % (
+                num_vlm_layers,
+                num_layers,
+            )
             expert_config.num_hidden_layers = num_layers
 
         return expert_config
@@ -161,48 +171,28 @@ class VLMWithExpertModel(torch.nn.Module):
     def get_vlm_model(self) -> PreTrainedModel:
         return self.vlm.model
 
-    def set_requires_grad(self) -> None:
-        if self.freeze_vision_encoder:
+    def _set_requires_grad(self) -> None:
+        if self.freeze_vision_model:
             self.get_vlm_model().vision_model.eval()
             for params in self.get_vlm_model().vision_model.parameters():
                 params.requires_grad = False
-        if self.train_expert_only:
-            self.vlm.eval()
-            for params in self.vlm.parameters():
+        if self.freeze_text_model:
+            self.get_vlm_model().text_model.eval()
+            for params in self.get_vlm_model().text_model.parameters():
                 params.requires_grad = False
-        else:
-            # To avoid unused params issue with distributed training
-            last_layers = [self.num_vlm_layers - 1]
-            if (
-                self.num_vlm_layers != self.num_expert_layers
-                and self.num_vlm_layers % self.num_expert_layers == 0
-            ):
-                last_layers.append(self.num_vlm_layers - 2)
-
-            frozen_layers = [
-                "lm_head",
-                "text_model.model.norm.weight",
-            ]
-            for layer in last_layers:
-                frozen_layers.append(f"text_model.model.layers.{layer}.")
-
-            for name, params in self.vlm.named_parameters():
-                if any(k in name for k in frozen_layers):
-                    params.requires_grad = False
-
-        # To avoid unused params issue with distributed training
-        for name, params in self.lm_expert.named_parameters():
-            if "lm_head" in name:
+        if self.freeze_connector:
+            self.get_vlm_model().connector.eval()
+            for params in self.get_vlm_model().connector.parameters():
                 params.requires_grad = False
 
     def train(self, mode: bool = True) -> None:
         super().train(mode)
-
-        if self.freeze_vision_encoder:
+        if self.freeze_vision_model:
             self.get_vlm_model().vision_model.eval()
-
-        if self.train_expert_only:
-            self.vlm.eval()
+        if self.freeze_connector:
+            self.get_vlm_model().connector.eval()
+        if self.freeze_text_model:
+            self.get_vlm_model().text_model.eval()
 
     def embed_image(self, image: torch.Tensor) -> torch.Tensor:
         assert len(image.shape) in [

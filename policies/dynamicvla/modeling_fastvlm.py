@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-09-10 20:19:11
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-16 18:35:55
+# @Last Modified at: 2025-09-17 14:41:46
 # @Email:  root@haozhexie.com
 
 import copy
@@ -15,14 +15,12 @@ import torch
 import torch.nn.functional as F
 from timm.layers import DropPath, SqueezeExcite
 from transformers import (
-    AutoConfig,
     AutoModel,
-    AutoTokenizer,
     GenerationMixin,
     PretrainedConfig,
     PreTrainedModel,
-    Qwen2Config,
-    Qwen2Model,
+    LlamaConfig,
+    LlamaModel,
 )
 from transformers.cache_utils import DynamicCache
 from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
@@ -93,16 +91,17 @@ class FastViTConfig(PretrainedConfig):
 class FastVLMConfig(PretrainedConfig):
 
     model_type = "fastvlm"
-    sub_configs = {"text_config": Qwen2Config, "vision_config": FastViTConfig}
+    sub_configs = {"text_config": LlamaConfig, "vision_config": FastViTConfig}
 
     def __init__(
         self,
         use_cache=True,
-        image_token_id=151_646,
-        tie_word_embeddings=True,
-        max_position_embeddings=32768,
+        tie_word_embeddings=False,
+        max_position_embeddings=None,
         text_config=None,
         vision_config=None,
+        image_token_id=128_257,
+        pad_token_id=128_002,
         **kwargs,
     ) -> None:
         # ViTConfig
@@ -115,12 +114,12 @@ class FastVLMConfig(PretrainedConfig):
         else:
             raise ValueError("No valid vision_config is provided.")
 
-        # Qwen2Config
+        # LlamaConfig
         if text_config is None:
-            self.text_config = Qwen2Config()
+            self.text_config = LlamaConfig()
         elif isinstance(text_config, dict):
-            self.text_config = Qwen2Config(**text_config)
-        elif isinstance(text_config, Qwen2Config):
+            self.text_config = LlamaConfig(**text_config)
+        elif isinstance(text_config, LlamaConfig):
             self.text_config = text_config
         else:
             raise ValueError("No valid text_config is provided.")
@@ -128,18 +127,53 @@ class FastVLMConfig(PretrainedConfig):
         self.use_cache = use_cache
         self.image_token_id = image_token_id
         self.tie_word_embeddings = tie_word_embeddings
-        self.text_config.max_position_embeddings = max_position_embeddings
+        if max_position_embeddings is not None:
+            self.text_config.max_position_embeddings = max_position_embeddings
 
-        super().__init__(**kwargs, tie_word_embeddings=tie_word_embeddings)
+        super().__init__(
+            **kwargs, pad_token_id=pad_token_id, tie_word_embeddings=tie_word_embeddings
+        )
 
 
-class FastVLMForConditionalGeneration(PreTrainedModel, GenerationMixin):
+class FastVLMPreTrainedModel(PreTrainedModel):
+    config_class = FastVLMConfig
+    base_model_prefix = "model"
+    supports_gradient_checkpointing = True
+    _skip_keys_device_placement = "past_key_values"
+    _supports_flash_attn_2 = True
+    _supports_sdpa = True
+    _supports_flex_attn = True
+    _supports_cache_class = True
+    _supports_attention_backend = True
+
+    def _init_weights(self, module):
+        std = getattr(
+            self.config,
+            "initializer_range",
+            self.config.get_text_config().initializer_range,
+        )
+
+        if isinstance(module, (torch.nn.Linear, torch.nn.Conv2d)):
+            module.weight.data.normal_(mean=0.0, std=std)
+            if module.bias is not None:
+                module.bias.data.zero_()
+        elif isinstance(module, torch.nn.Embedding):
+            module.weight.data.normal_(mean=0.0, std=std)
+            if module.padding_idx is not None:
+                module.weight.data[module.padding_idx].zero_()
+        elif isinstance(module, torch.nn.LayerNorm):
+            module.weight.data.fill_(1.0)
+            module.bias.data.zero_()
+
+
+class FastVLMForConditionalGeneration(FastVLMPreTrainedModel, GenerationMixin):
     def __init__(self, config):
         super().__init__(config)
         self.model = FastVLMModel(config)
         self.lm_head = torch.nn.Linear(
             config.text_config.hidden_size, config.text_config.vocab_size, bias=False
         )
+        self.vocab_size = config.text_config.vocab_size
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -309,12 +343,12 @@ class FastVLMForConditionalGeneration(PreTrainedModel, GenerationMixin):
         return model_kwargs
 
 
-class FastVLMModel(PreTrainedModel):
+class FastVLMModel(FastVLMPreTrainedModel):
     def __init__(self, config: FastVLMConfig) -> None:
         super().__init__(config)
         self.vision_model = FastViT(config.vision_config)
         self.connector = FastVLMConnector(config)
-        self.text_model: Qwen2Model = AutoModel.from_config(config.text_config)
+        self.text_model: LlamaModel = AutoModel.from_config(config.text_config)
         self.post_init()
 
     def enable_input_require_grads(self):

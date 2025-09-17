@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-02 15:14:44
+# @Last Modified at: 2025-09-17 14:30:19
 # @Email:  root@haozhexie.com
 
 import json
@@ -12,10 +12,13 @@ import logging
 import os
 import pathlib
 
+import draccus
 import easydict
 import numpy as np
+import safetensors.torch
 import scipy.spatial.transform
 import torch
+from huggingface_hub.constants import CONFIG_NAME, SAFETENSORS_SINGLE_FILE
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.types import FeatureType, PolicyFeature
 from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
@@ -54,15 +57,17 @@ def get_formatted_big_number(num: int, precision: int = 0) -> str:
 
 
 def save_checkpoint(cfg: dict, policy: PreTrainedPolicy, save_dir: str, epoch: int):
-    policy.module.save_pretrained(save_dir)
-    # Append additional information to config.json
-    model_cfg_path = os.path.join(save_dir, "config.json")
-    with open(model_cfg_path, "r") as fp:
-        model_cfg = json.load(fp)
-    with open(model_cfg_path, "w") as fp:
-        model_cfg["delta_timestamps"] = cfg.DATASET.DELTA_TIMESTAMPS
-        model_cfg["epoch"] = epoch
-        json.dump(model_cfg, fp, indent=2, sort_keys=False)
+    # policy.module.save_pretrained(save_dir, safe_serialization=True)
+    safetensors.torch.save_file(
+        {k: v.contiguous() for k, v in policy.module.state_dict().items()},
+        os.path.join(save_dir, SAFETENSORS_SINGLE_FILE),
+    )
+
+    with open(os.path.join(save_dir, CONFIG_NAME), "w") as f:
+        policy_cfg = draccus.encode(policy.module.config)
+        policy_cfg["delta_timestamps"] = cfg.DATASET.DELTA_TIMESTAMPS
+        policy_cfg["epoch"] = epoch
+        json.dump(policy_cfg, f, indent=4)
 
 
 def get_rotation_vector(quat, format="quat", scalar_first=True):

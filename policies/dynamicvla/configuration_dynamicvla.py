@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:22:31
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-12 14:47:22
+# @Last Modified at: 2025-09-17 14:54:37
 # @Email:  root@haozhexie.com
 
 from dataclasses import dataclass, field
@@ -58,8 +58,9 @@ class DynamicVLAConfig(PreTrainedConfig):
     # Attention utils
     use_cache: bool = True
     # Finetuning settings
-    freeze_vision_encoder: bool = True
-    train_expert_only: bool = True
+    freeze_vision_model: bool = True
+    freeze_connector: bool = True
+    freeze_text_model: bool = True
     train_state_proj: bool = True
     # Training presets
     optimizer_lr: float = 1e-4
@@ -80,12 +81,12 @@ class DynamicVLAConfig(PreTrainedConfig):
     vlm_model_name: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
     num_vlm_layers: int = 16
     # SmolVLM Settings
-    smol_vis_enc_patch_size: int = 16
-    smol_vis_enc_attention_heads: int = 12
-    smol_vis_enc_hidden_size: int = 768
-    smol_vis_enc_intermediate_size: int = 3072
+    smolvlm_patch_size: int = 16
+    smolvlm_attention_heads: int = 12
+    smolvlm_hidden_size: int = 768
+    smolvlm_intermediate_size: int = 3072
     # FastVLM Settings
-    fastvlm_inference_mode: bool = False
+    fastvlm_inference_mode: bool = True
     # Interleave SA layers each self_attn_every_n_layers
     self_attn_every_n_layers: int = 2
     # The action expert hidden size (wrt to the VLM)

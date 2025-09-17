@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-16 18:54:40
+# @Last Modified at: 2025-09-17 15:20:46
 # @Email:  root@haozhexie.com
 
 import math
@@ -117,7 +117,6 @@ def load_dynamicvla(
     state_dict = {k: v for k, v in state_dict.items() if not k.startswith(norm_keys)}
 
     missing, unexpected = model.load_state_dict(state_dict, strict=False)
-
     if not all(key.startswith(norm_keys) for key in missing) or unexpected:
         raise RuntimeError(
             "DynamicVLA %d missing / %d unexpected keys",
@@ -803,23 +802,26 @@ class VLAFlowMatching(torch.nn.Module):
         self._set_requires_grad()
 
     def _get_vlm_with_expert(
-        self, config: DynamicVLAConfig, vlm_model_name: str, vlm_input_channels: int
+        self,
+        config: DynamicVLAConfig,
+        vlm_model_name: str,
+        vlm_input_channels: int,
     ):
         vlm_config = AutoConfig.from_pretrained(vlm_model_name)
 
         if vlm_model_name.startswith("HuggingFaceTB/SmolVLM2"):
             vlm_config = AutoConfig.from_pretrained(vlm_model_name)
             vlm_config.vision_config.num_channels = vlm_input_channels
-            vlm_config.vision_config.patch_size = config.smol_vis_enc_patch_size
+            vlm_config.vision_config.patch_size = config.smolvlm_patch_size
             vlm_config.vision_config.num_attention_heads = (
-                config.smol_vis_enc_attention_heads
+                config.smolvlm_attention_heads
             )
-            vlm_config.vision_config.hidden_size = config.smol_vis_enc_hidden_size
+            vlm_config.vision_config.hidden_size = config.smolvlm_hidden_size
             vlm_config.vision_config.intermediate_size = (
-                config.smol_vis_enc_intermediate_size
+                config.smolvlm_intermediate_size
             )
             vlm = SmolVLMForConditionalGeneration(config=vlm_config)
-        elif vlm_model_name.startswith("Qwen/Qwen2"):
+        elif vlm_model_name.startswith("HuggingFaceTB/SmolLM2-360M"):
             text_config = AutoConfig.from_pretrained(vlm_model_name)
             vision_config = FastViTConfig(
                 in_channels=vlm_input_channels,
@@ -843,8 +845,9 @@ class VLAFlowMatching(torch.nn.Module):
         return VLMWithExpertModel(
             model_id=config.vlm_model_name,
             vlm=vlm,
-            freeze_vision_encoder=config.freeze_vision_encoder,
-            train_expert_only=config.train_expert_only,
+            freeze_vision_model=config.freeze_vision_model,
+            freeze_connector=config.freeze_connector,
+            freeze_text_model=config.freeze_text_model,
             num_vlm_layers=self.config.num_vlm_layers,
             num_expert_layers=config.num_expert_layers,
             self_attn_every_n_layers=self.config.self_attn_every_n_layers,
