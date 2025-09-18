@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-08 15:04:04
+# @Last Modified at: 2025-09-18 11:35:39
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -535,7 +535,12 @@ def main(simulation_app, args):
                         ),
                         episode_file_path,
                     )
-                # TODO: Wait for VLA client to acknowledge the end of this episode
+                # Wait for VLA client to acknowledge the end of this episode
+                logging.info("VLA client ACK pending...")
+                action = get_latest_action(act_socket)
+                while action is None or "ack" not in action:
+                    time.sleep(1)
+                    action = get_latest_action(act_socket)
 
             # Calcuate the success rate for this env
             success_rates[env_name] /= n_tests

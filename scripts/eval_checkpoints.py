@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-01 07:40:13
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-16 12:07:24
+# @Last Modified at: 2025-09-18 13:37:03
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -64,6 +64,7 @@ def test_checkpoint(
     work_dir,
     rotation,
     use_delta_action,
+    streaming,
     host,
     img_port,
     act_port,
@@ -91,6 +92,8 @@ def test_checkpoint(
     # fmt: on
     if use_delta_action:
         args.append("-d")
+    if streaming:
+        args.append("-s")
 
     test_results = None
     try:
@@ -132,6 +135,7 @@ def main(
     ckpt_pattern,
     rotation,
     use_delta_action,
+    streaming,
     host,
     img_port,
     act_port,
@@ -168,6 +172,7 @@ def main(
                 work_dir,
                 rotation,
                 use_delta_action,
+                streaming,
                 host,
                 img_port,
                 act_port,
@@ -215,6 +220,11 @@ if __name__ == "__main__":
         action="store_true",
     )
     parser.add_argument(
+        "-s",
+        "--streaming",
+        action="store_true",
+    )
+    parser.add_argument(
         "--log_dir",
         type=str,
         default=os.path.join(os.path.dirname(__file__), os.path.pardir, "runs", "logs"),
@@ -247,6 +257,7 @@ if __name__ == "__main__":
         args.ckpt_pattern,
         args.rotation,
         args.delta,
+        args.streaming,
         args.host,
         args.img_port,
         args.act_port,

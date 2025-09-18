@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-09 15:22:02
+# @Last Modified at: 2025-09-18 13:34:59
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -172,6 +172,8 @@ def run_tests(
                     len(observation["actions"]),
                 )
             )
+            # Send ack to the server
+            act_socket.send_pyobj({"ack": n_tests}, flags=zmq.NOBLOCK)
             continue
 
         if "task" in observation:
@@ -190,7 +192,6 @@ def run_tests(
         elif instruction is not None:
             observation["task"] = instruction
         else:
-            print("Never reach here?")
             continue
 
         observations.append(observation)
@@ -258,7 +259,7 @@ def _get_observations(observations, delta_timestamps):
 
 
 def _get_action(vla_model, observations, rotation, use_delta_action, debug=False):
-    N_DUMMY_STEPS = 2
+    N_DUMMY_STEPS = 3
     _count = getattr(_get_action, "count", -N_DUMMY_STEPS)
     _state = getattr(_get_action, "state", None)
     for ifk in vla_model.config.input_features.keys():
@@ -283,6 +284,7 @@ def _get_action(vla_model, observations, rotation, use_delta_action, debug=False
     if index is not None:
         observations["index"] = index
 
+    # print(observations["index"], _count)
     # Update the state every chunk_size steps
     if _count % vla_model.config.n_action_steps == 0:
         _state = observations["observation.state"][:, -1, :].cpu().numpy()
@@ -292,7 +294,6 @@ def _get_action(vla_model, observations, rotation, use_delta_action, debug=False
             states.append(_state)
             setattr(_get_action, "states", states)
 
-    print(index, _count, device)
     action = vla_model.select_action(observations).cpu().numpy()
     # If the model does not support delta action, we manually convert it here
     if not hasattr(vla_model.config, "use_delta_action") and use_delta_action:
