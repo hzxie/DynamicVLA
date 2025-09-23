@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-04 10:36:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-19 21:01:59
+# @Last Modified at: 2025-09-23 20:11:51
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -48,13 +48,21 @@ def _get_collider_type(category):
     return COLLIDERS[category]
 
 
-def create_dummy_collider(curr_stage, prim_path, category):
+def create_approximate_collider(curr_stage, prim_path, category):
     import isaacsim.core.utils.prims as prim_utils
     from pxr import UsdGeom, UsdPhysics
 
     prim_utils.create_prim(prim_path, prim_type=_get_collider_type(category))
     UsdPhysics.CollisionAPI.Apply(curr_stage.GetPrimAtPath(prim_path))
     UsdGeom.Imageable(curr_stage.GetPrimAtPath(prim_path)).MakeInvisible()
+
+
+def create_mesh_collider(curr_stage, prim_path):
+    from pxr import UsdPhysics
+
+    prim = curr_stage.GetPrimAtPath(prim_path)
+    assert prim.GetTypeName() == "Mesh"
+    UsdPhysics.CollisionAPI.Apply(prim)
 
 
 def reset_object_material(prim):
@@ -67,9 +75,11 @@ def reset_object_material(prim):
     shader.GetInput("useSpecularWorkflow").Set(0)
 
 
-def main(input_dir, output_dir):
+def main(input_dir, output_dir, approximate_collider):
     import isaacsim.core.utils.stage as stage_utils
 
+    GEO_PATH = "/Object/geometry"
+    COL_PATH = "/Object/collider"
     usd_files = [f for f in os.listdir(input_dir) if f.endswith(".usd")]
     for uf in tqdm(usd_files):
         input_file = os.path.join(input_dir, uf)
@@ -79,8 +89,12 @@ def main(input_dir, output_dir):
         stage_utils.create_new_stage()
         stage = stage_utils.get_current_stage()
         create_object_usd(stage, "/Object")
-        create_asset_prim(stage, "/Object/geometry", input_file)
-        create_dummy_collider(stage, "/Object/collider", category)
+        create_asset_prim(stage, GEO_PATH, input_file)
+        if approximate_collider:
+            create_approximate_collider(stage, COL_PATH, category)
+        else:
+            create_mesh_collider(stage, GEO_PATH)
+
         reset_object_material(stage.GetPrimAtPath("/Object/geometry/mtl/material_0"))
 
         # Remove external references
@@ -103,7 +117,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "objects")
     )
+    parser.add_argument("--approximate-collider", action="store_true")
     args = parser.parse_args()
 
-    main(args.input_dir, args.output_dir)
+    main(args.input_dir, args.output_dir, args.approximate_collider)
     app.close()
