@@ -47,19 +47,19 @@ tasks:
   pick:
     sm: "state_machines.pick_sm.PickStateMachine"
     done_term: "object_picked"
-    episode_length: 5
+    episode_length: 10
   place:
     sm: "state_machines.place_sm.PlaceStateMachine"
-    episode_length: 10
+    episode_length: 20
 
 robots:
   franka:
-    rest_pose: [0.465906, 0.0, 0.382970, 0.008583, 0.921765, 0.020404, 0.387116]
+    init_pose: [0.465906, 0.0, 0.382970, 0.008583, 0.921765, 0.020404, 0.387116]
     final_pose: [0.3, 0, 0.3, -1, 0, 0, 0]
     gripper_length: 0.045
     max_reach_dist: 0.75
   piper:
-    rest_pose: [0.373, 0.0, 0.271, 0.0, 0.9739, 0.0, 0.227]
+    init_pose: [0.373, 0.0, 0.271, 0.0, 0.9739, 0.0, 0.227]
     final_pose: [0.373, 0.0, 0.271, -1, 0, 0, 0]
     gripper_length: 0.09
     max_reach_dist: 0.55

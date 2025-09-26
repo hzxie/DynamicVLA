@@ -1,10 +1,19 @@
 # -*- coding: utf-8 -*-
 #
 # @File:   pick_sm.py
+# @Author: Haozhe Xie
+# @Date:   2025-09-26 11:07:21
+# @Last Modified by: Haozhe Xie
+# @Last Modified at: 2025-09-26 20:35:28
+# @Email:  root@haozhexie.com
+
+# -*- coding: utf-8 -*-
+#
+# @File:   pick_sm.py
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-26 17:07:41
+# @Last Modified at: 2025-09-26 20:35:28
 # @Email:  root@haozhexie.com
 
 import collections
@@ -27,18 +36,20 @@ class GripperState:
 class PickSmState:
     """States for the pick state machine."""
 
-    REST = wp.constant(0)
-    APPROACH_ABOVE_OBJECT = wp.constant(1)
-    APPROACH_OBJECT = wp.constant(2)
-    GRASP_OBJECT = wp.constant(3)
-    LIFT_OBJECT = wp.constant(4)
-    TO_TARGET = wp.constant(5)
+    INIT = wp.constant(0)
+    RESET = wp.constant(1)
+    APPROACH_ABOVE_OBJECT = wp.constant(2)
+    APPROACH_OBJECT = wp.constant(3)
+    GRASP_OBJECT = wp.constant(4)
+    LIFT_OBJECT = wp.constant(5)
+    TO_TARGET = wp.constant(6)
 
 
 class PickSmWaitTime:
     """Additional wait times (in s) for states for before switching."""
 
-    REST = wp.constant(0.08)
+    INIT = wp.constant(0.28)
+    RESET = wp.constant(0.08)
     APPROACH_ABOVE_OBJECT = wp.constant(0.4)
     APPROACH_OBJECT = wp.constant(0.72)
     GRASP_OBJECT = wp.constant(0.72)
@@ -54,19 +65,20 @@ class PickStateMachine:
     end-effector and the gripper. The state machine is implemented as a finite state
     machine with the following states:
 
-    1. REST: The robot is at rest.
-    2. APPROACH_ABOVE_OBJECT: The robot moves above the position.
-    3. APPROACH_OBJECT: The robot moves to the position.
-    4. GRASP_OBJECT: The robot grasps the object.
-    5. LIFT_OBJECT: The robot lifts the object to a height.
-    6. TO_TARGET: The robot moves the object to the desired pose. This is the final state.
+    1. INIT: The robot moves to the initial position.
+    2. RESET:
+    3. APPROACH_ABOVE_OBJECT: The robot moves above the position.
+    4. APPROACH_OBJECT: The robot moves to the position.
+    5. GRASP_OBJECT: The robot grasps the object.
+    6. LIFT_OBJECT: The robot lifts the object to a height.
+    7. TO_TARGET: The robot moves the object to the desired pose. This is the final state.
     """
 
     def __init__(
         self,
         dt: float,
         num_envs: int,
-        rest_pose: torch.tensor,
+        init_pose: torch.tensor,
         final_pose: torch.tensor,
         max_reach_dist: float,
         grasp_dist_thres: float = 0.01,
@@ -89,7 +101,7 @@ class PickStateMachine:
         self.num_envs = num_envs
         self.device = device
         # initialize state machine
-        self.rest_pose = rest_pose[:, [0, 1, 2, 4, 5, 6, 3]].repeat(num_envs, 1)
+        self.init_pose = init_pose[:, [0, 1, 2, 4, 5, 6, 3]].repeat(num_envs, 1)
         self.sm_dt = torch.full((num_envs,), dt, device=device)
         self.sm_state = torch.full((num_envs,), 0, dtype=torch.int32, device=device)
         self.sm_wait_time = torch.zeros((num_envs,), device=device)
@@ -122,7 +134,7 @@ class PickStateMachine:
         self.des_ee_pose_wp = wp.from_torch(self.des_ee_pose, wp.transform)
         self.des_gripper_state_wp = wp.from_torch(self.des_gripper_state, wp.float32)
         self.offset_wp = wp.from_torch(self.offset, wp.transform)
-        self.rest_pose_wp = wp.from_torch(self.rest_pose, wp.transform)
+        self.init_pose_wp = wp.from_torch(self.init_pose, wp.transform)
 
     def reset_idx(self, env_ids: collections.abc.Sequence[int] = None):
         if env_ids is None:
@@ -289,7 +301,7 @@ class PickStateMachine:
                 object_pose_wp,
                 object_vel_wp,
                 ee_pose_wp,
-                self.rest_pose_wp,
+                self.init_pose_wp,
                 final_object_pose_wp,
                 pose_angle_wp,
                 self.des_ee_pose_wp,
@@ -341,44 +353,6 @@ def is_offset_below_threshold(
         return offset[2] <= threshold[2]
 
 
-@wp.func
-def print_debug_information(
-    offset_object_ee: wp.vec3,
-    object_pose: wp.transform,
-    object_vel: wp.vec3,
-    ee_pose: wp.transform,
-    grasp_pose: wp.transform,
-):
-    wp.printf(
-        "Offset = [%.4f, %.4f, %.4f] / %.4f, ",
-        offset_object_ee[0],
-        offset_object_ee[1],
-        offset_object_ee[2],
-        get_length(offset_object_ee),
-    )
-    wp.printf(
-        "Object Pos [%.4f %.4f %.4f] Vel [%.4f %.4f %.4f], ",
-        object_pose[0],
-        object_pose[1],
-        object_pose[2],
-        object_vel[0],
-        object_vel[1],
-        object_vel[2],
-    )
-    wp.printf(
-        "EEF Pos [%.4f %.4f %.4f], ",
-        ee_pose[0],
-        ee_pose[1],
-        ee_pose[2],
-    )
-    wp.printf(
-        "Grasp Pos [%.4f %.4f %.4f], ",
-        grasp_pose[0],
-        grasp_pose[1],
-        grasp_pose[2],
-    )
-
-
 @wp.kernel
 def infer_state_machine(
     dt: wp.array(dtype=float),
@@ -388,42 +362,43 @@ def infer_state_machine(
     object_pose: wp.array(dtype=wp.transform),
     object_vel: wp.array(dtype=wp.vec3),
     ee_pose: wp.array(dtype=wp.transform),
-    rest_pose: wp.array(dtype=wp.transform),
+    init_pose: wp.array(dtype=wp.transform),
     final_object_pose: wp.array(dtype=wp.transform),
     pose_angle: wp.array(dtype=float),
     des_ee_pose: wp.array(dtype=wp.transform),
     gripper_state: wp.array(dtype=float),
     offset: wp.array(dtype=wp.transform),
-    max_reach_disthold: float,  # the object is reachable
+    max_reach_dist: float,  # the object is reachable
     grasp_dist_threshold: float,  # the object is graspable
     grasp_pose_threshold: float,  # the ee pose is aligned with object
     object_dist_threshold: float,  # the object to be considered grasped
 ):
-    # retrieve thread id
+    debug = True
     tid = wp.tid()
-    # retrieve state machine state
     state = sm_state[tid]
+
     # decide next state
-    if state == PickSmState.REST:
-        wp.printf(
-            "REST EEF Pose [%.4f %.4f %.4f %.4f %.4f %.4f %.4f]\n",
-            ee_pose[tid][0],
-            ee_pose[tid][1],
-            ee_pose[tid][2],
-            ee_pose[tid][3],
-            ee_pose[tid][4],
-            ee_pose[tid][5],
-            ee_pose[tid][6],
-        )
+    if state == PickSmState.INIT:
         gripper_state[tid] = GripperState.OPEN
-        des_ee_pose[tid] = rest_pose[tid]
-        dist_object_robot = get_length(wp.transform_get_translation(grasp_pose[tid]))
-        if (
-            sm_wait_time[tid] >= PickSmWaitTime.REST
-            and dist_object_robot < max_reach_disthold
-        ):
+        des_ee_pose[tid] = init_pose[tid]
+        dist_eef_obj = get_length(wp.transform_get_translation(grasp_pose[tid]))
+        if sm_wait_time[tid] >= PickSmWaitTime.INIT and dist_eef_obj < max_reach_dist:
             sm_state[tid] = PickSmState.APPROACH_ABOVE_OBJECT
             sm_wait_time[tid] = 0.0
+        if debug:
+            print("INIT")
+    elif state == PickSmState.RESET:
+        gripper_state[tid] = GripperState.OPEN
+        dist_eef_obj = get_length(wp.transform_get_translation(grasp_pose[tid]))
+        if dist_eef_obj > max_reach_dist:
+            des_ee_pose[tid] = final_object_pose[tid]
+        else:
+            des_ee_pose[tid] = wp.transform_multiply(offset[tid], grasp_pose[tid])
+            if sm_wait_time[tid] >= PickSmWaitTime.RESET:
+                sm_state[tid] = PickSmState.APPROACH_ABOVE_OBJECT
+                sm_wait_time[tid] = 0.0
+        if debug:
+            print("RESET")
     elif state == PickSmState.APPROACH_ABOVE_OBJECT:
         gripper_state[tid] = GripperState.OPEN
         des_ee_pose[tid] = wp.transform_multiply(offset[tid], grasp_pose[tid])
@@ -436,25 +411,9 @@ def infer_state_machine(
             wp.transform_get_translation(ee_pose[tid]),
             wp.transform_get_translation(object_pose[tid]),
         )
-        dist_object_robot = get_length(wp.transform_get_translation(grasp_pose[tid]))
-        # Debug information
-        wp.printf("APPROACH_ABOVE ")
-        print_debug_information(
-            offset_object_ee,
-            object_pose[tid],
-            object_vel[tid],
-            ee_pose[tid],
-            grasp_pose[tid],
-        )
-        wp.printf(
-            "thres: [%.4f, %.4f, %.4f]\n",
-            thres_object_ee[0],
-            thres_object_ee[1],
-            thres_object_ee[2],
-        )
-        # check if the object is reachable
-        if dist_object_robot >= max_reach_disthold:
-            sm_state[tid] = PickSmState.REST
+        dist_eef_obj = get_length(wp.transform_get_translation(grasp_pose[tid]))
+        if dist_eef_obj >= max_reach_dist:
+            sm_state[tid] = PickSmState.RESET
             sm_wait_time[tid] = 0.0
         elif (
             is_offset_below_threshold(
@@ -465,54 +424,52 @@ def infer_state_machine(
             if sm_wait_time[tid] >= PickSmWaitTime.APPROACH_ABOVE_OBJECT:
                 sm_state[tid] = PickSmState.APPROACH_OBJECT
                 sm_wait_time[tid] = 0.0
-
+        if debug:
+            print("APPROACH_ABOVE_OBJECT")
     elif state == PickSmState.APPROACH_OBJECT:
         gripper_state[tid] = GripperState.OPEN
         des_ee_pose[tid] = grasp_pose[tid]
-
-        # Debug information
-        print("APPROACH_OBJECT")
         if sm_wait_time[tid] >= PickSmWaitTime.APPROACH_OBJECT:
             sm_state[tid] = PickSmState.GRASP_OBJECT
             sm_wait_time[tid] = 0.0
-
+        if debug:
+            print("APPROACH_OBJECT")
     elif state == PickSmState.GRASP_OBJECT:
-        print("GRASP_OBJECT")
         gripper_state[tid] = GripperState.CLOSE
         if sm_wait_time[tid] >= PickSmWaitTime.GRASP_OBJECT:
             sm_state[tid] = PickSmState.LIFT_OBJECT
             sm_wait_time[tid] = 0.0
-
+        if debug:
+            print("GRASP_OBJECT")
     elif state == PickSmState.LIFT_OBJECT:
-        print("LIFT_OBJECT")
-        # lift the object away from the desktop
         gripper_state[tid] = GripperState.CLOSE
         des_ee_pose[tid] = wp.transform_multiply(offset[tid], object_pose[tid])
         if sm_wait_time[tid] >= PickSmWaitTime.LIFT_OBJECT:
             sm_state[tid] = PickSmState.TO_TARGET
             sm_wait_time[tid] = 0.0
-
+        if debug:
+            print("LIFT_OBJECT")
     elif state == PickSmState.TO_TARGET:
         des_ee_pose[tid] = final_object_pose[tid]
         gripper_state[tid] = GripperState.CLOSE
-
         dist_ee_object = get_length(
             wp.transform_get_translation(ee_pose[tid])
             - wp.transform_get_translation(object_pose[tid])
         )
-        wp.printf(
-            "TO_TARGET: obj: [%.4f, %.4f, %.4f] ee: [%.4f, %.4f, %.4f], dist: %.4f\n",
-            object_pose[tid][0],
-            object_pose[tid][1],
-            object_pose[tid][2],
-            ee_pose[tid][0],
-            ee_pose[tid][1],
-            ee_pose[tid][2],
-            dist_ee_object,
-        )
         if dist_ee_object > object_dist_threshold:
-            sm_state[tid] = PickSmState.REST
+            sm_state[tid] = PickSmState.RESET
             sm_wait_time[tid] = 0.0
+        if debug:
+            wp.printf(
+                "TO_TARGET: obj: [%.4f, %.4f, %.4f] ee: [%.4f, %.4f, %.4f], dist: %.4f\n",
+                object_pose[tid][0],
+                object_pose[tid][1],
+                object_pose[tid][2],
+                ee_pose[tid][0],
+                ee_pose[tid][1],
+                ee_pose[tid][2],
+                dist_ee_object,
+            )
 
     # increment wait time
     sm_wait_time[tid] = sm_wait_time[tid] + dt[tid]
