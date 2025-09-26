@@ -24,12 +24,12 @@ from lerobot.utils.utils import get_safe_dtype
 from transformers import AutoConfig, SmolVLMForConditionalGeneration
 
 from policies.dynamicvla.configuration_dynamicvla import DynamicVLAConfig
-from policies.dynamicvla.modeling_vlm_with_expert import VLMWithExpertModel
 from policies.dynamicvla.modeling_fastvlm import (
     FastViTConfig,
     FastVLMConfig,
     FastVLMForConditionalGeneration,
 )
+from policies.dynamicvla.modeling_vlm_with_expert import VLMWithExpertModel
 
 # Matches ".soNNN", optionally followed by "-something", up to the "_buffer_" marker
 _VARIANT_RE = re.compile(r"\.so\d+(?:-[\w]+)?_buffer_")

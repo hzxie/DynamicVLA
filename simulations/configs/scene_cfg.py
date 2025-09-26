@@ -206,7 +206,9 @@ def get_table_assets(scene_asset_usd_file: str, cameras: list[dict]) -> list:
             )
             long_side_anchors = [a for a in table_anchors if a["side"] == "long"]
             if len(long_side_anchors) > 0:
-                bbox.SetMax(pxr.Gf.Vec3d(bbox.max[0], bbox.max[1], table_height))  # Replace table height values in bbox
+                bbox.SetMax(
+                    pxr.Gf.Vec3d(bbox.max[0], bbox.max[1], table_height)
+                )  # Replace table height values in bbox
                 tables.append(
                     {"name": prim.GetName(), "anchors": table_anchors, "bbox": bbox}
                 )

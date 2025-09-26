@@ -10,14 +10,17 @@ scene:
       rotation: [-90, 0, 180]
       # quat: [0, 0, 0.70710678, 0.70710678]
       prim_path: "/Robot/SideCamera"
-  target_object:
+  containers:
+    n_containers: 1
+    categories:
+      - bowl
+  objects:
+    n_objects: 1
+    prob_rnd_quat: 0.85
+    prob_static: 0.5
+    moving_time: [0.5, 2.0]
     categories:
       - can
-    moving_time: [0.5, 2.0]
-  other_objects:
-    n_objects: 0
-    categories:
-      - apple
 
 camera:
   width: 480

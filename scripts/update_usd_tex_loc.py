@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-05 10:12:39
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-20 06:50:20
+# @Last Modified at: 2025-09-23 19:11:52
 # @Email:  root@haozhexie.com
 
 
@@ -46,9 +46,9 @@ def update_texture_location(usd_file_path, old_texture_dir, new_texture_dir):
             # For 3D-FUTURE
             # new_texture_path = new_texture_path.replace("/texture.png", ".png")
             # For Objaverse
-            # new_texture_path = (
-            #     "./texture/%s.jpg" % os.path.basename(usd_file_path).split(".")[0]
-            # )
+            new_texture_path = (
+                "./texture/%s.jpg" % os.path.basename(usd_file_path).split(".")[0]
+            )
             logging.debug(
                 "Updated texture path from %s to %s"
                 % (old_texture_path, new_texture_path)

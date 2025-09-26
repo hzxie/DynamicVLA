@@ -11,12 +11,7 @@ import copy
 import logging
 
 import torch
-from transformers import (
-    AutoModel,
-    AutoTokenizer,
-    PretrainedConfig,
-    PreTrainedModel,
-)
+from transformers import AutoModel, AutoTokenizer, PretrainedConfig, PreTrainedModel
 
 
 def apply_rope(x, positions, max_wavelength=10_000):

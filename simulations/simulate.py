@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-20 20:28:13
+# @Last Modified at: 2025-09-26 09:07:41
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -28,6 +28,50 @@ from isaaclab.app import AppLauncher
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 
 
+def get_object_metadata(object_dir, target_categories=[]):
+    object_metadata = {}
+    # Get the sizes of all objects (for grasping)
+    object_sizes = _get_object_sizes(args.object_dir, target_categories)
+    for k, v in object_sizes.items():
+        object_name = os.path.basename(k)
+        object_category = os.path.basename(os.path.dirname(k))
+        object_metadata[object_name] = {
+            "file_path": k,
+            "size": v,
+            "category": object_category,
+        }
+
+    # Load additional metadata if available
+    metadata_file = os.path.join(object_dir, "metadata.json")
+    if os.path.exists(metadata_file):
+        with open(metadata_file, "r") as f:
+            metadata = json.load(f)
+        for k, v in metadata.items():
+            if k in object_metadata:
+                object_metadata[k].update(v)
+            else:
+                logging.warning("Metadata found for unknown object %s." % k)
+
+    return object_metadata
+
+
+def _get_object_sizes(object_dir, target_categories=None):
+    object_sizes = {}
+    categories = sorted([f for f in os.listdir(object_dir)])
+    for c in categories:
+        if target_categories and c not in target_categories:
+            continue
+
+        objects = [
+            f for f in os.listdir(os.path.join(object_dir, c)) if f.endswith(".usd")
+        ]
+        for o in objects:
+            usd_path = os.path.join(object_dir, c, o)
+            object_sizes[usd_path] = _get_object_size(usd_path)
+
+    return object_sizes
+
+
 def _get_object_size(usd_path):
     import omni.usd
     import pxr
@@ -44,24 +88,7 @@ def _get_object_size(usd_path):
     return np.array(bbox.GetSize(), dtype=np.float32)
 
 
-def get_object_sizes(object_dir, target_categories=None):
-    object_sizes = {}
-    categories = sorted([f for f in os.listdir(object_dir)])
-    for c in categories:
-        if target_categories and c not in target_categories:
-            continue
-
-        objects = [
-            f for f in os.listdir(os.path.join(object_dir, c)) if f.endswith(".usd")
-        ]
-        for object in objects:
-            usd_path = os.path.join(object_dir, c, object)
-            object_sizes[usd_path] = _get_object_size(usd_path)
-
-    return object_sizes
-
-
-def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, object_sizes, robot):
+def get_env_cfg(sim_cfg, robot, object_metadata, scene_dir):
     # The following packages MUST be imported after the simulation app is created
     import configs.scene_cfg
     import isaaclab_tasks
@@ -116,19 +143,16 @@ def get_env_cfg(scene_dir, object_dir, container_dir, sim_cfg, object_sizes, rob
     )
     env_cfg.scene = configs.scene_cfg.set_light_asset(env_cfg.scene, **light_cfg)
 
-    # Dynamically add objects to scene
-    env_cfg.scene = _set_up_scene_objects(
-        env_cfg.scene,
-        sim_cfg,
-        robot_pose,
-        table["bbox"],
-        object_dir,
-        object_sizes,
+    # Determine the poses of objects and containers
+    object_states = _get_object_states(
+        sim_cfg, robot_pose, table["bbox"], object_metadata
     )
-    # Set up the container
-    if os.path.exists(container_dir):
-        env_cfg.scene = _set_up_scene_container(
-            env_cfg.scene, table["bbox"], container_dir
+    # Dynamically add objects to the scene
+    env_cfg.scene = _set_up_scene_objects(env_cfg.scene, object_states["objects"])
+    # Dynamically add containers to the scene
+    if "containers" in object_states and object_states["containers"]:
+        env_cfg.scene = _set_up_scene_containers(
+            env_cfg.scene, object_states["containers"]
         )
 
     return env_cfg
@@ -189,149 +213,155 @@ def _get_light_cfg(light_cfg):
     }
 
 
-def _set_up_scene_objects(
-    scene_cfg, sim_cfg, robot_pose, table_bbox, object_dir, object_sizes
-):
-    import configs.scene_cfg
-
-    target_object_usd = _get_object_usd_path(
-        object_dir, sim_cfg["scene"]["target_object"]["categories"]
-    )
-    logging.info("Using target object: %s" % os.path.basename(target_object_usd))
-    scene_cfg = configs.scene_cfg.set_target_object(
-        scene_cfg,
-        _get_object_cfg(
-            table_bbox,
-            file_path=target_object_usd,
-            object_size=object_sizes.get(target_object_usd, None),
-            robot_pos=robot_pose["pos"],
-            moving_time=_get_moving_time(
-                sim_cfg["scene"]["target_object"]["moving_time"]
-            ),
-            semantic_tags=[("class", "OBJECT_MAIN")],
-        ),
-    )
-    # Add more objects to the scene
-    for oi in range(sim_cfg["scene"]["other_objects"]["n_objects"]):
-        bg_object_usd = _get_object_usd_path(
-            object_dir, sim_cfg["scene"]["other_objects"]["categories"]
-        )
-        logging.info("Using additional object: %s" % os.path.basename(bg_object_usd))
-        scene_cfg = configs.scene_cfg.add_object_to_scene(
-            scene_cfg,
-            "object_%03d" % (oi + 1),
-            _get_object_cfg(
-                table_bbox,
-                file_path=bg_object_usd,
-                object_size=object_sizes.get(bg_object_usd, None),
-                robot_pos=robot_pose["pos"],
-                moving_time=_get_moving_time(
-                    sim_cfg["scene"]["target_object"]["moving_time"]
-                ),  # TODO
-                semantic_tags=[("class", "OBJECT_BG")],
-                object_name_id=(oi + 1),
-            ),
-        )
-
-    return scene_cfg
-
-
-def _get_object_usd_path(object_dir, categories):
-    if categories is None or len(categories) == 0:
-        category = random.choice(os.listdir(object_dir))
-    else:
-        category = random.choice(categories)
-
-    object_usd = [
-        f
-        for f in sorted(os.listdir(os.path.join(object_dir, category)))
-        if f.endswith(".usd")
+def _get_object_states(sim_cfg, robot_pose, table_bbox, object_metadata):
+    object_states = {"objects": [], "containers": []}
+    # Generate the poses of objects (The first object is the target object)
+    object_cfg = sim_cfg["scene"]["objects"]
+    object_categories = object_cfg["categories"]
+    if not object_categories:
+        object_categories = list(set([v["category"] for v in object_metadata.values()]))
+    object_candidates = [
+        v for v in object_metadata.values() if v["category"] in object_categories
     ]
-    target_object = random.choice(object_usd)
-    return os.path.join(object_dir, category, target_object)
+    for oi in range(object_cfg["n_objects"]):
+        _object = random.choice(object_candidates)  # TODO: Avoid duplicates
+        random_orientation = random.random() < object_cfg.get("prob_rnd_quat", 0.5)
+        random_static = (
+            random.random() < object_cfg.get("prob_static", 0.5) if oi != 0 else False
+        )  # The first object is always dynamic
+        _state = _get_object_state(
+            _object["size"],
+            robot_pose["pos"],
+            table_bbox,
+            None if random_static else object_cfg.get("moving_time", None),
+            random_orientation,
+            object_states["objects"],
+        )
+        object_states["objects"].append({**_object, **_state})
+
+    # Generate the poses of containers (The first container is the target container)
+    for _ in range(sim_cfg["scene"]["containers"]["n_containers"]):
+        pass
+
+    return object_states
 
 
-def _get_moving_time(moving_time_range):
-    if moving_time_range is None or len(moving_time_range) < 2:
-        return None
-
-    return random.uniform(*moving_time_range)
-
-
-def _get_object_cfg(
+def _get_object_state(
+    object_size,
+    robot_position,
     table_bbox,
-    file_path=None,
-    object_size=None,
-    robot_pos=None,
-    moving_time=None,
-    semantic_tags=None,
-    object_name_id=None,
+    moving_time,
+    random_orientation,
+    existing_objects,
 ):
-    import configs.object_cfg
-
+    # TODO: Consider the state of existing_objects
     PADDING = 0.02
-    object_cfg = {}
     tbl_z = table_bbox.max[2]
     object_z = (
         tbl_z + np.max(object_size) / 2 if object_size is not None else tbl_z + PADDING
     )
     if moving_time is None:
-        object_range_min_0 = table_bbox.min[0] * 3 / 4 + table_bbox.max[0] / 4
-        object_range_max_0 = table_bbox.min[0] / 4 + table_bbox.max[0] * 3 / 4
-        object_range_min_1 = table_bbox.min[1] * 3 / 4 + table_bbox.max[1] / 4
-        object_range_max_1 = table_bbox.min[1] / 4 + table_bbox.max[1] * 3 / 4
-        object_cfg["pos"] = np.array(
-            [
-                random.uniform(object_range_min_0, object_range_max_0),
-                random.uniform(object_range_min_1, object_range_max_1),
-                object_z,
-            ]
-        )
-        # 50% chance to set a random orientation. Otherwise, use the default orientation.
-        if random.random() < 0.5:
-            object_cfg["quat"] = configs.object_cfg.get_object_init_quat(
-                np.random.uniform(-0.1, 0.1, size=3)
-            )
+        return _get_static_object_state(table_bbox, object_z, random_orientation)
     else:
-        object_cfg["pos"] = np.array(
-            [
-                random.uniform(
-                    table_bbox.min[0] + PADDING, table_bbox.max[0] - PADDING
-                ),
-                random.uniform(
-                    table_bbox.min[1] + PADDING, table_bbox.max[1] - PADDING
-                ),
-                object_z,
-            ]
-        )
-        assert (
-            robot_pos is not None
-        ), "Robot position must be provided for dynamic objects."
-        # Generate a random position between the table center and the robot arm
-        tbl_ctr = (table_bbox.min + table_bbox.max) / 2.0
-        rnd_rto = random.uniform(-0.5, 0.5)
-        rnd_pos = tbl_ctr + rnd_rto * (robot_pos - tbl_ctr)
-        rnd_pos[2] = object_z
-        # Determine the linear velocity of the object
-        object_cfg["lin_vel"] = (rnd_pos - object_cfg["pos"]) / moving_time
-        object_cfg["quat"] = configs.object_cfg.get_object_init_quat(
-            object_cfg["lin_vel"]
+        return _get_dynamic_object_state(
+            table_bbox, object_z, moving_time, robot_position
         )
 
-    object_name = "/Object"
-    if object_name_id is not None:
-        object_name = f"/Object{object_name_id}"
 
-    return configs.object_cfg.get_object_cfg(
-        object_name,
-        object_cfg,
-        configs.object_cfg.get_spawner_cfg(
-            file_path=file_path, semantic_tags=semantic_tags
+def _get_static_object_state(table_bbox, object_z, random_orientation):
+    import configs.object_cfg
+
+    object_range_min_0 = table_bbox.min[0] * 3 / 4 + table_bbox.max[0] / 4
+    object_range_max_0 = table_bbox.min[0] / 4 + table_bbox.max[0] * 3 / 4
+    object_range_min_1 = table_bbox.min[1] * 3 / 4 + table_bbox.max[1] / 4
+    object_range_max_1 = table_bbox.min[1] / 4 + table_bbox.max[1] * 3 / 4
+    object_position = np.array(
+        [
+            random.uniform(object_range_min_0, object_range_max_0),
+            random.uniform(object_range_min_1, object_range_max_1),
+            object_z,
+        ]
+    )
+    object_quat = None
+    if random_orientation:
+        object_quat = configs.object_cfg.get_object_init_quat(
+            np.random.uniform(-0.1, 0.1, size=3)
+        )
+
+    return {"pos": object_position, "quat": object_quat}
+
+
+def _get_dynamic_object_state(table_bbox, object_z, moving_time, robot_position):
+    import configs.object_cfg
+
+    PADDING = 0.02
+    object_position = np.array(
+        [
+            random.uniform(table_bbox.min[0] + PADDING, table_bbox.max[0] - PADDING),
+            random.uniform(table_bbox.min[1] + PADDING, table_bbox.max[1] - PADDING),
+            object_z,
+        ]
+    )
+    assert robot_position is not None
+    # Generate a random position between the table center and the robot arm
+    tbl_ctr = (table_bbox.min + table_bbox.max) / 2.0
+    random_ratio = random.uniform(-0.5, 0.5)
+    random_position = tbl_ctr + random_ratio * (robot_position - tbl_ctr)
+    random_position[2] = object_z
+    # Determine the linear velocity of the object
+    assert moving_time is not None and len(moving_time) == 2
+    object_velocity = (random_position - object_position) / random.uniform(*moving_time)
+    object_quat = configs.object_cfg.get_object_init_quat(object_velocity)
+
+    return {
+        "pos": object_position,
+        "quat": object_quat,
+        "lin_vel": object_velocity,
+    }
+
+
+def _set_up_scene_objects(scene_cfg, object_states):
+    import configs.object_cfg
+    import configs.scene_cfg
+
+    assert object_states, "No object states provided."
+    target_object = object_states[0]
+    other_objects = object_states[1:]
+
+    # Set the target object (the object to be manipulated)
+    logging.info(
+        "Using target object: %s" % os.path.basename(target_object["file_path"])
+    )
+    scene_cfg = configs.scene_cfg.set_target_object(
+        scene_cfg,
+        configs.object_cfg.get_object_cfg(
+            "/Object",
+            target_object,
+            configs.object_cfg.get_spawner_cfg(
+                file_path=target_object["file_path"],
+                semantic_tags=[("class", "OBJECT_MAIN")],
+            ),
         ),
     )
+    # Add more objects to the scene
+    for i, o in enumerate(other_objects):
+        logging.info("Using additional object: %s" % os.path.basename(o["file_path"]))
+        scene_cfg = configs.scene_cfg.add_object_to_scene(
+            scene_cfg,
+            "object%02d" % (i + 1),
+            configs.object_cfg.get_object_cfg(
+                "/Object%02d" % (i + 1),
+                o,
+                configs.object_cfg.get_spawner_cfg(
+                    file_path=o["file_path"],
+                    semantic_tags=[("class", "OBJECT_BG")],
+                ),
+            ),
+        )
+    return scene_cfg
 
 
-def _set_up_scene_container(scene_cfg, table_bbox, container_dir):
+def _set_up_scene_containers(scene_cfg, table_bbox):
     import configs.object_cfg
 
     container_candidates = [f for f in os.listdir(container_dir) if f.endswith(".usd")]
@@ -703,26 +733,33 @@ def get_env_states(states, n_envs=1):
     return env_states
 
 
-def simulate(sim_cfg, object_sizes, task_cfg, dir_cfg, seed):
+def simulate(sim_cfg, object_metadata, task_cfg, dir_cfg, seed):
     import configs.robot_cfg
 
     # Create a new environment
     env_cfg = get_env_cfg(
-        dir_cfg["scene_dir"],
-        dir_cfg["object_dir"],
-        dir_cfg["container_dir"],
         sim_cfg,
-        object_sizes,
         task_cfg["robot"],
+        object_metadata,
+        dir_cfg["scene_dir"],
     )
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=seed)
     # Reset environment at start
     env.reset(seed=seed)
 
     # Determine the object size (without transformation)
-    # TODO: Handle non USD objects
+    object_name = os.path.basename(env_cfg.scene.object.spawn.usd_path)
+    if object_name in object_metadata:
+        object_size = object_metadata[object_name]["size"]
+    else:
+        object_size = [0.05, 0.05, 0.05]
+        logging.warning(
+            "Object size for %s not found. Using default size %s."
+            % (object_name, object_size)
+        )
+
     object_size = torch.tensor(
-        object_sizes[env_cfg.scene.object.spawn.usd_path],
+        object_size,
         dtype=torch.float32,
         device=env.unwrapped.device,
     ).unsqueeze(0)
@@ -1010,7 +1047,7 @@ def dump_video(frames, output_path, fps=24):
     )
 
 
-def main(simulation_app, args):
+def main(args):
     with open(args.sim_cfg_file) as fp:
         sim_cfg = yaml.load(fp, Loader=yaml.FullLoader)
 
@@ -1025,14 +1062,16 @@ def main(simulation_app, args):
             "path_tracing": args.path_tracing,
         }
     )
-    # Calculate the bounding boxes of the target objects
-    object_sizes = get_object_sizes(
-        args.object_dir, sim_cfg["scene"]["target_object"]["categories"]
+    # Get metadata for the objects (size, description, orientation)
+    object_metadata = get_object_metadata(
+        args.object_dir, sim_cfg["scene"]["objects"]["categories"]
     )
 
     # Perform simulations in the environment
+    n_simulations = 0
     seed = args.seed if args.seed is not None else random.randint(0, 65535)
-    while simulation_app.is_running():
+    while n_simulations < args.n_simulations:
+        n_simulations += 1
         seed += 1
         logging.info("Running simulation with seed: %d" % seed)
         random.seed(seed)
@@ -1041,7 +1080,7 @@ def main(simulation_app, args):
 
         env_cfg, env_states = simulate(
             sim_cfg,
-            object_sizes,
+            object_metadata,
             {
                 "task_name": args.task,
                 "robot": args.robot,
@@ -1049,7 +1088,6 @@ def main(simulation_app, args):
             {
                 "scene_dir": args.scene_dir,
                 "object_dir": args.object_dir,
-                "container_dir": args.container_dir,
             },
             seed,
         )
@@ -1118,9 +1156,6 @@ if __name__ == "__main__":
         "--object_dir", default=os.path.join(PROJECT_HOME, os.pardir, "objects")
     )
     parser.add_argument(
-        "--container_dir", default=os.path.join(PROJECT_HOME, os.pardir, "containers")
-    )
-    parser.add_argument(
         "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "datasets")
     )
     parser.add_argument("--task", default="pick")
@@ -1132,6 +1167,7 @@ if __name__ == "__main__":
     parser.add_argument("--disable_sm", action="store_true", default=False)
     parser.add_argument("--path_tracing", action="store_true", default=False)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--n_simulations", type=int, default=10_000)
     args = parser.parse_args(script_args)
     # Copy the shared parameters from isaaclab_args to args
     for sp in SHARED_PARAMETERS:
@@ -1150,5 +1186,5 @@ if __name__ == "__main__":
         if answer != "y":
             exit(0)
 
-    main(app_launcher.app, args)
+    main(args)
     app_launcher.app.close()
