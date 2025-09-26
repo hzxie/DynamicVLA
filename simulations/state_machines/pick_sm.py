@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-20 15:41:15
+# @Last Modified at: 2025-09-26 17:07:41
 # @Email:  root@haozhexie.com
 
 import collections
@@ -67,9 +67,8 @@ class PickStateMachine:
         dt: float,
         num_envs: int,
         rest_pose: torch.tensor,
-        final_position: torch.tensor,
-        final_quat: torch.tensor,
-        reach_dist_thres: float,
+        final_pose: torch.tensor,
+        max_reach_dist: float,
         grasp_dist_thres: float = 0.01,
         grasp_pose_thres: float = 15.0,
         object_dist_thres: float = 0.1,
@@ -94,16 +93,14 @@ class PickStateMachine:
         self.sm_dt = torch.full((num_envs,), dt, device=device)
         self.sm_state = torch.full((num_envs,), 0, dtype=torch.int32, device=device)
         self.sm_wait_time = torch.zeros((num_envs,), device=device)
-
         # next gripper state
         self.des_ee_pose = torch.zeros((num_envs, POSE_DIM), device=device)
         self.des_gripper_state = torch.full((num_envs,), 0.0, device=device)
 
         # the final object position after lifting (quat in xyzw)
-        self.final_object_pose = torch.cat([final_position, final_quat], dim=1)
-
-        # the reachable range of the robot (too near or too far cannot be reached)
-        self.reach_dist_thres = reach_dist_thres
+        self.final_object_pose = final_pose.repeat(num_envs, 1)
+        # the reachable range of the robot (too far cannot be reached)
+        self.max_reach_dist = max_reach_dist
         # the distance threshold for grasping
         self.grasp_dist_thres = grasp_dist_thres
         # the angle threshold (degree) for grasping
@@ -298,7 +295,7 @@ class PickStateMachine:
                 self.des_ee_pose_wp,
                 self.des_gripper_state_wp,
                 self.offset_wp,
-                self.reach_dist_thres,
+                self.max_reach_dist,
                 self.grasp_dist_thres,
                 self.grasp_pose_thres,
                 self.object_dist_thres,
@@ -397,7 +394,7 @@ def infer_state_machine(
     des_ee_pose: wp.array(dtype=wp.transform),
     gripper_state: wp.array(dtype=float),
     offset: wp.array(dtype=wp.transform),
-    reach_dist_threshold: float,  # the object is reachable
+    max_reach_disthold: float,  # the object is reachable
     grasp_dist_threshold: float,  # the object is graspable
     grasp_pose_threshold: float,  # the ee pose is aligned with object
     object_dist_threshold: float,  # the object to be considered grasped
@@ -423,7 +420,7 @@ def infer_state_machine(
         dist_object_robot = get_length(wp.transform_get_translation(grasp_pose[tid]))
         if (
             sm_wait_time[tid] >= PickSmWaitTime.REST
-            and dist_object_robot < reach_dist_threshold
+            and dist_object_robot < max_reach_disthold
         ):
             sm_state[tid] = PickSmState.APPROACH_ABOVE_OBJECT
             sm_wait_time[tid] = 0.0
@@ -456,7 +453,7 @@ def infer_state_machine(
             thres_object_ee[2],
         )
         # check if the object is reachable
-        if dist_object_robot >= reach_dist_threshold:
+        if dist_object_robot >= max_reach_disthold:
             sm_state[tid] = PickSmState.REST
             sm_wait_time[tid] = 0.0
         elif (

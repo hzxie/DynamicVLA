@@ -4,13 +4,14 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 21:04:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-26 09:45:59
+# @Last Modified at: 2025-09-26 10:29:56
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
 
 import configs.robot_cfg
 from configs.scene_cfg import SceneCfg
+from configs.termination_cfg import TerminationsCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import (
     CurriculumTermCfg,
@@ -19,7 +20,6 @@ from isaaclab.managers import (
     ObservationTermCfg,
     RewardTermCfg,
     SceneEntityCfg,
-    TerminationTermCfg,
 )
 from isaaclab.utils import configclass
 from isaaclab_tasks.manager_based.manipulation.lift import mdp
@@ -76,15 +76,15 @@ class EventCfg:
     """Configuration for events."""
 
     reset_all = EventTermCfg(func=mdp.reset_scene_to_default, mode="reset")
-    # reset_object_position = EventTermCfg(
-    #     func=mdp.reset_root_state_uniform,
-    #     mode="reset",
-    #     params={
-    #         "pose_range": {"x": (-0.1, 0.1), "y": (-0.25, 0.25), "z": (0.0, 0.0)},
-    #         "velocity_range": {},
-    #         "asset_cfg": SceneEntityCfg("object", body_names="Object"),
-    #     },
-    # )
+    reset_object_position = EventTermCfg(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={
+            "pose_range": {"x": (0, 0), "y": (0, 0), "z": (0.0, 0.0)},
+            "velocity_range": {},
+            "asset_cfg": SceneEntityCfg("object", body_names="Object"),
+        },
+    )
 
 
 @configclass
@@ -117,21 +117,6 @@ class RewardsCfg:
 
 
 @configclass
-class TerminationsCfg:
-    """Termination terms for the MDP."""
-
-    time_out = TerminationTermCfg(func=mdp.time_out, time_out=True)
-    object_dropping = TerminationTermCfg(
-        func=mdp.root_height_below_minimum,
-        params={
-            "minimum_height": 0.1,
-            "asset_cfg": SceneEntityCfg("object"),
-        },
-        time_out=True,
-    )
-
-
-@configclass
 class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
@@ -157,8 +142,8 @@ class EnvCfg(ManagerBasedRLEnvCfg):
     observations: ObservationsCfg = ObservationsCfg()
     commands: CommandsCfg = CommandsCfg()
     # MDP settings
+    terminations: TerminationsCfg = MISSING
     rewards: RewardsCfg = RewardsCfg()
-    terminations: TerminationsCfg = TerminationsCfg()
     events: EventCfg = EventCfg()
     curriculum: CurriculumCfg = CurriculumCfg()
 
@@ -166,7 +151,7 @@ class EnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # number of simulation steps per environment step
         self.decimation = 1
-        # the length of the episode in seconds
+        # the length of the episode in seconds (will be overridden)
         self.episode_length_s = 5.0
         # simulation settings
         self.sim.dt = 0.04  # 25Hz

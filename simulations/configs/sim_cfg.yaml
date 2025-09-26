@@ -3,17 +3,11 @@ scene:
     - name: "opst_cam"
       position: [1, 0, 0.6]
       rotation: [0, 60, 90]
-      # quat: [0.61237244, 0.35355339, 0.35355339, 0.61237244]
       prim_path: "/Robot/OppositeCamera"
     - name: "side_cam"
       position: [0.5, 1, 0.35]
       rotation: [-90, 0, 180]
-      # quat: [0, 0, 0.70710678, 0.70710678]
       prim_path: "/Robot/SideCamera"
-  containers:
-    n_containers: 1
-    categories:
-      - bowl
   objects:
     n_objects: 1
     prob_rnd_quat: 0.85
@@ -21,6 +15,10 @@ scene:
     moving_time: [0.5, 2.0]
     categories:
       - can
+  containers:
+    n_containers: 1
+    categories:
+      - bowl
 
 camera:
   width: 480
@@ -44,3 +42,24 @@ lighting:
     x: [-20, 20]
     y: [-20, 20]
     z: [10, 20]
+
+tasks:
+  pick:
+    sm: "state_machines.pick_sm.PickStateMachine"
+    done_term: "object_picked"
+    episode_length: 5
+  place:
+    sm: "state_machines.place_sm.PlaceStateMachine"
+    episode_length: 10
+
+robots:
+  franka:
+    rest_pose: [0.465906, 0.0, 0.382970, 0.008583, 0.921765, 0.020404, 0.387116]
+    final_pose: [0.3, 0, 0.3, -1, 0, 0, 0]
+    gripper_length: 0.045
+    max_reach_dist: 0.75
+  piper:
+    rest_pose: [0.373, 0.0, 0.271, 0.0, 0.9739, 0.0, 0.227]
+    final_pose: [0.373, 0.0, 0.271, -1, 0, 0, 0]
+    gripper_length: 0.09
+    max_reach_dist: 0.55

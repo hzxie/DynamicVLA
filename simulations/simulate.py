@@ -4,11 +4,12 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-26 09:07:41
+# @Last Modified at: 2025-09-26 17:09:15
 # @Email:  root@haozhexie.com
 
 import argparse
 import ast
+import importlib
 import json
 import logging
 import os
@@ -88,9 +89,10 @@ def _get_object_size(usd_path):
     return np.array(bbox.GetSize(), dtype=np.float32)
 
 
-def get_env_cfg(sim_cfg, robot, object_metadata, scene_dir):
+def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
     # The following packages MUST be imported after the simulation app is created
     import configs.scene_cfg
+    import configs.termination_cfg
     import isaaclab_tasks
 
     gym.register(
@@ -106,6 +108,18 @@ def get_env_cfg(sim_cfg, robot, object_metadata, scene_dir):
         device=sim_cfg["device"],
         num_envs=sim_cfg["num_envs"],
         use_fabric=not sim_cfg["disable_fabric"],
+    )
+    # Modify task-specific parameters
+    env_cfg.episode_length_s = sim_cfg["tasks"][task]["episode_length"]
+    env_cfg.terminations = configs.termination_cfg.get_termination_cfg(
+        task,
+        {
+            "goal_position": torch.tensor(
+                sim_cfg["robots"][robot]["final_pose"][:3],
+                dtype=torch.float32,
+                device=sim_cfg["device"],
+            ),
+        },
     )
 
     table = None
@@ -345,7 +359,7 @@ def _set_up_scene_objects(scene_cfg, object_states):
     )
     # Add more objects to the scene
     for i, o in enumerate(other_objects):
-        logging.info("Using additional object: %s" % os.path.basename(o["file_path"]))
+        logging.info("Using BG object: %s" % os.path.basename(o["file_path"]))
         scene_cfg = configs.scene_cfg.add_object_to_scene(
             scene_cfg,
             "object%02d" % (i + 1),
@@ -403,123 +417,29 @@ def _get_container_cfg(table_bbox):
     return object_cfg
 
 
-def get_state_machine(task, robot, sm_args={}):
-    import state_machines.pick_sm
-    import state_machines.place_sm
+def get_state_machine(task_cfg, robot_cfg, sm_args={}):
+    state_machine = _get_class(task_cfg["sm"])
+    for k, v in robot_cfg.items():
+        sm_args[k] = _get_tensor(v, sm_args.get("device"))
 
-    STATE_MACHINES = {
-        "pick": state_machines.pick_sm.PickStateMachine,
-        "place": state_machines.place_sm.PlaceStateMachine,
-    }
-    if task not in STATE_MACHINES:
-        raise ValueError("Unknown task: %s." % task)
-
-    # Set the final position and quaternion for different tasks and robots
-    rest_pose = get_rest_pose(robot, sm_args.get("device"))
-    final_position = get_final_position(task, robot, sm_args.get("device"))
-    final_quat = _get_final_quat(task, robot, sm_args.get("device"))
-    reach_dist_thres = _get_reach_dist_threshold(robot)
-    if rest_pose is not None:
-        sm_args["rest_pose"] = rest_pose
-    if final_position is not None:
-        sm_args["final_position"] = final_position
-    if final_quat is not None:
-        sm_args["final_quat"] = final_quat
-    if reach_dist_thres is not None:
-        sm_args["reach_dist_thres"] = reach_dist_thres
-
-    return STATE_MACHINES[task](**sm_args)
+    return state_machine(**sm_args)
 
 
-def get_object_size(object_path, device="cpu"):
-    import omni.usd
-    import pxr
-
-    usd_context = omni.usd.get_context()
-    stage = usd_context.get_stage()
-    prim = stage.GetPrimAtPath(object_path)
-    bbox_cache = pxr.UsdGeom.BBoxCache(
-        pxr.Usd.TimeCode.Default(), [pxr.UsdGeom.Tokens.default_]
-    )
-    bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
-    return torch.tensor([bbox.GetSize()], dtype=torch.float32, device=device)
+def _get_class(class_path):
+    module_path, class_name = class_path.rsplit(".", 1)
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)
 
 
-def get_rest_pose(robot, device="cpu"):
-    # NOTE: Quaternion in wxyz format
-    if robot == "franka":
-        return torch.tensor(
-            [[0.465906, 0.0, 0.382970, 0.008583, 0.921765, 0.020404, 0.387116]],
-            # [[0.3, 0.0, 0.3, 0.0, 0.0, 1.0, 0.0]],
-            dtype=torch.float32,
-            device=device,
-        )
-    elif robot == "piper":
-        return torch.tensor(
-            [[0.373, 0.0, 0.271, 0.0, 0.9739, 0.0, 0.227]],
-            # [[0.3, 0.0, 0.3, 0.0, 0.0, 1.0, 0.0]],
-            dtype=torch.float32,
-            device=device,
-        )
-    else:
-        raise ValueError("Unknown robot: %s." % robot)
+def _get_tensor(array, device="cpu", unsqueeze=True):
+    if not isinstance(array, list) and not isinstance(array, np.ndarray):
+        return array
 
+    tensor = torch.tensor(array, dtype=torch.float32, device=device)
+    if unsqueeze:
+        tensor = tensor.unsqueeze(0)
 
-def get_final_position(task, robot, device="cpu"):
-    FINAL_POSITIONS = {
-        "pick": {
-            "franka": [0.3, 0, 0.3],
-            "piper": [0.373, 0.0, 0.271],
-        },
-        "place": {
-            "franka": [0.3, 0, 0.3],
-            "piper": [0.373, 0.0, 0.271],
-        },
-    }
-    if task in FINAL_POSITIONS:
-        if FINAL_POSITIONS[task] is None:
-            # The final position is not set for the task
-            return None
-        if robot in FINAL_POSITIONS[task]:
-            return torch.tensor(
-                [FINAL_POSITIONS[task][robot]], dtype=torch.float32, device=device
-            )
-    else:
-        raise ValueError("Unknown task: %s." % task)
-
-
-def _get_final_quat(task, robot, device="cpu"):
-    FINAL_QUATS = {
-        "pick": {
-            "franka": [-1, 0, 0, 0],
-            "piper": [-1, 0, 0, 0],
-        },
-        "place": {
-            "franka": [0, 1, 0, 0],
-            "piper": [0, 1, 0, 0],
-        },
-    }
-    if task in FINAL_QUATS:
-        if FINAL_QUATS[task] is None:
-            # The final quaternion is not set for the task
-            return None
-        if robot in FINAL_QUATS[task]:
-            return torch.tensor(
-                [FINAL_QUATS[task][robot]], dtype=torch.float32, device=device
-            )
-    else:
-        raise ValueError("Unknown task: %s." % task)
-
-
-def _get_reach_dist_threshold(robot):
-    REACHABLE_RANGE = {
-        "franka": 0.75,
-        "piper": 0.55,
-    }
-    if robot in REACHABLE_RANGE:
-        return REACHABLE_RANGE[robot]
-    else:
-        raise ValueError("Unknown robot: %s." % robot)
+    return tensor
 
 
 def set_object_material(target_object, n_envs=1):
@@ -569,6 +489,7 @@ def get_curr_state(
     if object_size is not None:
         if "object" not in curr_state:
             curr_state["object"] = {}
+
         curr_state["object"]["size"] = _get_object_relative_bbox(
             object_size, object_state.root_quat_w, robot_quat
         )
@@ -674,12 +595,6 @@ def _get_semantic_segmentation(rgba_seg_maps, semantic_tags):
     return seg_maps
 
 
-def is_final_position_reached(object_pos, ee_pos, final_pos, threshold=0.05):
-    ee_offset = (ee_pos - final_pos).abs().sum(dim=1)
-    obj_offset = (object_pos - final_pos).abs().sum(dim=1)
-    return torch.bitwise_and(ee_offset < threshold, obj_offset < threshold)
-
-
 def get_env_states(states, n_envs=1):
     KEYS = {
         "sm_state": ("next_state", "sm_state"),
@@ -733,15 +648,14 @@ def get_env_states(states, n_envs=1):
     return env_states
 
 
-def simulate(sim_cfg, object_metadata, task_cfg, dir_cfg, seed):
-    import configs.robot_cfg
-
+def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
     # Create a new environment
     env_cfg = get_env_cfg(
         sim_cfg,
-        task_cfg["robot"],
+        task,
+        robot,
         object_metadata,
-        dir_cfg["scene_dir"],
+        scene_dir,
     )
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=seed)
     # Reset environment at start
@@ -771,14 +685,15 @@ def simulate(sim_cfg, object_metadata, task_cfg, dir_cfg, seed):
         rep.settings.set_render_pathtraced()
 
     # Initialize the state machine
+    assert task in sim_cfg["tasks"], "Unknown task: %s." % task
+    assert robot in sim_cfg["robots"], "Unknown robot: %s." % robot
     state_machine = get_state_machine(
-        task_cfg["task_name"],
-        task_cfg["robot"],
+        sim_cfg["tasks"][task],
+        sim_cfg["robots"][robot],
         {
             "dt": env_cfg.sim.dt * env_cfg.decimation,
             "num_envs": env.unwrapped.num_envs,
             "device": env.unwrapped.device,
-            "gripper_length": configs.robot_cfg.get_gripper_length(task_cfg["robot"]),
         },
     )
 
@@ -787,24 +702,11 @@ def simulate(sim_cfg, object_metadata, task_cfg, dir_cfg, seed):
         env.unwrapped.scene["object"],
         n_envs=env.unwrapped.num_envs,
     )
-
     # Simulation loop
     env_states = []
-    is_done = torch.zeros(
-        env.unwrapped.num_envs, dtype=torch.bool, device=env.unwrapped.device
-    )
-    robot_origin = (
-        torch.from_numpy(env_cfg.scene.robot.init_state.pos[None, :])
-        .float()
-        .to(env.unwrapped.device)
-    )
-    robot_quat = (
-        torch.from_numpy(env_cfg.scene.robot.init_state.rot[None, :])
-        .float()
-        .to(env.unwrapped.device)
-    )
-
-    while not is_done.all():
+    term_mgr = env.env.termination_manager
+    done_term = sim_cfg["tasks"][task]["done_term"]
+    while not term_mgr.dones.all():
         # Add an option to disable the state machine to accelerate the simulation
         if sim_cfg["disable_sm"]:
             env.step(torch.from_numpy(env.action_space.sample()))
@@ -820,8 +722,8 @@ def simulate(sim_cfg, object_metadata, task_cfg, dir_cfg, seed):
                 if "container" in env.unwrapped.scene.keys()
                 else None
             ),
-            env.unwrapped.scene.env_origins + robot_origin,
-            robot_quat,
+            env.unwrapped.scene["robot"].data.root_pos_w,
+            env.unwrapped.scene["robot"].data.root_quat_w,
             env.unwrapped.device,
         )
         # NOTE: state format in xyz, quat (wxyz), gripper (-1/1)
@@ -831,27 +733,14 @@ def simulate(sim_cfg, object_metadata, task_cfg, dir_cfg, seed):
             env.unwrapped.scene.sensors, ["rgb", "depth", "seg"]
         )
         # Check whether the simulation is finished
-        response = env.step(next_state["action"])
-        # Ideally, _[-2] indicates the simulation is finished, which does not work.
-        is_done = is_final_position_reached(
-            curr_state["object"]["pos"],
-            curr_state["end_effector"]["pos"],
-            state_machine.final_object_pose[:, :3],
-            threshold=0.035,
-        )
-        # Omit the sequence if the object is dropped or timeout
-        if (
-            response[-1]["log"]["Episode_Termination/time_out"]
-            or response[-1]["log"]["Episode_Termination/object_dropping"]
-        ):
-            break
+        _ = env.step(next_state["action"])
         # Save current env. states (camera views, robot states, and object states)
         env_states.append(
             {
                 "cam_views": cam_views,
                 "curr_state": curr_state,
                 "next_state": next_state,
-                "is_done": is_done,
+                "is_done": term_mgr.dones,
             }
         )
 
@@ -859,6 +748,7 @@ def simulate(sim_cfg, object_metadata, task_cfg, dir_cfg, seed):
     env.close()
     # Ignore the simulation if the task is not finished
     # If in debug mode, save all simulation data even if the task is not finished
+    is_done = term_mgr.get_term(done_term)
     return env_cfg, [
         es
         for env_id, es in enumerate(env_states)
@@ -1080,15 +970,10 @@ def main(args):
 
         env_cfg, env_states = simulate(
             sim_cfg,
+            args.task,
+            args.robot,
+            args.scene_dir,
             object_metadata,
-            {
-                "task_name": args.task,
-                "robot": args.robot,
-            },
-            {
-                "scene_dir": args.scene_dir,
-                "object_dir": args.object_dir,
-            },
             seed,
         )
         # Save the simulation data
@@ -1102,9 +987,6 @@ def main(args):
                 ) as fp:
                     _env_cfg = env_cfg.to_dict()
                     _env_cfg["seed"] = seed
-                    _env_cfg["final_position"] = get_final_position(
-                        args.task, args.robot
-                    ).numpy()
                     json.dump(get_object_without_numpy(_env_cfg), fp, indent=2)
 
                 with h5py.File(

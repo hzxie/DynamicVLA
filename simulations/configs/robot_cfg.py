@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-24 16:59:09
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-08 19:32:32
+# @Last Modified at: 2025-09-26 09:18:44
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
@@ -157,15 +157,6 @@ def get_wrist_camera_cfg(robot: str) -> dict:
         "quat": [0, 0.7071068, 0.7071068, 0],
         "convention": "opengl",
     }
-
-
-def get_gripper_length(robot: str) -> float:
-    if robot == "franka":
-        return 0.045
-    elif robot == "piper":
-        return 0.09
-    else:
-        raise ValueError("Unknown robot: %s" % robot)
 
 
 def get_robot_name(usd_path: str) -> str:
