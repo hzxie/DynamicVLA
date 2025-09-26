@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-26 17:09:15
+# @Last Modified at: 2025-09-26 20:04:31
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -796,6 +796,8 @@ def get_object_without_numpy(obj):
         return [get_object_without_numpy(item) for item in obj]
     elif isinstance(obj, tuple):
         return tuple(get_object_without_numpy(item) for item in obj)
+    elif isinstance(obj, torch.Tensor):
+        return obj.cpu().numpy().tolist()
     elif isinstance(obj, np.ndarray):
         return obj.tolist()
     elif isinstance(obj, (np.int32, np.float64)):
@@ -981,13 +983,17 @@ def main(args):
             episode_name = get_episode_name(
                 args.task, args.robot, env_cfg.scene.to_dict()
             )
+            logging.info(
+                "Saving episode %s with %d frames."
+                % (episode_name, len(es["sm_state"]))
+            )
             if args.save:
                 with open(
                     os.path.join(args.output_dir, "%s.json" % episode_name), "w"
                 ) as fp:
-                    _env_cfg = env_cfg.to_dict()
-                    _env_cfg["seed"] = seed
-                    json.dump(get_object_without_numpy(_env_cfg), fp, indent=2)
+                    env_cfg = env_cfg.to_dict()
+                    env_cfg["seed"] = seed
+                    json.dump(get_object_without_numpy(env_cfg), fp, indent=2)
 
                 with h5py.File(
                     os.path.join(args.output_dir, "%s.h5" % episode_name), "w"
