@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-22 14:40:51
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-20 06:48:51
+# @Last Modified at: 2025-09-26 16:17:26
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -127,8 +127,10 @@ def contains_invisible_prims(stage):
 
     invisible_prims = []
     for prim in stage.Traverse():
-        # Remain ceiling primitives invisible
-        if prim.GetPath().pathString.startswith("/house/ceiling"):
+        # Remain ceiling and table plane primitives invisible
+        if prim.GetPath().pathString.startswith(
+            "/house/ceiling"
+        ) or prim.GetPath().pathString.endswith("TablePlane"):
             continue
 
         imageable = UsdGeom.Imageable(prim)
