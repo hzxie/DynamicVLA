@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-18 11:35:39
+# @Last Modified at: 2025-09-27 11:26:27
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -55,6 +55,7 @@ def get_test_env(
     object_dir,
     physics_time_step,
     timeout,
+    tolerance,
     device,
     disable_fabric,
     path_tracing,
@@ -62,7 +63,9 @@ def get_test_env(
     import omni.replicator.core as rep
 
     # Create the environment
-    env_cfg = _get_env_cfg(cfg, num_envs, scene_dir, object_dir, device, disable_fabric)
+    env_cfg = _get_env_cfg(
+        cfg, num_envs, scene_dir, object_dir, tolerance, device, disable_fabric
+    )
     env_cfg.dt = physics_time_step
     env_cfg.episode_length_s = timeout
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=cfg["seed"])
@@ -79,7 +82,9 @@ def get_test_env(
     return env
 
 
-def _get_env_cfg(cfg, num_envs, scene_dir, object_dir, device, disable_fabric):
+def _get_env_cfg(
+    cfg, num_envs, scene_dir, object_dir, tolerance, device, disable_fabric
+):
     import configs.robot_cfg
     import configs.scene_cfg
     import isaaclab_tasks
@@ -99,6 +104,7 @@ def _get_env_cfg(cfg, num_envs, scene_dir, object_dir, device, disable_fabric):
         num_envs=num_envs,
         use_fabric=not disable_fabric,
     )
+    env_cfg.terminations = _get_terimation_cfg(cfg["terminations"], tolerance, device)
 
     scene_usd_path = os.path.join(
         scene_dir, os.path.basename(cfg["scene"]["house"]["spawn"]["usd_path"])
@@ -131,9 +137,28 @@ def _get_env_cfg(cfg, num_envs, scene_dir, object_dir, device, disable_fabric):
         env_cfg.scene, cfg["scene"]["distant_light"]
     )
 
-    # Dynamically add objects to scene
+    # Dynamically add objects / containers to scene
     env_cfg.scene = _set_up_scene_objects(env_cfg.scene, cfg["scene"], object_dir)
     return env_cfg
+
+
+def _get_terimation_cfg(cfg, tolerance, device):
+    import configs.termination_cfg
+
+    if "object_picked" in cfg:
+        return configs.termination_cfg.get_termination_cfg(
+            "pick",
+            {
+                "tolerance": tolerance,
+                "goal_position": torch.tensor(
+                    cfg["object_picked"]["params"]["goal_position"],
+                    dtype=torch.float32,
+                    device=device,
+                ),
+            },
+        )
+    else:
+        raise NotImplementedError("Unsupported termination config.")
 
 
 def _set_up_scene_cameras(scene_cfg, cfg):
@@ -234,16 +259,6 @@ def _set_up_scene_objects(scene_cfg, cfg, object_dir):
     return scene_cfg
 
 
-def get_final_position(env_cfg, device="cpu"):
-    if "final_position" in env_cfg:
-        final_position = env_cfg["final_position"]
-    else:
-        logging.warning("Final position not found in environment configuration.")
-        final_position = [0.3, 0.0, 0.3]
-
-    return torch.tensor(final_position, dtype=torch.float32, device=device)
-
-
 def get_latest_action(act_socket):
     action = None
     while True:
@@ -273,19 +288,15 @@ def _get_action_tensor(action, num_envs, device):
     return action
 
 
-def simulate(
-    env,
-    obs_socket,
-    act_socket,
-    robot_origin,
-    robot_quat,
-    final_position,
-):
+def simulate(env, obs_socket, act_socket):
     import configs.robot_cfg
+    import configs.termination_cfg
 
     last_action = None
     sim_results = {"status": -1, "cam_views": [], "ee_path": []}
     # The simulation loop
+    term_mgr = env.env.termination_manager
+    done_term = configs.termination_cfg.get_done_term(term_mgr.active_terms)
     while sim_results["status"] == -1:
         # scene_state = env.unwrapped.scene.state
         cam_view = sim.get_camera_views(env.unwrapped.scene.sensors, ["rgb"])
@@ -293,8 +304,8 @@ def simulate(
             ee_state=env.unwrapped.scene["ee_frame"].data,
             # robot_joint_pos=scene_state["articulation"]["robot"]["joint_position"],
             object_state=env.unwrapped.scene["object"].data,
-            env_origins=env.unwrapped.scene.env_origins + robot_origin,
-            robot_quat=robot_quat,
+            env_origins=env.unwrapped.scene["robot"].data.root_pos_w,
+            robot_quat=env.unwrapped.scene["robot"].data.root_quat_w,
             device=env.unwrapped.device,
         )
         sim_results["cam_views"].append(cam_view)
@@ -335,18 +346,10 @@ def simulate(
                 dim=1,
             )
 
-        response = env.step(last_action)
-        if sim.is_final_position_reached(
-            curr_state["object"]["pos"],
-            curr_state["end_effector"]["pos"],
-            final_position,
-            threshold=0.1,
-        ):
+        env.step(last_action)
+        if term_mgr.get_term(done_term).all():
             sim_results["status"] = 0
-        elif (
-            response[-1]["log"]["Episode_Termination/time_out"]
-            or response[-1]["log"]["Episode_Termination/object_dropping"]
-        ):
+        elif term_mgr.dones.all():
             sim_results["status"] = 1 if action is not None else 2
 
     return sim_results
@@ -396,6 +399,7 @@ def get_sim_results(sim_cfg, env_cfg_file_path, obs_socket, act_socket):
             sim_cfg["object_dir"],
             sim_cfg["physics_time_step"],
             sim_cfg["timeout"],
+            sim_cfg["tolerance"],
             sim_cfg["device"],
             sim_cfg["disable_fabric"],
             sim_cfg["path_tracing"],
@@ -411,29 +415,9 @@ def get_sim_results(sim_cfg, env_cfg_file_path, obs_socket, act_socket):
     env.reset(seed=env_cfg["seed"])
 
     instruction = get_task_instruction(env_cfg_file_path)
-    robot_origin = (
-        torch.from_numpy(np.array(env.unwrapped.cfg.scene.robot.init_state.pos))
-        .unsqueeze(0)
-        .float()
-        .to(env.unwrapped.device)
-    )
-    robot_quat = (
-        torch.from_numpy(np.array(env.unwrapped.cfg.scene.robot.init_state.rot))
-        .unsqueeze(0)
-        .float()
-        .to(env.unwrapped.device)
-    )
-    final_position = get_final_position(env_cfg, env.unwrapped.device)
     # Send the task instruction at the beginning of the simulation
     obs_socket.send_pyobj({"task": instruction})
-    sim_results = simulate(
-        env,
-        obs_socket,
-        act_socket,
-        robot_origin,
-        robot_quat,
-        final_position,
-    )
+    sim_results = simulate(env, obs_socket, act_socket)
     logging.info("Simulation finished with code: %d" % sim_results["status"])
     # Clear the action socket
     get_latest_action(act_socket)
@@ -474,6 +458,7 @@ def main(simulation_app, args):
         "object_dir": args.object_dir,
         "physics_time_step": args.physics_time_step,
         "timeout": args.timeout,
+        "tolerance": args.tolerance,
         "device": args.device,
         "disable_fabric": args.disable_fabric,
         "path_tracing": args.path_tracing,
@@ -578,6 +563,7 @@ if __name__ == "__main__":
     parser.add_argument("--path_tracing", action="store_true")
     parser.add_argument("--physics_time_step", type=float, default=0.04)
     parser.add_argument("--timeout", type=float, default=10)
+    parser.add_argument("--tolerance", type=float, default=0.07)
     parser.add_argument(
         "--scene_dir", default=os.path.join(PROJECT_HOME, os.pardir, "scenes")
     )

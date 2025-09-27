@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 18:09:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-19 18:25:26
+# @Last Modified at: 2025-09-27 11:21:02
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -12,7 +12,6 @@ import json
 import logging
 import os
 import random
-import shutil
 import sys
 
 import h5py
@@ -57,8 +56,10 @@ def get_camera_config(sim_cfg_file, robot_usd_path):
     return cam_cfg
 
 
-def simulate(env, sim_states, robot_origin, robot_quat, final_position, debug=False):
-    OFFSET = 5
+def simulate(env, sim_states, debug=False):
+    import configs.termination_cfg
+
+    OFFSET = 10
     state_seq = np.concatenate(
         [sim_states["ee_pos"][()], sim_states["ee_quat"][()]], axis=1
     )
@@ -81,6 +82,8 @@ def simulate(env, sim_states, robot_origin, robot_quat, final_position, debug=Fa
 
     # The simulation loop
     env_states = []
+    term_mgr = env.env.termination_manager
+    done_term = configs.termination_cfg.get_done_term(term_mgr.active_terms)
     for act_conter in range(action_seq.shape[0] - OFFSET):
         curr_state = sim.get_curr_state(
             env.unwrapped.scene["ee_frame"].data,
@@ -88,8 +91,8 @@ def simulate(env, sim_states, robot_origin, robot_quat, final_position, debug=Fa
             env.unwrapped.scene["object"].data,
             None,
             None,
-            env.unwrapped.scene.env_origins + robot_origin,
-            robot_quat,
+            env.unwrapped.scene["robot"].data.root_pos_w,
+            env.unwrapped.scene["robot"].data.root_quat_w,
             env.unwrapped.device,
         )
         cam_view = sim.get_camera_views(
@@ -105,12 +108,7 @@ def simulate(env, sim_states, robot_origin, robot_quat, final_position, debug=Fa
             env.unwrapped.device,
         )
         env.step(action)
-        # Check if the final position is reached
-        is_done = sim.is_final_position_reached(
-            curr_state["object"]["pos"],
-            curr_state["end_effector"]["pos"],
-            final_position,
-        )
+        is_done = term_mgr.get_term(done_term)
         env_states.append(
             {
                 "cam_views": cam_view,
@@ -119,6 +117,8 @@ def simulate(env, sim_states, robot_origin, robot_quat, final_position, debug=Fa
                 "is_done": is_done,
             }
         )
+        if is_done.all():
+            break
 
     env_states = sim.get_env_states(env_states, env.unwrapped.num_envs)
     return [
@@ -197,30 +197,14 @@ def main(args):
             args.object_dir,
             args.physics_time_step,
             args.timeout,
+            args.tolerance,
             args.device,
             args.disable_fabric,
             args.path_tracing,
         )
         env.reset(seed=env_cfg["seed"])
 
-        # Simulation loop
-        robot_origin = (
-            torch.from_numpy(np.array(env.unwrapped.cfg.scene.robot.init_state.pos))
-            .unsqueeze(0)
-            .float()
-            .to(env.unwrapped.device)
-        )
-        robot_quat = (
-            torch.from_numpy(np.array(env.unwrapped.cfg.scene.robot.init_state.rot))
-            .unsqueeze(0)
-            .float()
-            .to(env.unwrapped.device)
-        )
-        final_position = eval.get_final_position(env_cfg, env.unwrapped.device)
-
-        env_states = simulate(
-            env, env_states, robot_origin, robot_quat, final_position, args.debug
-        )
+        env_states = simulate(env, env_states, args.debug)
         for es in env_states:
             env_state, success = es
             if args.save:
@@ -241,7 +225,7 @@ def main(args):
                     sim.get_frames(env_state, ["ee_pos", "object_pos", "object_vel"]),
                     os.path.join(
                         args.output_dir,
-                        "%s-%s.mp4" % (seq[:-4], "SUCCESS" if success else "FAIL"),
+                        "%s-%s.mp4" % (seq[:-3], "SUCCESS" if success else "FAIL"),
                     ),
                 )
 
@@ -277,6 +261,7 @@ if __name__ == "__main__":
     parser.add_argument("--path_tracing", action="store_true")
     parser.add_argument("--physics_time_step", type=float, default=0.04)
     parser.add_argument("--timeout", type=float, default=10)
+    parser.add_argument("--tolerance", type=float, default=0.02)
     parser.add_argument(
         "--sim_cfg_file",
         default=os.path.join(PROJECT_HOME, "simulations", "configs", "sim_cfg.yaml"),

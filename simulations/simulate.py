@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-26 20:04:31
+# @Last Modified at: 2025-09-27 11:21:00
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -234,6 +234,7 @@ def _get_object_states(sim_cfg, robot_pose, table_bbox, object_metadata):
     object_categories = object_cfg["categories"]
     if not object_categories:
         object_categories = list(set([v["category"] for v in object_metadata.values()]))
+
     object_candidates = [
         v for v in object_metadata.values() if v["category"] in object_categories
     ]
@@ -254,8 +255,25 @@ def _get_object_states(sim_cfg, robot_pose, table_bbox, object_metadata):
         object_states["objects"].append({**_object, **_state})
 
     # Generate the poses of containers (The first container is the target container)
-    for _ in range(sim_cfg["scene"]["containers"]["n_containers"]):
-        pass
+    container_cfg = sim_cfg["scene"]["containers"]
+    container_categories = container_cfg["categories"]
+    if not container_categories:
+        container_categories = list(
+            set([v["category"] for v in object_metadata.values()])
+        )
+
+    container_candidates = [
+        v for v in object_metadata.values() if v["category"] in container_categories
+    ]
+    for _ in range(container_cfg["n_containers"]):
+        breakpoint()
+        _container = random.choice(container_candidates)  # TODO: Avoid duplicates
+        _state = _get_container_state(
+            _container["size"],
+            table_bbox,
+            object_states,
+        )
+        object_states["containers"].append({**_container, **_state})
 
     return object_states
 
@@ -268,7 +286,7 @@ def _get_object_state(
     random_orientation,
     existing_objects,
 ):
-    # TODO: Consider the state of existing_objects
+    # TODO: Consider the state of existing objects
     PADDING = 0.02
     tbl_z = table_bbox.max[2]
     object_z = (
@@ -334,6 +352,32 @@ def _get_dynamic_object_state(table_bbox, object_z, moving_time, robot_position)
     }
 
 
+def _get_container_state(container_size, table_bbox, existing_objects):
+    import configs.object_cfg
+
+    # TODO: Consider the state of existing objects and containers
+    PADDING = 0.02
+    tbl_z = table_bbox.max[2]
+    container_z = (
+        tbl_z + np.max(container_size) / 2
+        if container_size is not None
+        else tbl_z + PADDING
+    )
+
+    object_range_min_0 = table_bbox.min[0] * 3 / 4 + table_bbox.max[0] / 4
+    object_range_max_0 = table_bbox.min[0] / 4 + table_bbox.max[0] * 3 / 4
+    object_range_min_1 = table_bbox.min[1] * 3 / 4 + table_bbox.max[1] / 4
+    object_range_max_1 = table_bbox.min[1] / 4 + table_bbox.max[1] * 3 / 4
+    object_position = np.array(
+        [
+            random.uniform(object_range_min_0, object_range_max_0),
+            random.uniform(object_range_min_1, object_range_max_1),
+            container_z,
+        ]
+    )
+    return {"pos": object_position}
+
+
 def _set_up_scene_objects(scene_cfg, object_states):
     import configs.object_cfg
     import configs.scene_cfg
@@ -375,46 +419,28 @@ def _set_up_scene_objects(scene_cfg, object_states):
     return scene_cfg
 
 
-def _set_up_scene_containers(scene_cfg, table_bbox):
+def _set_up_scene_containers(scene_cfg, container_states):
     import configs.object_cfg
+    import configs.scene_cfg
 
-    container_candidates = [f for f in os.listdir(container_dir) if f.endswith(".usd")]
-    target_container = random.choice(container_candidates)
-    container_cfg = _get_container_cfg(table_bbox)
-
-    scene_cfg = configs.scene_cfg.add_object_to_scene(
-        scene_cfg,
-        "container",
-        configs.object_cfg.get_object_cfg(
-            "/Container",
-            container_cfg,
-            configs.object_cfg.get_spawner_cfg(
-                file_path=os.path.join(container_dir, target_container),
-                semantic_tags=[("class", "CONTAINER")],
+    assert container_states, "No container states provided."
+    for i, o in enumerate(container_states):
+        logging.info("Using container object: %s" % os.path.basename(o["file_path"]))
+        scene_cfg = configs.scene_cfg.add_object_to_scene(
+            scene_cfg,
+            f"container{i:02d}" if i != 0 else "container",
+            configs.object_cfg.get_object_cfg(
+                f"/Container{i:02d}" if i != 0 else "/Container",
+                o,
+                configs.object_cfg.get_spawner_cfg(
+                    file_path=o["file_path"],
+                    semantic_tags=[
+                        ("class", "CONTAINER_BG" if i != 0 else "CONTAINER_MAIN")
+                    ],
+                ),
             ),
-        ),
-    )
+        )
     return scene_cfg
-
-
-def _get_container_cfg(table_bbox):
-    object_cfg = {}
-    tbl_z = table_bbox.max[2] + 0.1
-
-    object_range_min_0 = table_bbox.min[0] * 3 / 4 + table_bbox.max[0] / 4
-    object_range_max_0 = table_bbox.min[0] / 4 + table_bbox.max[0] * 3 / 4
-    object_range_min_1 = table_bbox.min[1] * 3 / 4 + table_bbox.max[1] / 4
-    object_range_max_1 = table_bbox.min[1] / 4 + table_bbox.max[1] * 3 / 4
-    object_cfg["pos"] = np.array(
-        [
-            random.uniform(object_range_min_0, object_range_max_0),
-            random.uniform(object_range_min_1, object_range_max_1),
-            tbl_z,
-        ]
-    )
-    # TODO: How about quat?
-
-    return object_cfg
 
 
 def get_state_machine(task_cfg, robot_cfg, sm_args={}):
@@ -577,7 +603,13 @@ def get_camera_views(sensors, views=["rgb"]):
 
 
 def _get_semantic_segmentation(rgba_seg_maps, semantic_tags):
-    KNOWN_TAGS = {"ROBOT": 1, "OBJECT_BG": 2, "OBJECT_MAIN": 3, "CONTAINER": 4}
+    KNOWN_TAGS = {
+        "ROBOT": 1,
+        "OBJECT_BG": 2,
+        "OBJECT_MAIN": 3,
+        "CONTAINER_BG": 4,
+        "CONTAINER_MAIN": 5,
+    }
     seg_maps = np.zeros_like(rgba_seg_maps[..., :1], dtype=np.uint8)
 
     # Iterate over each image (since the tags may not be the same for each image)
@@ -613,8 +645,6 @@ def get_env_states(states, n_envs=1):
     for es in states:
         # es = {"cam_views": dict, "curr_state": dict, "next_state": dict, "is_done": Tensor}
         for eid in range(n_envs):
-            if es["is_done"][eid].item():
-                continue
             # Predefined keys
             for k, v in KEYS.items():
                 value = None
@@ -649,6 +679,8 @@ def get_env_states(states, n_envs=1):
 
 
 def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
+    import configs.termination_cfg
+
     # Create a new environment
     env_cfg = get_env_cfg(
         sim_cfg,
@@ -705,7 +737,7 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
     # Simulation loop
     env_states = []
     term_mgr = env.env.termination_manager
-    done_term = sim_cfg["tasks"][task]["done_term"]
+    done_term = configs.termination_cfg.get_done_term(term_mgr.active_terms)
     while not term_mgr.dones.all():
         # Add an option to disable the state machine to accelerate the simulation
         if sim_cfg["disable_sm"]:
@@ -732,8 +764,7 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
         cam_views = get_camera_views(
             env.unwrapped.scene.sensors, ["rgb", "depth", "seg"]
         )
-        # Check whether the simulation is finished
-        _ = env.step(next_state["action"])
+        env.step(next_state["action"])
         # Save current env. states (camera views, robot states, and object states)
         env_states.append(
             {
@@ -747,7 +778,7 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
     env_states = get_env_states(env_states, env.unwrapped.num_envs)
     env.close()
     # Ignore the simulation if the task is not finished
-    # If in debug mode, save all simulation data even if the task is not finished
+    # If in debug mode, save all simulation data even if the task is not finishedq
     is_done = term_mgr.get_term(done_term)
     return env_cfg, [
         es
@@ -756,7 +787,7 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
     ]
 
 
-def get_episode_name(task, robot, scene_cfg):
+def get_episode_name(task, robot, seed, scene_cfg):
     n_objects = len(
         [
             v["class_type"]
@@ -772,15 +803,16 @@ def get_episode_name(task, robot, scene_cfg):
         if "usd_path" in scene_cfg["object"]["spawn"]
         else "cylinder"  # default object type
     )
-    random_suffix = str(uuid.uuid4())[-12:]
+    random_suffix = str(uuid.uuid4())[-4:]
 
     # Generate a unique name for the episode
-    return "%s_%s_%s%s_O%02d_%s" % (
+    return "%s_%s_%s%s_O%02d_%08d_%s" % (
         task,
         robot,
         object_type,
         "d" if object_vel > 1e-3 else "s",
         n_objects,
+        seed,
         random_suffix,
     )
 
@@ -963,8 +995,6 @@ def main(args):
     n_simulations = 0
     seed = args.seed if args.seed is not None else random.randint(0, 65535)
     while n_simulations < args.n_simulations:
-        n_simulations += 1
-        seed += 1
         logging.info("Running simulation with seed: %d" % seed)
         random.seed(seed)
         np.random.seed(seed)
@@ -981,13 +1011,14 @@ def main(args):
         # Save the simulation data
         for es in env_states:
             episode_name = get_episode_name(
-                args.task, args.robot, env_cfg.scene.to_dict()
+                args.task, args.robot, seed, env_cfg.scene.to_dict()
             )
             logging.info(
                 "Saving episode %s with %d frames."
                 % (episode_name, len(es["sm_state"]))
             )
             if args.save:
+                # TODO: Add object descriptions to the config
                 with open(
                     os.path.join(args.output_dir, "%s.json" % episode_name), "w"
                 ) as fp:
@@ -1006,6 +1037,9 @@ def main(args):
                     get_frames(es),
                     os.path.join(args.output_dir, "%s.mp4" % episode_name),
                 )
+        # Increment the seed for the next simulation
+        seed += 1
+        n_simulations += 1
 
 
 if __name__ == "__main__":
@@ -1044,10 +1078,11 @@ if __name__ == "__main__":
         "--object_dir", default=os.path.join(PROJECT_HOME, os.pardir, "objects")
     )
     parser.add_argument(
-        "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "datasets")
+        "-o", "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "datasets")
     )
     parser.add_argument("--task", default="pick")
     parser.add_argument(
+        "-c",
         "--sim_cfg_file",
         default=os.path.join(PROJECT_HOME, "simulations", "configs", "sim_cfg.yaml"),
     )
@@ -1055,7 +1090,7 @@ if __name__ == "__main__":
     parser.add_argument("--disable_sm", action="store_true", default=False)
     parser.add_argument("--path_tracing", action="store_true", default=False)
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--n_simulations", type=int, default=10_000)
+    parser.add_argument("-n", "--n_simulations", type=int, default=10_000)
     args = parser.parse_args(script_args)
     # Copy the shared parameters from isaaclab_args to args
     for sp in SHARED_PARAMETERS:

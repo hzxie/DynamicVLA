@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-09-26 10:24:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-26 17:10:39
+# @Last Modified at: 2025-09-27 11:21:48
 # @Email:  root@haozhexie.com
 
 import torch
@@ -39,17 +39,14 @@ def is_object_picked(
     return object_eef_dist < tolerance and eef_goal_dist < tolerance
 
 
-def get_termination_cfg(task, args: dict = {}):
-    if task == "pick":
-        cfg = PickTerminationsCfg()
-        for k, v in args.items():
-            cfg.object_picked.params[k] = v
-    elif task == "place":
-        cfg = TerminationsCfg()
-    else:
-        cfg = TerminationsCfg()
+def get_done_term(terms: list[str]) -> str | None:
+    DONE_TERMS = ["object_picked", "object_placed"]
 
-    return cfg
+    for term in DONE_TERMS:
+        if term in terms:
+            return term
+
+    return None
 
 
 @configclass
@@ -76,3 +73,16 @@ class PickTerminationsCfg(TerminationsCfg):
         params={"goal_position": None},
         time_out=False,
     )
+
+
+def get_termination_cfg(task: str, args: dict = {}) -> TerminationsCfg:
+    if task == "pick":
+        cfg = PickTerminationsCfg()
+        for k, v in args.items():
+            cfg.object_picked.params[k] = v
+    elif task == "place":
+        cfg = TerminationsCfg()
+    else:
+        cfg = TerminationsCfg()
+
+    return cfg

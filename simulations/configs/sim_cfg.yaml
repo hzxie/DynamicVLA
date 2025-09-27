@@ -16,7 +16,7 @@ scene:
     categories:
       - can
   containers:
-    n_containers: 1
+    n_containers: 0
     categories:
       - bowl
 
@@ -46,7 +46,6 @@ lighting:
 tasks:
   pick:
     sm: "state_machines.pick_sm.PickStateMachine"
-    done_term: "object_picked"
     episode_length: 10
   place:
     sm: "state_machines.place_sm.PlaceStateMachine"
