@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-04 10:36:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-23 20:11:51
+# @Last Modified at: 2025-09-28 22:41:55
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -58,11 +58,27 @@ def create_approximate_collider(curr_stage, prim_path, category):
 
 
 def create_mesh_collider(curr_stage, prim_path):
-    from pxr import UsdPhysics
+    from isaaclab.sim.utils import safe_set_attribute_on_usd_schema
+    from pxr import PhysxSchema, UsdPhysics
 
     prim = curr_stage.GetPrimAtPath(prim_path)
     assert prim.GetTypeName() == "Mesh"
     UsdPhysics.CollisionAPI.Apply(prim)
+    usd_collision_api = UsdPhysics.CollisionAPI(prim)
+
+    physx_collision_api = PhysxSchema.PhysxCollisionAPI(prim)
+    if not physx_collision_api:
+        physx_collision_api = PhysxSchema.PhysxCollisionAPI.Apply(prim)
+
+    mesh_collision_api = UsdPhysics.MeshCollisionAPI.Apply(prim)
+    mesh_collision_api.GetApproximationAttr().Set(UsdPhysics.Tokens.convexDecomposition)
+    # set into USD API
+    safe_set_attribute_on_usd_schema(
+        usd_collision_api,
+        "collision_enabled",
+        True,
+        camel_case=True,
+    )
 
 
 def reset_object_material(prim):
@@ -93,9 +109,11 @@ def main(input_dir, output_dir, approximate_collider):
         if approximate_collider:
             create_approximate_collider(stage, COL_PATH, category)
         else:
-            create_mesh_collider(stage, GEO_PATH)
+            create_mesh_collider(stage, f"{GEO_PATH}/mesh")
 
-        reset_object_material(stage.GetPrimAtPath("/Object/geometry/mtl/material_0"))
+        mtl_prim = stage.GetPrimAtPath(f"{GEO_PATH}/mtl/material_0")
+        if mtl_prim.IsValid():
+            reset_object_material(mtl_prim)
 
         # Remove external references
         stage.Flatten().Export(output_file)

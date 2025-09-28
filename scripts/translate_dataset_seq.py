@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 18:09:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-27 11:21:02
+# @Last Modified at: 2025-09-27 21:54:48
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -59,7 +59,7 @@ def get_camera_config(sim_cfg_file, robot_usd_path):
 def simulate(env, sim_states, debug=False):
     import configs.termination_cfg
 
-    OFFSET = 10
+    OFFSET = 5
     state_seq = np.concatenate(
         [sim_states["ee_pos"][()], sim_states["ee_quat"][()]], axis=1
     )
@@ -261,7 +261,7 @@ if __name__ == "__main__":
     parser.add_argument("--path_tracing", action="store_true")
     parser.add_argument("--physics_time_step", type=float, default=0.04)
     parser.add_argument("--timeout", type=float, default=10)
-    parser.add_argument("--tolerance", type=float, default=0.02)
+    parser.add_argument("--tolerance", type=float, default=0.03)
     parser.add_argument(
         "--sim_cfg_file",
         default=os.path.join(PROJECT_HOME, "simulations", "configs", "sim_cfg.yaml"),

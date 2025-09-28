@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-27 11:21:00
+# @Last Modified at: 2025-09-28 23:20:30
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -266,7 +266,6 @@ def _get_object_states(sim_cfg, robot_pose, table_bbox, object_metadata):
         v for v in object_metadata.values() if v["category"] in container_categories
     ]
     for _ in range(container_cfg["n_containers"]):
-        breakpoint()
         _container = random.choice(container_candidates)  # TODO: Avoid duplicates
         _state = _get_container_state(
             _container["size"],
@@ -314,7 +313,7 @@ def _get_static_object_state(table_bbox, object_z, random_orientation):
             object_z,
         ]
     )
-    object_quat = None
+    object_quat = np.array([1.0, 0.0, 0.0, 0.0])
     if random_orientation:
         object_quat = configs.object_cfg.get_object_init_quat(
             np.random.uniform(-0.1, 0.1, size=3)
@@ -987,9 +986,11 @@ def main(args):
         }
     )
     # Get metadata for the objects (size, description, orientation)
-    object_metadata = get_object_metadata(
-        args.object_dir, sim_cfg["scene"]["objects"]["categories"]
-    )
+    categories = sim_cfg["scene"]["objects"]["categories"]
+    if sim_cfg["scene"]["containers"].get("categories", []):
+        categories += sim_cfg["scene"]["containers"]["categories"]
+
+    object_metadata = get_object_metadata(args.object_dir, categories)
 
     # Perform simulations in the environment
     n_simulations = 0
