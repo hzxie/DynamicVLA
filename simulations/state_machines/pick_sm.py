@@ -1,30 +1,17 @@
 # -*- coding: utf-8 -*-
 #
 # @File:   pick_sm.py
-# @Author: Haozhe Xie
-# @Date:   2025-09-26 11:07:21
-# @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-26 20:35:28
-# @Email:  root@haozhexie.com
-
-# -*- coding: utf-8 -*-
-#
-# @File:   pick_sm.py
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-26 20:35:28
+# @Last Modified at: 2025-09-29 21:44:03
 # @Email:  root@haozhexie.com
 
 import collections
 
-import numpy as np
 import torch
 import warp as wp
-
-# initialize warp
-wp.init()
-
+from . import sm_utils
 
 class GripperState:
     """States for the gripper."""
@@ -64,14 +51,6 @@ class PickStateMachine:
     the robot's end-effector and the object, and outputs the desired state of the robot's
     end-effector and the gripper. The state machine is implemented as a finite state
     machine with the following states:
-
-    1. INIT: The robot moves to the initial position.
-    2. RESET:
-    3. APPROACH_ABOVE_OBJECT: The robot moves above the position.
-    4. APPROACH_OBJECT: The robot moves to the position.
-    5. GRASP_OBJECT: The robot grasps the object.
-    6. LIFT_OBJECT: The robot lifts the object to a height.
-    7. TO_TARGET: The robot moves the object to the desired pose. This is the final state.
     """
 
     def __init__(
@@ -109,8 +88,8 @@ class PickStateMachine:
         self.des_ee_pose = torch.zeros((num_envs, POSE_DIM), device=device)
         self.des_gripper_state = torch.full((num_envs,), 0.0, device=device)
 
-        # the final object position after lifting (quat in xyzw)
-        self.final_object_pose = final_pose.repeat(num_envs, 1)
+        # the final end-effector position after lifting (quat in xyzw)
+        self.final_eef_pose = final_pose.repeat(num_envs, 1)
         # the reachable range of the robot (too far cannot be reached)
         self.max_reach_dist = max_reach_dist
         # the distance threshold for grasping
@@ -143,118 +122,6 @@ class PickStateMachine:
         self.sm_state[env_ids] = 0
         self.sm_wait_time[env_ids] = 0.0
 
-    def _is_object_static(self, object_velocity: torch.Tensor) -> torch.Tensor:
-        STATIC_VELOCITY_THRESHOLD = 0.1
-        return torch.norm(object_velocity, dim=1) < STATIC_VELOCITY_THRESHOLD
-
-    def _get_grasp_position(
-        self,
-        object_projected_size: torch.Tensor,
-        object_position: torch.Tensor,
-        object_velocity: torch.Tensor,
-    ) -> torch.Tensor:
-        WAITING_TIME = 0.23
-        TABLE_HEIGHT_THRES = 0.006
-        OBJECT_HEIGHT_DISPLACEMENT = 0.008
-        grasp_position = object_position.clone() + object_velocity * WAITING_TIME
-        object_height = torch.norm(object_projected_size[:, 2])
-        grasp_position_z = grasp_position[:, 2]
-
-        # Plan B: Try to grasp the center of the object
-        grasp_position_z = torch.where(
-            object_height > OBJECT_HEIGHT_DISPLACEMENT * 2,
-            grasp_position_z - OBJECT_HEIGHT_DISPLACEMENT,
-            grasp_position_z,
-        )
-        grasp_position_z = torch.where(
-            object_height > self.gripper_length * 2,
-            object_height - self.gripper_length,
-            grasp_position_z,
-        )
-
-        # ensure grasping height higher than table
-        grasp_position[:, 2] = torch.where(
-            grasp_position_z < TABLE_HEIGHT_THRES,
-            TABLE_HEIGHT_THRES,
-            grasp_position_z,
-        )
-
-        return grasp_position
-
-    def _get_grasp_quat(
-        self,
-        object_projected_size: torch.Tensor,
-        object_velocity: torch.Tensor,
-    ) -> torch.Tensor:
-        # NOTE: Rotation around the z-axis (0, 0, 1)
-        #       Quat = [
-        #         x * sin(theta / 2),
-        #         y * sin(theta / 2),
-        #         z * sin(theta / 2),
-        #         w * cos(theta / 2)
-        #       ]
-
-        # Consider the object quaternion to determine the grasp quaternion for static objects
-        if self._is_object_static(object_velocity):
-            object_size_z_rot = torch.abs(object_projected_size[:, 2])
-            object_size_z_max = torch.argmax(object_size_z_rot)
-            keep_indices = [i for i in range(3) if i != object_size_z_max]
-            object_size_xy_rot = object_projected_size[keep_indices, :2]
-            object_size_xy_norm = torch.norm(object_size_xy_rot, dim=1)
-            if abs(object_size_xy_norm[0] / object_size_xy_norm[1] - 1) < 0.05:
-                short_axis = 0
-            else:
-                short_axis = torch.argmin(object_size_xy_norm)
-            grasp_direction = torch.tensor(
-                [
-                    [object_size_xy_rot[short_axis][0]],
-                    [object_size_xy_rot[short_axis][1]],
-                ],
-                device=self.device,
-            )
-        else:
-            grasp_direction = [object_velocity[:, 0], object_velocity[:, 1]]
-
-        # Determine the grasp quaternion according to the velocity
-        gsp_theta = torch.arctan2(grasp_direction[0], grasp_direction[1])
-        gsp_theta = torch.where(gsp_theta >= np.pi / 2, gsp_theta - np.pi, gsp_theta)
-        gsp_theta = torch.where(gsp_theta <= -np.pi / 2, gsp_theta + np.pi, gsp_theta)
-        gsp_theta = torch.where(gsp_theta > np.pi / 2 - 1e-2, -np.pi / 2, gsp_theta)
-
-        gsp_quat = torch.stack(
-            [
-                torch.zeros_like(gsp_theta),
-                torch.zeros_like(gsp_theta),
-                torch.sin(gsp_theta / 2),
-                torch.cos(gsp_theta / 2),
-            ],
-            dim=1,
-        )  # xyzw
-
-        # Consider the basic rotation of the gripper
-        return self._quat_multiply(gsp_quat, self.final_object_pose[:, 3:7])
-
-    def _get_pose_angle(
-        self, target_quat: torch.Tensor, ee_quat: torch.Tensor
-    ) -> torch.Tensor:
-        from isaaclab.utils.math import quat_box_minus
-
-        return quat_box_minus(target_quat, ee_quat)[:, 2] * 180 / np.pi
-
-    def _quat_multiply(self, q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
-        """Quaternion multiplication."""
-        x1, y1, z1, w1 = q1.unbind(1)
-        x2, y2, z2, w2 = q2.unbind(1)
-        return torch.stack(
-            [
-                w2 * x1 + x2 * w1 + y2 * z1 - z2 * y1,
-                w2 * y1 - x2 * z1 + y2 * w1 + z2 * x1,
-                w2 * z1 + x2 * y1 - y2 * x1 + z2 * w1,
-                w2 * w1 - x2 * x1 - y2 * y1 - z2 * z1,
-            ],
-            dim=1,
-        )
-
     def compute(self, curr_state: dict) -> torch.Tensor:
         ee_pose = torch.cat(
             [
@@ -263,18 +130,20 @@ class PickStateMachine:
             ],
             dim=-1,
         )
-
         # Determine the object position before lifting
-        grasp_position = self._get_grasp_position(
+        grasp_position = sm_utils.get_grasp_position(
             curr_state["object"]["size"],
             curr_state["object"]["pos"],
             curr_state["object"]["velocity"],
+            self.gripper_length,
         )
-        grasp_quat = self._get_grasp_quat(
+        grasp_quat = sm_utils.get_grasp_quat(
             curr_state["object"]["size"],
             curr_state["object"]["velocity"],
+            self.final_eef_pose,
+            self.device,
         )
-        pose_angle = self._get_pose_angle(
+        pose_angle = sm_utils.get_pose_angle(
             grasp_quat[:, [3, 0, 1, 2]],
             curr_state["end_effector"]["quat"],
         )
@@ -286,7 +155,7 @@ class PickStateMachine:
         grasp_pose_wp = wp.from_torch(grasp_pose, wp.transform)
         object_pose_wp = wp.from_torch(object_pose, wp.transform)
         object_vel_wp = wp.from_torch(curr_state["object"]["velocity"], wp.vec3)
-        final_object_pose_wp = wp.from_torch(self.final_object_pose, wp.transform)
+        final_eef_pose_wp = wp.from_torch(self.final_eef_pose, wp.transform)
         pose_angle_wp = wp.from_torch(pose_angle, wp.float32)
 
         # Run state machine
@@ -302,7 +171,7 @@ class PickStateMachine:
                 object_vel_wp,
                 ee_pose_wp,
                 self.init_pose_wp,
-                final_object_pose_wp,
+                final_eef_pose_wp,
                 pose_angle_wp,
                 self.des_ee_pose_wp,
                 self.des_gripper_state_wp,
@@ -327,30 +196,6 @@ class PickStateMachine:
         }
 
 
-@wp.func
-def get_length(vec: wp.vec3) -> float:
-    return wp.length(vec)
-
-
-@wp.func
-def get_offset(vec1: wp.vec3, vec2: wp.vec3) -> wp.vec3:
-    return wp.abs(vec1 - vec2)
-
-
-@wp.func
-def get_z_offset(vec1: wp.vec3, vec2: wp.vec3) -> float:
-    return wp.abs(vec1[2] - vec2[2])
-
-
-@wp.func
-def is_offset_below_threshold(
-    offset: wp.vec3, threshold: wp.vec3, object_vel: wp.vec3
-) -> bool:
-    is_static = wp.length(object_vel) < 0.05
-    if is_static:
-        return offset[0] <= threshold[0] and offset[1] <= threshold[1]
-    else:
-        return offset[2] <= threshold[2]
 
 
 @wp.kernel
@@ -363,7 +208,7 @@ def infer_state_machine(
     object_vel: wp.array(dtype=wp.vec3),
     ee_pose: wp.array(dtype=wp.transform),
     init_pose: wp.array(dtype=wp.transform),
-    final_object_pose: wp.array(dtype=wp.transform),
+    final_eef_pose: wp.array(dtype=wp.transform),
     pose_angle: wp.array(dtype=float),
     des_ee_pose: wp.array(dtype=wp.transform),
     gripper_state: wp.array(dtype=float),
@@ -381,7 +226,7 @@ def infer_state_machine(
     if state == PickSmState.INIT:
         gripper_state[tid] = GripperState.OPEN
         des_ee_pose[tid] = init_pose[tid]
-        dist_eef_obj = get_length(wp.transform_get_translation(grasp_pose[tid]))
+        dist_eef_obj = sm_utils.get_length(wp.transform_get_translation(grasp_pose[tid]))
         if sm_wait_time[tid] >= PickSmWaitTime.INIT and dist_eef_obj < max_reach_dist:
             sm_state[tid] = PickSmState.APPROACH_ABOVE_OBJECT
             sm_wait_time[tid] = 0.0
@@ -389,9 +234,9 @@ def infer_state_machine(
             print("INIT")
     elif state == PickSmState.RESET:
         gripper_state[tid] = GripperState.OPEN
-        dist_eef_obj = get_length(wp.transform_get_translation(grasp_pose[tid]))
+        dist_eef_obj = sm_utils.get_length(wp.transform_get_translation(grasp_pose[tid]))
         if dist_eef_obj > max_reach_dist:
-            des_ee_pose[tid] = final_object_pose[tid]
+            des_ee_pose[tid] = final_eef_pose[tid]
         else:
             des_ee_pose[tid] = wp.transform_multiply(offset[tid], grasp_pose[tid])
             if sm_wait_time[tid] >= PickSmWaitTime.RESET:
@@ -407,16 +252,16 @@ def infer_state_machine(
             grasp_dist_threshold,
             offset[tid][2] + grasp_dist_threshold,
         )
-        offset_object_ee = get_offset(
+        offset_object_ee = sm_utils.get_offset(
             wp.transform_get_translation(ee_pose[tid]),
             wp.transform_get_translation(object_pose[tid]),
         )
-        dist_eef_obj = get_length(wp.transform_get_translation(grasp_pose[tid]))
+        dist_eef_obj = sm_utils.get_length(wp.transform_get_translation(grasp_pose[tid]))
         if dist_eef_obj >= max_reach_dist:
             sm_state[tid] = PickSmState.RESET
             sm_wait_time[tid] = 0.0
         elif (
-            is_offset_below_threshold(
+            sm_utils.is_offset_below_threshold(
                 offset_object_ee, thres_object_ee, object_vel[tid]
             )
             and pose_angle[tid] < grasp_pose_threshold
@@ -444,15 +289,22 @@ def infer_state_machine(
     elif state == PickSmState.LIFT_OBJECT:
         gripper_state[tid] = GripperState.CLOSE
         des_ee_pose[tid] = wp.transform_multiply(offset[tid], object_pose[tid])
-        if sm_wait_time[tid] >= PickSmWaitTime.LIFT_OBJECT:
+        dist_ee_object = sm_utils.get_length(
+            wp.transform_get_translation(ee_pose[tid])
+            - wp.transform_get_translation(object_pose[tid])
+        )
+        if dist_ee_object > object_dist_threshold:
+            sm_state[tid] = PickSmState.RESET
+            sm_wait_time[tid] = 0.0
+        elif sm_wait_time[tid] >= PickSmWaitTime.LIFT_OBJECT:
             sm_state[tid] = PickSmState.TO_TARGET
             sm_wait_time[tid] = 0.0
         if debug:
             print("LIFT_OBJECT")
     elif state == PickSmState.TO_TARGET:
-        des_ee_pose[tid] = final_object_pose[tid]
+        des_ee_pose[tid] = final_eef_pose[tid]
         gripper_state[tid] = GripperState.CLOSE
-        dist_ee_object = get_length(
+        dist_ee_object = sm_utils.get_length(
             wp.transform_get_translation(ee_pose[tid])
             - wp.transform_get_translation(object_pose[tid])
         )

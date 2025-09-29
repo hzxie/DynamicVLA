@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-09-26 10:24:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-27 11:21:48
+# @Last Modified at: 2025-09-29 16:38:37
 # @Email:  root@haozhexie.com
 
 import torch
@@ -37,6 +37,34 @@ def is_object_picked(
     )
     eef_goal_dist = torch.norm(goal_position_r - eef_position_r, dim=1)
     return object_eef_dist < tolerance and eef_goal_dist < tolerance
+
+
+def is_object_placed(
+    env: ManagerBasedRLEnv,
+    goal_position: torch.Tensor,
+    tolerance: float = 0.015,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    container_cfg: SceneEntityCfg = SceneEntityCfg("container"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    object = env.scene[object_cfg.name]
+    container = env.scene[container_cfg.name]
+    ee_frame = env.scene[ee_frame_cfg.name]
+    robot = env.scene[robot_cfg.name]
+
+    object_position_w = object.data.root_pos_w
+    container_position_w = container.data.root_pos_w
+    eef_position_w = ee_frame.data.target_pos_w[..., 0, :]
+
+    object_container_dist = torch.norm(container_position_w - object_position_w, dim=1)
+    goal_position_r = goal_position.to(device=robot.data.root_pos_w.device)
+    eef_position_r = quat_apply(
+        quat_inv(robot.data.root_quat_w), eef_position_w - robot.data.root_pos_w
+    )
+    eef_goal_dist = torch.norm(goal_position_r - eef_position_r, dim=1)
+    # print(object_container_dist, eef_goal_dist, tolerance)
+    return object_container_dist < tolerance and eef_goal_dist < tolerance
 
 
 def get_done_term(terms: list[str]) -> str | None:
@@ -75,13 +103,26 @@ class PickTerminationsCfg(TerminationsCfg):
     )
 
 
+@configclass
+class PlaceTerminationsCfg(TerminationsCfg):
+    """Termination terms for the Pick task."""
+
+    object_placed = TerminationTermCfg(
+        func=is_object_placed,
+        params={"goal_position": None},
+        time_out=False,
+    )
+
+
 def get_termination_cfg(task: str, args: dict = {}) -> TerminationsCfg:
     if task == "pick":
         cfg = PickTerminationsCfg()
         for k, v in args.items():
             cfg.object_picked.params[k] = v
     elif task == "place":
-        cfg = TerminationsCfg()
+        cfg = PlaceTerminationsCfg()
+        for k, v in args.items():
+            cfg.object_placed.params[k] = v
     else:
         cfg = TerminationsCfg()
 

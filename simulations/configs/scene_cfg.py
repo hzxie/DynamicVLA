@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-23 12:28:24
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-20 18:36:35
+# @Last Modified at: 2025-09-29 19:20:07
 # @Email:  root@haozhexie.com
 
 import logging
@@ -290,7 +290,7 @@ def _get_uncollided_anchors(
 
             # Check if the camera anchor collides with the primitives
             for cam in cameras:
-                if _is_anchor_collided(prim_bbox, _get_camera_position(ta, cam), 0.05):
+                if _is_anchor_collided(prim_bbox, _get_camera_position(ta, cam), 0.25):
                     ta["collision"] = True
                     logging.debug(
                         "[%s] Camera %s of %s collides with %s"

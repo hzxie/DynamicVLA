@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-28 23:20:30
+# @Last Modified at: 2025-09-29 20:49:43
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -159,7 +159,11 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
 
     # Determine the poses of objects and containers
     object_states = _get_object_states(
-        sim_cfg, robot_pose, table["bbox"], object_metadata
+        sim_cfg,
+        robot_pose,
+        table["bbox"],
+        object_metadata,
+        sim_cfg["robots"][robot]["max_reach_dist"],
     )
     # Dynamically add objects to the scene
     env_cfg.scene = _set_up_scene_objects(env_cfg.scene, object_states["objects"])
@@ -227,7 +231,9 @@ def _get_light_cfg(light_cfg):
     }
 
 
-def _get_object_states(sim_cfg, robot_pose, table_bbox, object_metadata):
+def _get_object_states(
+    sim_cfg, robot_pose, table_bbox, object_metadata, robot_reach_dist
+):
     object_states = {"objects": [], "containers": []}
     # Generate the poses of objects (The first object is the target object)
     object_cfg = sim_cfg["scene"]["objects"]
@@ -238,6 +244,7 @@ def _get_object_states(sim_cfg, robot_pose, table_bbox, object_metadata):
     object_candidates = [
         v for v in object_metadata.values() if v["category"] in object_categories
     ]
+    object_range_bbox = _get_object_range_bbox(table_bbox)
     for oi in range(object_cfg["n_objects"]):
         _object = random.choice(object_candidates)  # TODO: Avoid duplicates
         random_orientation = random.random() < object_cfg.get("prob_rnd_quat", 0.5)
@@ -245,9 +252,9 @@ def _get_object_states(sim_cfg, robot_pose, table_bbox, object_metadata):
             random.random() < object_cfg.get("prob_static", 0.5) if oi != 0 else False
         )  # The first object is always dynamic
         _state = _get_object_state(
-            _object["size"],
+            _get_object_z(object_range_bbox.max[2], _object["size"]),
             robot_pose["pos"],
-            table_bbox,
+            object_range_bbox,
             None if random_static else object_cfg.get("moving_time", None),
             random_orientation,
             object_states["objects"],
@@ -257,6 +264,9 @@ def _get_object_states(sim_cfg, robot_pose, table_bbox, object_metadata):
     # Generate the poses of containers (The first container is the target container)
     container_cfg = sim_cfg["scene"]["containers"]
     container_categories = container_cfg["categories"]
+    cntr_range_bbox = _get_object_range_bbox(
+        table_bbox, robot_pose["pos"], robot_reach_dist
+    )
     if not container_categories:
         container_categories = list(
             set([v["category"] for v in object_metadata.values()])
@@ -268,8 +278,8 @@ def _get_object_states(sim_cfg, robot_pose, table_bbox, object_metadata):
     for _ in range(container_cfg["n_containers"]):
         _container = random.choice(container_candidates)  # TODO: Avoid duplicates
         _state = _get_container_state(
-            _container["size"],
-            table_bbox,
+            _get_object_z(object_range_bbox.max[2], _container["size"]),
+            cntr_range_bbox,
             object_states,
         )
         object_states["containers"].append({**_container, **_state})
@@ -277,39 +287,69 @@ def _get_object_states(sim_cfg, robot_pose, table_bbox, object_metadata):
     return object_states
 
 
-def _get_object_state(
-    object_size,
-    robot_position,
-    table_bbox,
-    moving_time,
-    random_orientation,
-    existing_objects,
-):
-    # TODO: Consider the state of existing objects
-    PADDING = 0.02
-    tbl_z = table_bbox.max[2]
-    object_z = (
-        tbl_z + np.max(object_size) / 2 if object_size is not None else tbl_z + PADDING
-    )
-    if moving_time is None:
-        return _get_static_object_state(table_bbox, object_z, random_orientation)
-    else:
-        return _get_dynamic_object_state(
-            table_bbox, object_z, moving_time, robot_position
-        )
-
-
-def _get_static_object_state(table_bbox, object_z, random_orientation):
-    import configs.object_cfg
+def _get_object_range_bbox(table_bbox, robot_position=None, robot_reach_dist=None):
+    from pxr import Gf
 
     object_range_min_0 = table_bbox.min[0] * 3 / 4 + table_bbox.max[0] / 4
     object_range_max_0 = table_bbox.min[0] / 4 + table_bbox.max[0] * 3 / 4
     object_range_min_1 = table_bbox.min[1] * 3 / 4 + table_bbox.max[1] / 4
     object_range_max_1 = table_bbox.min[1] / 4 + table_bbox.max[1] * 3 / 4
+    table_z = table_bbox.max[2]
+    if robot_position is None and robot_reach_dist is None:
+        return Gf.Range3d(
+            Gf.Vec3d(object_range_min_0, object_range_min_1, table_z),
+            Gf.Vec3d(object_range_max_0, object_range_max_1, table_z),
+        )
+    else:
+        # Consider whether the object is within the robot reach
+        robot_reach_bbox = Gf.Range3d(
+            Gf.Vec3d(
+                robot_position[0] - robot_reach_dist,
+                table_bbox.min[1] - robot_reach_dist,
+                table_z,
+            ),
+            Gf.Vec3d(
+                robot_position[0] + robot_reach_dist,
+                table_bbox.min[1] + robot_reach_dist,
+                table_z,
+            ),
+        )
+        return robot_reach_bbox.IntersectWith(table_bbox)
+
+
+def _get_object_z(table_z, object_size=None):
+    PADDING = 0.02
+    return (
+        table_z + np.max(object_size) / 2
+        if object_size is not None
+        else table_z + PADDING
+    )
+
+
+def _get_object_state(
+    object_z,
+    robot_position,
+    object_range_bbox,
+    moving_time,
+    random_orientation,
+    existing_objects,
+):
+    # TODO: Consider the state of existing objects
+    if moving_time is None:
+        return _get_static_object_state(object_range_bbox, object_z, random_orientation)
+    else:
+        return _get_dynamic_object_state(
+            object_range_bbox, object_z, moving_time, robot_position
+        )
+
+
+def _get_static_object_state(object_range_bbox, object_z, random_orientation):
+    import configs.object_cfg
+
     object_position = np.array(
         [
-            random.uniform(object_range_min_0, object_range_max_0),
-            random.uniform(object_range_min_1, object_range_max_1),
+            random.uniform(object_range_bbox.min[0], object_range_bbox.max[0]),
+            random.uniform(object_range_bbox.min[1], object_range_bbox.max[1]),
             object_z,
         ]
     )
@@ -322,20 +362,19 @@ def _get_static_object_state(table_bbox, object_z, random_orientation):
     return {"pos": object_position, "quat": object_quat}
 
 
-def _get_dynamic_object_state(table_bbox, object_z, moving_time, robot_position):
+def _get_dynamic_object_state(object_range_bbox, object_z, moving_time, robot_position):
     import configs.object_cfg
 
-    PADDING = 0.02
     object_position = np.array(
         [
-            random.uniform(table_bbox.min[0] + PADDING, table_bbox.max[0] - PADDING),
-            random.uniform(table_bbox.min[1] + PADDING, table_bbox.max[1] - PADDING),
+            random.uniform(object_range_bbox.min[0], object_range_bbox.max[0]),
+            random.uniform(object_range_bbox.min[1], object_range_bbox.max[1]),
             object_z,
         ]
     )
     assert robot_position is not None
     # Generate a random position between the table center and the robot arm
-    tbl_ctr = (table_bbox.min + table_bbox.max) / 2.0
+    tbl_ctr = (object_range_bbox.min + object_range_bbox.max) / 2.0
     random_ratio = random.uniform(-0.5, 0.5)
     random_position = tbl_ctr + random_ratio * (robot_position - tbl_ctr)
     random_position[2] = object_z
@@ -351,26 +390,14 @@ def _get_dynamic_object_state(table_bbox, object_z, moving_time, robot_position)
     }
 
 
-def _get_container_state(container_size, table_bbox, existing_objects):
+def _get_container_state(container_z, object_range_bbox, existing_objects):
     import configs.object_cfg
 
     # TODO: Consider the state of existing objects and containers
-    PADDING = 0.02
-    tbl_z = table_bbox.max[2]
-    container_z = (
-        tbl_z + np.max(container_size) / 2
-        if container_size is not None
-        else tbl_z + PADDING
-    )
-
-    object_range_min_0 = table_bbox.min[0] * 3 / 4 + table_bbox.max[0] / 4
-    object_range_max_0 = table_bbox.min[0] / 4 + table_bbox.max[0] * 3 / 4
-    object_range_min_1 = table_bbox.min[1] * 3 / 4 + table_bbox.max[1] / 4
-    object_range_max_1 = table_bbox.min[1] / 4 + table_bbox.max[1] * 3 / 4
     object_position = np.array(
         [
-            random.uniform(object_range_min_0, object_range_max_0),
-            random.uniform(object_range_min_1, object_range_max_1),
+            random.uniform(object_range_bbox.min[0], object_range_bbox.max[0]),
+            random.uniform(object_range_bbox.min[1], object_range_bbox.max[1]),
             container_z,
         ]
     )
@@ -411,6 +438,7 @@ def _set_up_scene_objects(scene_cfg, object_states):
                 o,
                 configs.object_cfg.get_spawner_cfg(
                     file_path=o["file_path"],
+                    mass=1,  # TODO: Make it configurable
                     semantic_tags=[("class", "OBJECT_BG")],
                 ),
             ),
@@ -986,12 +1014,11 @@ def main(args):
         }
     )
     # Get metadata for the objects (size, description, orientation)
-    categories = sim_cfg["scene"]["objects"]["categories"]
-    if sim_cfg["scene"]["containers"].get("categories", []):
-        categories += sim_cfg["scene"]["containers"]["categories"]
-
-    object_metadata = get_object_metadata(args.object_dir, categories)
-
+    object_categories = sim_cfg["scene"]["objects"]["categories"]
+    container_categories = sim_cfg["scene"]["containers"].get("categories", [])
+    object_metadata = get_object_metadata(
+        args.object_dir, object_categories + container_categories
+    )
     # Perform simulations in the environment
     n_simulations = 0
     seed = args.seed if args.seed is not None else random.randint(0, 65535)
