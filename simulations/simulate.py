@@ -305,11 +305,12 @@ def _get_object_range_bbox(table_bbox, robot_position=None, robot_reach_dist=Non
     object_range_min_1 = table_bbox.min[1] * 3 / 4 + table_bbox.max[1] / 4
     object_range_max_1 = table_bbox.min[1] / 4 + table_bbox.max[1] * 3 / 4
     table_z = table_bbox.max[2]
+    object_valid_range = Gf.Range3d(
+        Gf.Vec3d(object_range_min_0, object_range_min_1, table_z),
+        Gf.Vec3d(object_range_max_0, object_range_max_1, table_z),
+    )
     if robot_position is None and robot_reach_dist is None:
-        return Gf.Range3d(
-            Gf.Vec3d(object_range_min_0, object_range_min_1, table_z),
-            Gf.Vec3d(object_range_max_0, object_range_max_1, table_z),
-        )
+        return object_valid_range
     else:
         # Consider whether the object is within the robot reach
         robot_reach_bbox = Gf.Range3d(
@@ -324,7 +325,7 @@ def _get_object_range_bbox(table_bbox, robot_position=None, robot_reach_dist=Non
                 table_z,
             ),
         )
-        return robot_reach_bbox.IntersectWith(table_bbox)
+        return robot_reach_bbox.IntersectWith(object_valid_range)
 
 
 def _get_object_z(table_z, object_size=None):
