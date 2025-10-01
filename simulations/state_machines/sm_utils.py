@@ -125,7 +125,7 @@ def get_grasp_quat(
 
 
 def get_pose_angle(target_quat: torch.Tensor, ee_quat: torch.Tensor) -> torch.Tensor:
-    return quat_box_minus(target_quat, ee_quat)[:, 2] * 180 / np.pi
+    return torch.abs(quat_box_minus(target_quat, ee_quat)[:, 2]) * 180 / np.pi
 
 
 @wp.func
