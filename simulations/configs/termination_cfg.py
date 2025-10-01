@@ -57,13 +57,16 @@ def is_object_placed(
     ee_frame = env.scene[ee_frame_cfg.name]
     robot = env.scene[robot_cfg.name]
 
-    # object_obb = _get_obb_vertices(
-    #     object_size, object.data.root_pos_w, object.data.root_quat_w
-    # )
-    # container_obb = _get_obb_vertices(
-    #     container_size, container.data.root_pos_w, container.data.root_quat_w
-    # )
-    # object_container_dist = torch.norm(container_position_w - object_position_w, dim=1)
+    object_relative_size = _get_object_relative_bbox(object_size, object.data.root_quat_w) / 2
+    object_negz_mask = (object_relative_size[:, 2] > 0).unsqueeze(1)
+    object_negz_size = torch.where(object_negz_mask, -object_relative_size, object_relative_size)
+    lowest_point = object.data.root_pos_w + object_negz_size.sum(dim=0) / 2
+
+    containier_relative_size = _get_object_relative_bbox(container_size, container.data.root_quat_w) / 2
+    object_container_rela = lowest_point - container.data.root_pos_w
+    containier_axis_lengths = torch.norm(containier_relative_size, dim=1)
+    containier_axis_dirs = containier_relative_size / containier_axis_lengths[:, None]
+    object_container_projections = torch.matmul(containier_axis_dirs, object_container_rela[0])
 
     goal_position_r = goal_position.to(device=robot.data.root_pos_w.device)
     eef_position_r = quat_apply(
@@ -71,9 +74,8 @@ def is_object_placed(
         ee_frame.data.target_pos_w[..., 0, :] - robot.data.root_pos_w,
     )
     eef_goal_dist = torch.norm(goal_position_r - eef_position_r, dim=1)
-    # print(object_container_dist, eef_goal_dist, tolerance)
-    # return object_container_dist < tolerance and eef_goal_dist < tolerance
-    return eef_goal_dist < tolerance
+    
+    return torch.all(torch.abs(object_container_projections) <= containier_axis_lengths) and eef_goal_dist < tolerance
 
 
 def _get_object_relative_bbox(object_size, object_quat_w):
@@ -90,46 +92,6 @@ def _get_object_relative_bbox(object_size, object_quat_w):
         torch.tensor([[0.0, 0.0, object_size[:, 2]]], device=object_size.device),
     )
     return torch.cat([object_size_x_rot, object_size_y_rot, object_size_z_rot], dim=0)
-
-
-# def _get_obb_vertices(
-#     size: torch.Tensor, center: torch.Tensor, quat: torch.Tensor
-# ) -> torch.Tensor:
-#     batch_size = center.shape[0]
-#     signs = torch.tensor(
-#         [
-#             [-1, -1, -1],
-#             [-1, -1, 1],
-#             [-1, 1, -1],
-#             [-1, 1, 1],
-#             [1, -1, -1],
-#             [1, -1, 1],
-#             [1, 1, -1],
-#             [1, 1, 1],
-#         ],
-#         device=center.device,
-#         dtype=center.dtype,
-#     )  # [8,3]
-#     signs = signs.unsqueeze(0).expand(batch_size, 8, 3)  # [B,8,3]
-#     local_verts = signs * size.unsqueeze(1) / 2  # [B,8,3]
-#     rotated_verts = _quat_rotate_batch(quat, local_verts)  # [B,8,3]
-#     return rotated_verts + center.unsqueeze(1)  # [B,8,3]
-
-
-# def _quat_rotate_batch(quat: torch.Tensor, vecs: torch.Tensor) -> torch.Tensor:
-#     w, x, y, z = quat[:, 0:1], quat[:, 1:2], quat[:, 2:3], quat[:, 3:4]  # [B,1]
-#     R = torch.zeros((quat.shape[0], 3, 3), device=vecs.device, dtype=vecs.dtype)
-#     R[:, 0, 0] = 1 - 2 * (y**2 + z**2)
-#     R[:, 0, 1] = 2 * (x * y - z * w)
-#     R[:, 0, 2] = 2 * (x * z + y * w)
-#     R[:, 1, 0] = 2 * (x * y + z * w)
-#     R[:, 1, 1] = 1 - 2 * (x**2 + z**2)
-#     R[:, 1, 2] = 2 * (y * z - x * w)
-#     R[:, 2, 0] = 2 * (x * z - y * w)
-#     R[:, 2, 1] = 2 * (y * z + x * w)
-#     R[:, 2, 2] = 1 - 2 * (x**2 + y**2)
-#     # [B,N,3] @ [B,3,3] -> [B,N,3]
-#     return torch.bmm(vecs, R.transpose(1, 2))
 
 
 def get_done_term(terms: list[str]) -> str | None:
