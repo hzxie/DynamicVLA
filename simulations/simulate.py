@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-01 14:04:57
+# @Last Modified at: 2025-10-01 20:59:09
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -163,25 +163,27 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
 
     # Modify task-specific parameters
     env_cfg.episode_length_s = sim_cfg["tasks"][task]["episode_length"]
+    terimation_args = {
+        "goal_position": torch.tensor(
+            sim_cfg["robots"][robot]["final_pose"][:3],
+            dtype=torch.float32,
+            device=sim_cfg["device"],
+        ),
+        "object_size": get_object_size(
+            os.path.basename(env_cfg.scene.object.spawn.usd_path),
+            object_metadata,
+            device=sim_cfg["device"],
+        ),
+    }
+    if hasattr(env_cfg.scene, "container"):
+        terimation_args["container_size"] = get_object_size(
+            os.path.basename(env_cfg.scene.container.spawn.usd_path),
+            object_metadata,
+            device=sim_cfg["device"],
+        )
+
     env_cfg.terminations = configs.termination_cfg.get_termination_cfg(
-        task,
-        {
-            "goal_position": torch.tensor(
-                sim_cfg["robots"][robot]["final_pose"][:3],
-                dtype=torch.float32,
-                device=sim_cfg["device"],
-            ),
-            "object_size": get_object_size(
-                os.path.basename(env_cfg.scene.object.spawn.usd_path),
-                object_metadata,
-                device=sim_cfg["device"],
-            ),
-            "container_size": get_object_size(
-                os.path.basename(env_cfg.scene.container.spawn.usd_path),
-                object_metadata,
-                device=sim_cfg["device"],
-            ),
-        },
+        task, terimation_args
     )
     return env_cfg
 
@@ -269,11 +271,13 @@ def _get_object_states(
             random_orientation,
             object_states["objects"],
         )
-        object_states["objects"].append({
-            **_object, 
-            **_state,
-            "mass": object_cfg.get("mass", 0.05),
-        })
+        object_states["objects"].append(
+            {
+                **_object,
+                **_state,
+                "mass": object_cfg.get("mass", 0.05),
+            }
+        )
 
     # Generate the poses of containers (The first container is the target container)
     container_cfg = sim_cfg["scene"]["containers"]
@@ -296,11 +300,13 @@ def _get_object_states(
             cntr_range_bbox,
             object_states,
         )
-        object_states["containers"].append({
-            **_container, 
-            **_state, 
-            "mass": container_cfg.get("mass", 0.1),
-        })
+        object_states["containers"].append(
+            {
+                **_container,
+                **_state,
+                "mass": container_cfg.get("mass", 0.1),
+            }
+        )
 
     return object_states
 
