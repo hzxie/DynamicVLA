@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-29 21:44:03
+# @Last Modified at: 2025-09-30 19:19:14
 # @Email:  root@haozhexie.com
 
 import collections
@@ -12,6 +12,7 @@ import collections
 import torch
 import warp as wp
 from . import sm_utils
+
 
 class GripperState:
     """States for the gripper."""
@@ -196,8 +197,6 @@ class PickStateMachine:
         }
 
 
-
-
 @wp.kernel
 def infer_state_machine(
     dt: wp.array(dtype=float),
@@ -226,7 +225,9 @@ def infer_state_machine(
     if state == PickSmState.INIT:
         gripper_state[tid] = GripperState.OPEN
         des_ee_pose[tid] = init_pose[tid]
-        dist_eef_obj = sm_utils.get_length(wp.transform_get_translation(grasp_pose[tid]))
+        dist_eef_obj = sm_utils.get_length(
+            wp.transform_get_translation(grasp_pose[tid])
+        )
         if sm_wait_time[tid] >= PickSmWaitTime.INIT and dist_eef_obj < max_reach_dist:
             sm_state[tid] = PickSmState.APPROACH_ABOVE_OBJECT
             sm_wait_time[tid] = 0.0
@@ -234,7 +235,9 @@ def infer_state_machine(
             print("INIT")
     elif state == PickSmState.RESET:
         gripper_state[tid] = GripperState.OPEN
-        dist_eef_obj = sm_utils.get_length(wp.transform_get_translation(grasp_pose[tid]))
+        dist_eef_obj = sm_utils.get_length(
+            wp.transform_get_translation(grasp_pose[tid])
+        )
         if dist_eef_obj > max_reach_dist:
             des_ee_pose[tid] = final_eef_pose[tid]
         else:
@@ -256,7 +259,9 @@ def infer_state_machine(
             wp.transform_get_translation(ee_pose[tid]),
             wp.transform_get_translation(object_pose[tid]),
         )
-        dist_eef_obj = sm_utils.get_length(wp.transform_get_translation(grasp_pose[tid]))
+        dist_eef_obj = sm_utils.get_length(
+            wp.transform_get_translation(grasp_pose[tid])
+        )
         if dist_eef_obj >= max_reach_dist:
             sm_state[tid] = PickSmState.RESET
             sm_wait_time[tid] = 0.0
@@ -270,7 +275,7 @@ def infer_state_machine(
                 sm_state[tid] = PickSmState.APPROACH_OBJECT
                 sm_wait_time[tid] = 0.0
         if debug:
-            print("APPROACH_ABOVE_OBJECT")
+            wp.printf("APPROACH_ABOVE_OBJECT: pose_angle: %.4f\n", pose_angle[tid])
     elif state == PickSmState.APPROACH_OBJECT:
         gripper_state[tid] = GripperState.OPEN
         des_ee_pose[tid] = grasp_pose[tid]

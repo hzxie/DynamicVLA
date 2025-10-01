@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-29 20:49:43
+# @Last Modified at: 2025-10-01 14:04:57
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -109,18 +109,6 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
         num_envs=sim_cfg["num_envs"],
         use_fabric=not sim_cfg["disable_fabric"],
     )
-    # Modify task-specific parameters
-    env_cfg.episode_length_s = sim_cfg["tasks"][task]["episode_length"]
-    env_cfg.terminations = configs.termination_cfg.get_termination_cfg(
-        task,
-        {
-            "goal_position": torch.tensor(
-                sim_cfg["robots"][robot]["final_pose"][:3],
-                dtype=torch.float32,
-                device=sim_cfg["device"],
-            ),
-        },
-    )
 
     table = None
     scenes = [f for f in os.listdir(scene_dir) if f.endswith(".usd")]
@@ -173,6 +161,28 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
             env_cfg.scene, object_states["containers"]
         )
 
+    # Modify task-specific parameters
+    env_cfg.episode_length_s = sim_cfg["tasks"][task]["episode_length"]
+    env_cfg.terminations = configs.termination_cfg.get_termination_cfg(
+        task,
+        {
+            "goal_position": torch.tensor(
+                sim_cfg["robots"][robot]["final_pose"][:3],
+                dtype=torch.float32,
+                device=sim_cfg["device"],
+            ),
+            "object_size": get_object_size(
+                os.path.basename(env_cfg.scene.object.spawn.usd_path),
+                object_metadata,
+                device=sim_cfg["device"],
+            ),
+            "container_size": get_object_size(
+                os.path.basename(env_cfg.scene.container.spawn.usd_path),
+                object_metadata,
+                device=sim_cfg["device"],
+            ),
+        },
+    )
     return env_cfg
 
 
@@ -470,6 +480,30 @@ def _set_up_scene_containers(scene_cfg, container_states):
     return scene_cfg
 
 
+def get_object_size(object_name, object_metadata, device="cpu"):
+    if object_name in object_metadata:
+        object_size = object_metadata[object_name]["size"]
+    else:
+        object_size = [0.05, 0.05, 0.05]
+        logging.warning(
+            "Object size for %s not found. Using default size %s."
+            % (object_name, object_size)
+        )
+
+    return _get_tensor(object_size, device=device, unsqueeze=True)
+
+
+def _get_tensor(array, device="cpu", unsqueeze=True):
+    if not isinstance(array, list) and not isinstance(array, np.ndarray):
+        return array
+
+    tensor = torch.tensor(array, dtype=torch.float32, device=device)
+    if unsqueeze:
+        tensor = tensor.unsqueeze(0)
+
+    return tensor
+
+
 def get_state_machine(task_cfg, robot_cfg, sm_args={}):
     state_machine = _get_class(task_cfg["sm"])
     for k, v in robot_cfg.items():
@@ -482,17 +516,6 @@ def _get_class(class_path):
     module_path, class_name = class_path.rsplit(".", 1)
     module = importlib.import_module(module_path)
     return getattr(module, class_name)
-
-
-def _get_tensor(array, device="cpu", unsqueeze=True):
-    if not isinstance(array, list) and not isinstance(array, np.ndarray):
-        return array
-
-    tensor = torch.tensor(array, dtype=torch.float32, device=device)
-    if unsqueeze:
-        tensor = tensor.unsqueeze(0)
-
-    return tensor
 
 
 def set_object_material(target_object, n_envs=1):
@@ -721,21 +744,11 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
     env.reset(seed=seed)
 
     # Determine the object size (without transformation)
-    object_name = os.path.basename(env_cfg.scene.object.spawn.usd_path)
-    if object_name in object_metadata:
-        object_size = object_metadata[object_name]["size"]
-    else:
-        object_size = [0.05, 0.05, 0.05]
-        logging.warning(
-            "Object size for %s not found. Using default size %s."
-            % (object_name, object_size)
-        )
-
-    object_size = torch.tensor(
-        object_size,
-        dtype=torch.float32,
-        device=env.unwrapped.device,
-    ).unsqueeze(0)
+    object_size = get_object_size(
+        os.path.basename(env_cfg.scene.object.spawn.usd_path),
+        object_metadata,
+        env.unwrapped.device,
+    )
 
     # Enable Path Tracing
     if sim_cfg["enable_cameras"] and sim_cfg["path_tracing"]:
@@ -985,7 +998,6 @@ def _get_state_text(state):
 
 
 def dump_video(frames, output_path, fps=24):
-    # Mirrored from utils.helpers.dump_video (to prevent install LeRobot dependency)
     if len(frames) == 0:
         return
 

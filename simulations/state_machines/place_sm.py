@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-29 21:43:59
+# @Last Modified at: 2025-09-30 20:58:01
 # @Email:  root@haozhexie.com
 
 import collections
@@ -13,6 +13,7 @@ import numpy as np
 import torch
 import warp as wp
 from . import sm_utils
+
 
 class GripperState:
     """States for the gripper."""
@@ -67,6 +68,7 @@ class PlaceStateMachine:
         final_pose: torch.tensor,
         max_reach_dist: float,
         grasp_dist_thres: float = 0.01,
+        place_dist_thres: float = 0.1,
         grasp_pose_thres: float = 15.0,
         object_dist_thres: float = 0.1,
         gripper_length: float = 0.3,
@@ -100,6 +102,8 @@ class PlaceStateMachine:
         self.max_reach_dist = max_reach_dist
         # the distance threshold for grasping
         self.grasp_dist_thres = grasp_dist_thres
+        # the distance threshold for placing
+        self.place_dist_thres = place_dist_thres
         # the angle threshold (degree) for grasping
         self.grasp_pose_thres = grasp_pose_thres
         # the distance threshold for the object to be considered grasped
@@ -203,6 +207,7 @@ class PlaceStateMachine:
                 self.offset_wp,
                 self.max_reach_dist,
                 self.grasp_dist_thres,
+                self.place_dist_thres,
                 self.grasp_pose_thres,
                 self.object_dist_thres,
             ],
@@ -239,10 +244,11 @@ def infer_state_machine(
     offset: wp.array(dtype=wp.transform),
     max_reach_dist: float,  # the object is reachable
     grasp_dist_threshold: float,  # the object is graspable
+    place_dist_threshold: float,  # the object is placed within this distance
     grasp_pose_threshold: float,  # the ee pose is aligned with object
     object_dist_threshold: float,  # the object to be considered grasped
 ):
-    debug = False
+    debug = True
     tid = wp.tid()
     state = sm_state[tid]
     # Thresholds for checking offsets
@@ -260,7 +266,9 @@ def infer_state_machine(
     if state == PlaceSmState.INIT:
         gripper_state[tid] = GripperState.OPEN
         des_ee_pose[tid] = init_pose[tid]
-        dist_eef_obj = sm_utils.get_length(wp.transform_get_translation(grasp_pose[tid]))
+        dist_eef_obj = sm_utils.get_length(
+            wp.transform_get_translation(grasp_pose[tid])
+        )
         if sm_wait_time[tid] >= PlaceSmWaitTime.INIT and dist_eef_obj < max_reach_dist:
             sm_state[tid] = PlaceSmState.APPROACH_ABOVE_OBJECT
             sm_wait_time[tid] = 0.0
@@ -268,7 +276,9 @@ def infer_state_machine(
             print("INIT")
     elif state == PlaceSmState.RESET:
         gripper_state[tid] = GripperState.OPEN
-        dist_eef_obj = sm_utils.get_length(wp.transform_get_translation(grasp_pose[tid]))
+        dist_eef_obj = sm_utils.get_length(
+            wp.transform_get_translation(grasp_pose[tid])
+        )
         if dist_eef_obj > max_reach_dist:
             des_ee_pose[tid] = final_eef_pose[tid]
         else:
@@ -285,7 +295,9 @@ def infer_state_machine(
             wp.transform_get_translation(ee_pose[tid]),
             wp.transform_get_translation(object_pose[tid]),
         )
-        dist_eef_obj = sm_utils.get_length(wp.transform_get_translation(grasp_pose[tid]))
+        dist_eef_obj = sm_utils.get_length(
+            wp.transform_get_translation(grasp_pose[tid])
+        )
         if dist_eef_obj >= max_reach_dist:
             sm_state[tid] = PlaceSmState.RESET
             sm_wait_time[tid] = 0.0
@@ -392,7 +404,7 @@ def infer_state_machine(
             wp.transform_get_translation(object_pose[tid])
             - wp.transform_get_translation(place_pose[tid])
         )
-        if dist_object_target > object_dist_threshold:
+        if dist_object_target > place_dist_threshold:
             sm_state[tid] = PlaceSmState.RESET
             sm_wait_time[tid] = 0.0
         if debug:
