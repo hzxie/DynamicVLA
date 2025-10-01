@@ -10,6 +10,7 @@ scene:
       prim_path: "/Robot/SideCamera"
   objects:
     n_objects: 1
+    mass: 0.05
     prob_rnd_quat: 0.85
     prob_static: 0.5
     moving_time: [0.5, 2.0]
@@ -17,6 +18,7 @@ scene:
       - can
   containers:
     n_containers: 0
+    mass: 0.1
     categories:
       - bowl
 

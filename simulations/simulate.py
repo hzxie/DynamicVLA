@@ -269,7 +269,11 @@ def _get_object_states(
             random_orientation,
             object_states["objects"],
         )
-        object_states["objects"].append({**_object, **_state})
+        object_states["objects"].append({
+            **_object, 
+            **_state,
+            "mass": object_cfg.get("mass", 0.05),
+        })
 
     # Generate the poses of containers (The first container is the target container)
     container_cfg = sim_cfg["scene"]["containers"]
@@ -292,7 +296,11 @@ def _get_object_states(
             cntr_range_bbox,
             object_states,
         )
-        object_states["containers"].append({**_container, **_state})
+        object_states["containers"].append({
+            **_container, 
+            **_state, 
+            "mass": container_cfg.get("mass", 0.1),
+        })
 
     return object_states
 
@@ -434,6 +442,7 @@ def _set_up_scene_objects(scene_cfg, object_states):
             target_object,
             configs.object_cfg.get_spawner_cfg(
                 file_path=target_object["file_path"],
+                mass=target_object["mass"],
                 semantic_tags=[("class", "OBJECT_MAIN")],
             ),
         ),
@@ -449,7 +458,7 @@ def _set_up_scene_objects(scene_cfg, object_states):
                 o,
                 configs.object_cfg.get_spawner_cfg(
                     file_path=o["file_path"],
-                    mass=1,  # TODO: Make it configurable
+                    mass=o["mass"],
                     semantic_tags=[("class", "OBJECT_BG")],
                 ),
             ),
@@ -472,6 +481,7 @@ def _set_up_scene_containers(scene_cfg, container_states):
                 o,
                 configs.object_cfg.get_spawner_cfg(
                     file_path=o["file_path"],
+                    mass=o["mass"],
                     semantic_tags=[
                         ("class", "CONTAINER_BG" if i != 0 else "CONTAINER_MAIN")
                     ],
