@@ -551,6 +551,7 @@ def get_curr_state(
     object_state=None,
     object_size=None,
     container_state=None,
+    container_size=None,
     env_origins=None,
     robot_quat=None,
     device="cpu",
@@ -595,6 +596,13 @@ def get_curr_state(
                 container_state.root_quat_w, robot_quat
             ),
         }
+    if container_size is not None:
+        if "container" not in curr_state:
+            curr_state["container"] = {}
+
+        curr_state["container"]["size"] = _get_object_relative_bbox(
+            container_size, container_state.root_quat_w, robot_quat
+        )
     if device == "cpu":
         for csk, csv in curr_state.items():
             if isinstance(csv, dict):
@@ -766,6 +774,11 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
         object_metadata,
         env.unwrapped.device,
     )
+    container_size = get_object_size(
+        os.path.basename(env_cfg.scene.container.spawn.usd_path),
+        object_metadata,
+        env.unwrapped.device,
+    )
 
     # Enable Path Tracing
     if sim_cfg["enable_cameras"] and sim_cfg["path_tracing"]:
@@ -808,6 +821,11 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
             object_size,
             (
                 env.unwrapped.scene["container"].data
+                if "container" in env.unwrapped.scene.keys()
+                else None
+            ),
+            (
+                container_size
                 if "container" in env.unwrapped.scene.keys()
                 else None
             ),

@@ -48,7 +48,7 @@ class PlaceSmWaitTime:
     LIFT_OBJECT = wp.constant(0.2)
     APPROACH_ABOVE_TARGET = wp.constant(0.4)
     APPROACH_TARGET = wp.constant(0.4)
-    PLACE_OBJECT = wp.constant(0.2)
+    PLACE_OBJECT = wp.constant(0.4)
     TO_TARGET = wp.constant(0.6)
 
 
@@ -143,6 +143,27 @@ class PlaceStateMachine:
         place_quat = self.final_eef_pose[:, 3:7]
 
         return torch.cat([place_position, place_quat], dim=-1)
+    
+    def _get_object_placed(
+        self, 
+        object_projected_size: torch.Tensor,
+        object_position: torch.Tensor,
+        container_projected_size: torch.Tensor,
+        container_position: torch.Tensor,
+    ) -> torch.Tensor:
+        # Simple implementation
+        object_relative_size = object_projected_size / 2
+        object_negz_mask = (object_relative_size[:, 2] > 0).unsqueeze(1)
+        object_negz_size = torch.where(object_negz_mask, -object_relative_size, object_relative_size)
+        lowest_point = object_position + object_negz_size.sum(dim=0) / 2
+
+        containier_relative_size = container_projected_size / 2
+        object_container_rela = lowest_point - container_position
+        containier_axis_lengths = torch.norm(containier_relative_size, dim=1)
+        containier_axis_dirs = containier_relative_size / containier_axis_lengths[:, None]
+        object_container_projections = torch.matmul(containier_axis_dirs, object_container_rela[0])
+
+        return torch.all(torch.abs(object_container_projections) <= containier_axis_lengths)
 
     def compute(self, curr_state: dict) -> torch.Tensor:
         ee_pose = torch.cat(
@@ -174,6 +195,12 @@ class PlaceStateMachine:
             curr_state["object"]["velocity"],
             curr_state["container"]["pos"],
         )
+        is_object_placed = self._get_object_placed(
+            curr_state["object"]["size"],
+            curr_state["object"]["pos"],
+            curr_state["container"]["size"],
+            curr_state["container"]["pos"],
+        ).item()
         grasp_pose = torch.cat([grasp_position, grasp_quat], dim=-1)
         object_pose = torch.cat([curr_state["object"]["pos"], grasp_quat], dim=-1)
 
@@ -207,9 +234,9 @@ class PlaceStateMachine:
                 self.offset_wp,
                 self.max_reach_dist,
                 self.grasp_dist_thres,
-                self.place_dist_thres,
                 self.grasp_pose_thres,
                 self.object_dist_thres,
+                is_object_placed,
             ],
             device=self.device,
         )
@@ -242,11 +269,11 @@ def infer_state_machine(
     des_ee_pose: wp.array(dtype=wp.transform),
     gripper_state: wp.array(dtype=float),
     offset: wp.array(dtype=wp.transform),
-    max_reach_dist: float,  # the object is reachable
+    max_reach_dist: float,        # the object is reachable
     grasp_dist_threshold: float,  # the object is graspable
-    place_dist_threshold: float,  # the object is placed within this distance
     grasp_pose_threshold: float,  # the ee pose is aligned with object
-    object_dist_threshold: float,  # the object to be considered grasped
+    object_dist_threshold: float, # the object to be considered grasped
+    is_object_placed: bool,       # the object is placed
 ):
     debug = True
     tid = wp.tid()
@@ -404,7 +431,7 @@ def infer_state_machine(
             wp.transform_get_translation(object_pose[tid])
             - wp.transform_get_translation(place_pose[tid])
         )
-        if dist_object_target > place_dist_threshold:
+        if not is_object_placed:
             sm_state[tid] = PlaceSmState.RESET
             sm_wait_time[tid] = 0.0
         if debug:
