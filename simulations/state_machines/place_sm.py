@@ -149,6 +149,7 @@ class PlaceStateMachine:
         object_position: torch.Tensor,
         container_projected_size: torch.Tensor,
         container_position: torch.Tensor,
+        tolerance: float = 0.015,
     ) -> torch.Tensor:
         object_relative_size = object_projected_size / 2
         object_negz_mask = (object_relative_size[:, 2] > 0).unsqueeze(1)
@@ -157,7 +158,7 @@ class PlaceStateMachine:
         )
         lowest_point = object_position + object_negz_size.sum(dim=0)
 
-        containier_relative_size = container_projected_size / 2
+        containier_relative_size = container_projected_size / 2 + tolerance
         object_container_rela = lowest_point - container_position
         containier_axis_lengths = torch.norm(containier_relative_size, dim=1)
         containier_axis_dirs = (
