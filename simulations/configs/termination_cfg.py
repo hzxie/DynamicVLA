@@ -60,7 +60,7 @@ def is_object_placed(
     object_relative_size = _get_object_relative_bbox(object_size, object.data.root_quat_w) / 2
     object_negz_mask = (object_relative_size[:, 2] > 0).unsqueeze(1)
     object_negz_size = torch.where(object_negz_mask, -object_relative_size, object_relative_size)
-    lowest_point = object.data.root_pos_w + object_negz_size.sum(dim=0) / 2
+    lowest_point = object.data.root_pos_w + object_negz_size.sum(dim=0)
 
     containier_relative_size = _get_object_relative_bbox(container_size, container.data.root_quat_w) / 2
     object_container_rela = lowest_point - container.data.root_pos_w

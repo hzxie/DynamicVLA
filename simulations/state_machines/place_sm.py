@@ -155,7 +155,7 @@ class PlaceStateMachine:
         object_relative_size = object_projected_size / 2
         object_negz_mask = (object_relative_size[:, 2] > 0).unsqueeze(1)
         object_negz_size = torch.where(object_negz_mask, -object_relative_size, object_relative_size)
-        lowest_point = object_position + object_negz_size.sum(dim=0) / 2
+        lowest_point = object_position + object_negz_size.sum(dim=0)
 
         containier_relative_size = container_projected_size / 2
         object_container_rela = lowest_point - container_position
