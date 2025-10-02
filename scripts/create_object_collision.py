@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-04 10:36:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-28 22:41:55
+# @Last Modified at: 2025-10-01 21:31:52
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -81,6 +81,17 @@ def create_mesh_collider(curr_stage, prim_path):
     )
 
 
+def create_mass_attr(curr_stage, prim_path, mass):
+    from pxr import UsdPhysics
+
+    prim = curr_stage.GetPrimAtPath(prim_path)
+    if not prim.HasAPI(UsdPhysics.MassAPI):
+        UsdPhysics.MassAPI.Apply(prim)
+
+    mass_api = UsdPhysics.MassAPI(prim)
+    mass_api.CreateMassAttr(mass)
+
+
 def reset_object_material(prim):
     from pxr import UsdShade
 
@@ -91,7 +102,7 @@ def reset_object_material(prim):
     shader.GetInput("useSpecularWorkflow").Set(0)
 
 
-def main(input_dir, output_dir, approximate_collider):
+def main(input_dir, output_dir, mass, approximate_collider):
     import isaacsim.core.utils.stage as stage_utils
 
     GEO_PATH = "/Object/geometry"
@@ -108,8 +119,10 @@ def main(input_dir, output_dir, approximate_collider):
         create_asset_prim(stage, GEO_PATH, input_file)
         if approximate_collider:
             create_approximate_collider(stage, COL_PATH, category)
+            create_mass_attr(stage, COL_PATH, mass)
         else:
             create_mesh_collider(stage, f"{GEO_PATH}/mesh")
+            create_mass_attr(stage, f"{GEO_PATH}/mesh", mass)
 
         mtl_prim = stage.GetPrimAtPath(f"{GEO_PATH}/mtl/material_0")
         if mtl_prim.IsValid():
@@ -135,8 +148,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_dir", default=os.path.join(PROJECT_HOME, os.pardir, "objects")
     )
+    parser.add_argument("--mass", type=float, default=0.05)
     parser.add_argument("--approximate-collider", action="store_true")
     args = parser.parse_args()
 
-    main(args.input_dir, args.output_dir, args.approximate_collider)
+    main(args.input_dir, args.output_dir, args.mass, args.approximate_collider)
     app.close()
