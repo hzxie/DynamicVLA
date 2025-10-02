@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-30 20:58:01
+# @Last Modified at: 2025-10-02 15:21:56
 # @Email:  root@haozhexie.com
 
 import collections
@@ -134,7 +134,6 @@ class PlaceStateMachine:
 
     def _get_place_pose(
         self,
-        object_velocity: torch.Tensor,
         container_position: torch.Tensor,
     ) -> torch.Tensor:
         # Simple implementation
@@ -143,27 +142,34 @@ class PlaceStateMachine:
         place_quat = self.final_eef_pose[:, 3:7]
 
         return torch.cat([place_position, place_quat], dim=-1)
-    
-    def _get_object_placed(
-        self, 
+
+    def _is_object_placed(
+        self,
         object_projected_size: torch.Tensor,
         object_position: torch.Tensor,
         container_projected_size: torch.Tensor,
         container_position: torch.Tensor,
     ) -> torch.Tensor:
-        # Simple implementation
         object_relative_size = object_projected_size / 2
         object_negz_mask = (object_relative_size[:, 2] > 0).unsqueeze(1)
-        object_negz_size = torch.where(object_negz_mask, -object_relative_size, object_relative_size)
+        object_negz_size = torch.where(
+            object_negz_mask, -object_relative_size, object_relative_size
+        )
         lowest_point = object_position + object_negz_size.sum(dim=0)
 
         containier_relative_size = container_projected_size / 2
         object_container_rela = lowest_point - container_position
         containier_axis_lengths = torch.norm(containier_relative_size, dim=1)
-        containier_axis_dirs = containier_relative_size / containier_axis_lengths[:, None]
-        object_container_projections = torch.matmul(containier_axis_dirs, object_container_rela[0])
+        containier_axis_dirs = (
+            containier_relative_size / containier_axis_lengths[:, None]
+        )
+        object_container_projections = torch.matmul(
+            containier_axis_dirs, object_container_rela[0]
+        )
 
-        return torch.all(torch.abs(object_container_projections) <= containier_axis_lengths)
+        return torch.all(
+            torch.abs(object_container_projections) <= containier_axis_lengths
+        )
 
     def compute(self, curr_state: dict) -> torch.Tensor:
         ee_pose = torch.cat(
@@ -192,10 +198,9 @@ class PlaceStateMachine:
             curr_state["end_effector"]["quat"],
         )
         place_pose = self._get_place_pose(
-            curr_state["object"]["velocity"],
             curr_state["container"]["pos"],
         )
-        is_object_placed = self._get_object_placed(
+        is_object_placed = self._is_object_placed(
             curr_state["object"]["size"],
             curr_state["object"]["pos"],
             curr_state["container"]["size"],
@@ -269,11 +274,11 @@ def infer_state_machine(
     des_ee_pose: wp.array(dtype=wp.transform),
     gripper_state: wp.array(dtype=float),
     offset: wp.array(dtype=wp.transform),
-    max_reach_dist: float,        # the object is reachable
+    max_reach_dist: float,  # the object is reachable
     grasp_dist_threshold: float,  # the object is graspable
     grasp_pose_threshold: float,  # the ee pose is aligned with object
-    object_dist_threshold: float, # the object to be considered grasped
-    is_object_placed: bool,       # the object is placed
+    object_dist_threshold: float,  # the object to be considered grasped
+    is_object_placed: bool,  # the object is placed
 ):
     debug = True
     tid = wp.tid()

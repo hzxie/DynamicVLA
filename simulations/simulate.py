@@ -824,11 +824,7 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
                 if "container" in env.unwrapped.scene.keys()
                 else None
             ),
-            (
-                container_size
-                if "container" in env.unwrapped.scene.keys()
-                else None
-            ),
+            (container_size if "container" in env.unwrapped.scene.keys() else None),
             env.unwrapped.scene["robot"].data.root_pos_w,
             env.unwrapped.scene["robot"].data.root_quat_w,
             env.unwrapped.device,
