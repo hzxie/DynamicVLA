@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-22 14:40:51
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-26 16:17:26
+# @Last Modified at: 2025-10-03 09:57:27
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -141,10 +141,37 @@ def contains_invisible_prims(stage):
     return invisible_prims
 
 
-def main(scene_dir):
+def contains_huge_prims(stage):
+    # Represented by 0a17c68b-b74d-4d81-afe4-bc2ed405f0ec.usd
+    from pxr import Usd, UsdGeom
+
+    bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    house_bbox = bbox_cache.ComputeWorldBound(stage.GetPrimAtPath("/house/structure"))
+
+    huge_prims = []
+    for prim in stage.Traverse():
+        if prim.GetTypeName() != "Mesh":
+            continue
+        if prim.GetPath().pathString.startswith("/house/"):
+            # Check if the prim is huge
+            prim_bbox = bbox_cache.ComputeWorldBound(prim)
+            if prim_bbox.GetVolume() > house_bbox.GetVolume():
+                parent_prim = prim.GetParent()
+                assert parent_prim.GetTypeName() == "Xform"
+                huge_prims.append(prim.GetParent())
+
+    return list(set(huge_prims))
+
+
+def main(scene_dir, range=None):
     from pxr import Usd, UsdGeom
 
     usd_files = [f for f in os.listdir(scene_dir) if f.endswith(".usd")]
+    if range is not None:
+        start, end = range
+        logging.info("Processing USD files from %d to %d" % (start, end))
+        usd_files = usd_files[start:end]
+
     for uf in tqdm(usd_files):
         usd_file = os.path.join(scene_dir, uf)
         modified = False
@@ -182,6 +209,14 @@ def main(scene_dir):
             for ip in invisible_prims:
                 UsdGeom.Imageable(ip).GetVisibilityAttr().Set(UsdGeom.Tokens.inherited)
 
+        huge_prims = contains_huge_prims(stage)
+        if huge_prims:
+            modified = True
+            logging.info("Huge primitives[%s] found in %s" % (huge_prims, uf))
+            for hp in huge_prims:
+                if not stage.RemovePrim(hp.GetPath()):
+                    logging.warning("Failed to remove huge object %s" % (hp.GetPath()))
+
         if modified:
             stage.GetRootLayer().Save()
 
@@ -199,7 +234,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--scene_dir", default=os.path.join(PROJECT_HOME, os.pardir, "scenes")
     )
+    parser.add_argument("--range", type=int, nargs=2, default=None)
     args = parser.parse_args()
 
-    main(args.scene_dir)
+    main(args.scene_dir, args.range)
     app.close()

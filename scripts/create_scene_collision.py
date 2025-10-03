@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-04 10:36:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-22 18:49:59
+# @Last Modified at: 2025-10-03 09:56:20
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -190,23 +190,14 @@ def save_table_heights(stage, heights):
 
 
 def add_table_planes(stage, heights):
-    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+    from pxr import Gf, UsdGeom, UsdPhysics
 
-    THICKNESS = 0.001
-    bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    THICKNESS = 0.01
     for prim_path, height in heights.items():
         prim = stage.GetPrimAtPath(prim_path)
-        bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
+        # NOTE: bbox_cache.ComputeWorldBound may not be correct.
+        bbox = _get_bounding_box(prim)
         size = bbox.GetSize()
-        rot_op = [
-            op
-            for op in UsdGeom.Xformable(prim).GetOrderedXformOps()
-            if op.GetOpName() == "xformOp:rotateXYZ"
-        ]
-        rot_op = None if len(rot_op) == 0 else rot_op[0]
-        if rot_op is not None and abs(abs(rot_op.Get()[1]) - 90) < 1e-3:
-            # Ugly fix: If the table is rotated, swap the x and z axes
-            size = Gf.Vec3f(size[2], size[1], size[0])
 
         plane = UsdGeom.Cube.Define(stage, "%s/TablePlane" % prim_path)
         plane_prim = plane.GetPrim()
@@ -217,10 +208,28 @@ def add_table_planes(stage, heights):
         # 1. The default size of the plane is 2.0
         # 2. The y-axis is the up-axis in the USD
         # 3. The translation is the relative position of the table bbox
-        plane.AddTranslateOp().Set(Gf.Vec3f(0.0, height + THICKNESS / 2.0, 0.0))
+        plane.AddTranslateOp().Set(Gf.Vec3f(0.0, height - THICKNESS / 2, 0.0))
         plane.AddScaleOp().Set(Gf.Vec3f(size[0] / 2.0, THICKNESS, size[2] / 2.0))
         # Set the transparency of the plane
         UsdGeom.Imageable(plane_prim).MakeInvisible()
+
+
+def _get_bounding_box(prim):
+    from pxr import Usd, UsdGeom, Gf
+
+    DEFAULT_TIME = Usd.TimeCode.Default()
+    bbox = Gf.Range3d()
+    for child in prim.GetChildren():
+        if not child.GetTypeName() == "Mesh":
+            continue
+
+        mesh = UsdGeom.Mesh(child)
+        for p in mesh.GetPointsAttr().Get(DEFAULT_TIME):
+            bbox.UnionWith(Gf.Vec3d(p))
+        # Update extent for future use
+        mesh.GetExtentAttr().Set([bbox.GetMin(), bbox.GetMax()], DEFAULT_TIME)
+
+    return bbox
 
 
 def main(input_dir, output_dir, ignore_files=None, range=None):
