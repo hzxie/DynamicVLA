@@ -51,7 +51,7 @@ tasks:
     episode_length: 10
   place:
     sm: "state_machines.place_sm.PlaceStateMachine"
-    episode_length: 20
+    episode_length: 10
 
 robots:
   franka:
