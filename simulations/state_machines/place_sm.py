@@ -91,6 +91,7 @@ class PlaceStateMachine:
         self.init_pose = init_pose[:, [0, 1, 2, 4, 5, 6, 3]].repeat(num_envs, 1)
         self.sm_dt = torch.full((num_envs,), dt, device=device)
         self.sm_state = torch.full((num_envs,), 0, dtype=torch.int32, device=device)
+        self.sm_is_placed = torch.full((num_envs,), 0, dtype=torch.int32, device=device)
         self.sm_wait_time = torch.zeros((num_envs,), device=device)
         # next gripper state
         self.des_ee_pose = torch.zeros((num_envs, POSE_DIM), device=device)
@@ -119,6 +120,7 @@ class PlaceStateMachine:
         # convert to warp
         self.sm_dt_wp = wp.from_torch(self.sm_dt, wp.float32)
         self.sm_state_wp = wp.from_torch(self.sm_state, wp.int32)
+        self.sm_is_placed_wp = wp.from_torch(self.sm_is_placed, wp.int32)
         self.sm_wait_time_wp = wp.from_torch(self.sm_wait_time, wp.float32)
         self.des_ee_pose_wp = wp.from_torch(self.des_ee_pose, wp.transform)
         self.des_gripper_state_wp = wp.from_torch(self.des_gripper_state, wp.float32)
@@ -149,7 +151,7 @@ class PlaceStateMachine:
         object_position: torch.Tensor,
         container_projected_size: torch.Tensor,
         container_position: torch.Tensor,
-        tolerance: float = 0.015,
+        tolerance: float = 0.02,
     ) -> torch.Tensor:
         object_relative_size = object_projected_size / 2
         object_negz_mask = (object_relative_size[:, 2] > 0).unsqueeze(1)
@@ -226,6 +228,7 @@ class PlaceStateMachine:
             inputs=[
                 self.sm_dt_wp,
                 self.sm_state_wp,
+                self.sm_is_placed_wp,
                 self.sm_wait_time_wp,
                 grasp_pose_wp,
                 object_pose_wp,
@@ -263,6 +266,7 @@ class PlaceStateMachine:
 def infer_state_machine(
     dt: wp.array(dtype=float),
     sm_state: wp.array(dtype=int),
+    sm_is_placed: wp.array(dtype=int),
     sm_wait_time: wp.array(dtype=float),
     grasp_pose: wp.array(dtype=wp.transform),
     object_pose: wp.array(dtype=wp.transform),
@@ -428,28 +432,25 @@ def infer_state_machine(
         if sm_wait_time[tid] >= PlaceSmWaitTime.PLACE_OBJECT:
             sm_state[tid] = PlaceSmState.TO_TARGET
             sm_wait_time[tid] = 0.0
+            sm_is_placed[tid] = 0
         if debug:
             print("PLACE_OBJECT")
     elif state == PlaceSmState.TO_TARGET:
         des_ee_pose[tid] = final_eef_pose[tid]
         gripper_state[tid] = GripperState.OPEN
-        dist_object_target = sm_utils.get_length(
-            wp.transform_get_translation(object_pose[tid])
-            - wp.transform_get_translation(place_pose[tid])
-        )
-        if not is_object_placed:
+        if is_object_placed:
+            sm_is_placed[tid] = 0
+        else:
+            sm_is_placed[tid] += 1
+        
+        if sm_is_placed[tid] >= 5:
             sm_state[tid] = PlaceSmState.RESET
             sm_wait_time[tid] = 0.0
         if debug:
             wp.printf(
-                "TO_TARGET: ee: [%.4f, %.4f, %.4f] tgt: [%.4f, %.4f, %.4f], dist: %.4f\n",
-                object_pose[tid][0],
-                object_pose[tid][1],
-                object_pose[tid][2],
-                place_pose[tid][0],
-                place_pose[tid][1],
-                place_pose[tid][2],
-                dist_object_target,
+                "TO_TARGET: is_placed: %d, %d\n",
+                is_object_placed,
+                sm_is_placed[tid]
             )
 
     # increment wait time

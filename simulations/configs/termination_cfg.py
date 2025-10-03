@@ -57,30 +57,39 @@ def is_object_placed(
     ee_frame = env.scene[ee_frame_cfg.name]
     robot = env.scene[robot_cfg.name]
 
+    env_origins = robot.data.root_pos_w
+    robot_quat = robot.data.root_quat_w
+    object_pos = _get_robot_relative_position(
+        object.data.root_pos_w - env_origins, robot_quat
+    )
+    container_pos = _get_robot_relative_position(
+        container.data.root_pos_w - env_origins, robot_quat
+    )
+
     object_relative_size = (
-        _get_object_relative_bbox(object_size, object.data.root_quat_w) / 2
+        _get_object_relative_bbox(object_size, object.data.root_quat_w, robot_quat) / 2
     )
     object_negz_mask = (object_relative_size[:, 2] > 0).unsqueeze(1)
     object_negz_size = torch.where(
         object_negz_mask, -object_relative_size, object_relative_size
     )
-    lowest_point = object.data.root_pos_w + object_negz_size.sum(dim=0)
+    lowest_point = object_pos + object_negz_size.sum(dim=0)
 
     containier_relative_size = (
-        _get_object_relative_bbox(container_size, container.data.root_quat_w) / 2
+        _get_object_relative_bbox(container_size, container.data.root_quat_w, robot_quat) / 2
         + tolerance
     )
-    object_container_rela = lowest_point - container.data.root_pos_w
+    object_container_rela = lowest_point - container_pos
     containier_axis_lengths = torch.norm(containier_relative_size, dim=1)
     containier_axis_dirs = containier_relative_size / containier_axis_lengths[:, None]
     object_container_projections = torch.matmul(
         containier_axis_dirs, object_container_rela[0]
     )
 
-    goal_position_r = goal_position.to(device=robot.data.root_pos_w.device)
-    eef_position_r = quat_apply(
-        quat_inv(robot.data.root_quat_w),
-        ee_frame.data.target_pos_w[..., 0, :] - robot.data.root_pos_w,
+    goal_position_r = goal_position.to(device=env_origins.device)
+    eef_position_r = _get_robot_relative_position(
+        ee_frame.data.target_pos_w[..., 0, :] - env_origins,
+        robot_quat
     )
     eef_goal_dist = torch.norm(goal_position_r - eef_position_r, dim=1)
 
@@ -90,7 +99,7 @@ def is_object_placed(
     )
 
 
-def _get_object_relative_bbox(object_size, object_quat_w):
+def _get_object_relative_bbox(object_size, object_quat_w, robot_quat):
     object_size_x_rot = quat_apply(
         object_quat_w,
         torch.tensor([[object_size[:, 0], 0.0, 0.0]], device=object_size.device),
@@ -103,7 +112,16 @@ def _get_object_relative_bbox(object_size, object_quat_w):
         object_quat_w,
         torch.tensor([[0.0, 0.0, object_size[:, 2]]], device=object_size.device),
     )
+    object_size_x_rot = _get_robot_relative_position(object_size_x_rot, robot_quat)
+    object_size_y_rot = _get_robot_relative_position(object_size_y_rot, robot_quat)
+    object_size_z_rot = _get_robot_relative_position(object_size_z_rot, robot_quat)
     return torch.cat([object_size_x_rot, object_size_y_rot, object_size_z_rot], dim=0)
+
+
+def _get_robot_relative_position(point, robot_quat):
+    # inv_quat = scipy.spatial.transform.Rotation.from_quat(robot_quat).inv()
+    # inv_offset = inv_quat.apply(point)
+    return quat_apply(quat_inv(robot_quat), point)
 
 
 def get_done_term(terms: list[str]) -> str | None:
@@ -152,7 +170,7 @@ class PlaceTerminationsCfg(TerminationsCfg):
             "goal_position": None,
             "object_size": None,
             "container_size": None,
-            "tolerance": 0.015,
+            "tolerance": 0.02,
         },
         time_out=False,
     )
