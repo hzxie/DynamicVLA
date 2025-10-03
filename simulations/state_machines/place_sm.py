@@ -46,9 +46,9 @@ class PlaceSmWaitTime:
     APPROACH_ABOVE_OBJECT = wp.constant(0.4)
     APPROACH_OBJECT = wp.constant(0.72)
     GRASP_OBJECT = wp.constant(0.72)
-    LIFT_OBJECT = wp.constant(0.2)
+    LIFT_OBJECT = wp.constant(0.0)
     APPROACH_ABOVE_TARGET = wp.constant(0.4)
-    APPROACH_TARGET = wp.constant(0.4)
+    APPROACH_TARGET = wp.constant(0.6)
     PLACE_OBJECT = wp.constant(0.4)
     TO_TARGET = wp.constant(0.6)
 
@@ -372,10 +372,11 @@ def infer_state_machine(
             wp.transform_get_translation(ee_pose[tid])
             - wp.transform_get_translation(object_pose[tid])
         )
+        dist_ee_target = place_pose[tid][2] + (offset[tid][2] / 2.0) - ee_pose[tid][2]
         if dist_ee_object > object_dist_threshold:
             sm_state[tid] = PlaceSmState.RESET
             sm_wait_time[tid] = 0.0
-        elif sm_wait_time[tid] >= PlaceSmWaitTime.LIFT_OBJECT:
+        elif dist_ee_target < grasp_dist_threshold :
             sm_state[tid] = PlaceSmState.APPROACH_ABOVE_TARGET
             sm_wait_time[tid] = 0.0
         if debug:
