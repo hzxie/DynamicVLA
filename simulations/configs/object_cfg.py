@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-16 14:38:58
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-07-07 20:05:32
+# @Last Modified at: 2025-10-03 20:06:46
 # @Email:  root@haozhexie.com
 
 import isaaclab.sim as sim_utils
@@ -74,13 +74,13 @@ def get_spawner_cfg(
     return spawner_cfg
 
 
-def get_object_init_quat(init_lin_vel: list[float]) -> list[float]:
+def get_object_init_quat(init_lin_vel: list[float], upright=False) -> list[float]:
     quat = scipy.spatial.transform.Rotation.from_euler(
         "xyz",
         [
-            np.pi / 2 * np.random.choice([-1, 1]),
+            0 if upright else np.pi / 2 * np.random.choice([-1, 1]),
             0,
             -np.arctan2(init_lin_vel[1], init_lin_vel[0]),
         ],
     ).as_quat()
-    return quat[[1, 2, 3, 0]]
+    return quat[[3, 0, 1, 2]]

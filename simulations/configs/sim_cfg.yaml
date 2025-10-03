@@ -17,10 +17,13 @@ scene:
     categories:
       - can
   containers:
-    n_containers: 0
+    n_containers: 1
     mass: 0.1
     categories:
       - bowl
+      - box
+      - plate
+      - tray
 
 camera:
   width: 480
@@ -51,7 +54,7 @@ tasks:
     episode_length: 10
   place:
     sm: "state_machines.place_sm.PlaceStateMachine"
-    episode_length: 10
+    episode_length: 12
 
 robots:
   franka:

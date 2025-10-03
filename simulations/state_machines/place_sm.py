@@ -12,6 +12,7 @@ import collections
 import numpy as np
 import torch
 import warp as wp
+
 from . import sm_utils
 
 
@@ -442,15 +443,13 @@ def infer_state_machine(
             sm_is_placed[tid] = 0
         else:
             sm_is_placed[tid] += 1
-        
+
         if sm_is_placed[tid] >= 5:
             sm_state[tid] = PlaceSmState.RESET
             sm_wait_time[tid] = 0.0
         if debug:
             wp.printf(
-                "TO_TARGET: is_placed: %d, %d\n",
-                is_object_placed,
-                sm_is_placed[tid]
+                "TO_TARGET: is_placed: %d, %d\n", is_object_placed, sm_is_placed[tid]
             )
 
     # increment wait time

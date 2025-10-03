@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-01 20:59:09
+# @Last Modified at: 2025-10-03 20:02:42
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -25,6 +25,10 @@ import scipy.spatial.transform
 import torch
 import yaml
 from isaaclab.app import AppLauncher
+from shapely.geometry import Polygon
+
+
+from simulations import helpers
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 
@@ -296,8 +300,9 @@ def _get_object_states(
     for _ in range(container_cfg["n_containers"]):
         _container = random.choice(container_candidates)  # TODO: Avoid duplicates
         _state = _get_container_state(
-            _get_object_z(object_range_bbox.max[2], _container["size"]),
+            _container["size"],
             cntr_range_bbox,
+            random_orientation,
             object_states,
         )
         object_states["containers"].append(
@@ -415,18 +420,65 @@ def _get_dynamic_object_state(object_range_bbox, object_z, moving_time, robot_po
     }
 
 
-def _get_container_state(container_z, object_range_bbox, existing_objects):
+def _get_container_state(
+    container_size, object_range_bbox, random_orientation, existing_objects
+):
     import configs.object_cfg
 
-    # TODO: Consider the state of existing objects and containers
-    object_position = np.array(
+    container_position = None
+    while container_position is None:
+        container_position = np.array(
+            [
+                random.uniform(object_range_bbox.min[0], object_range_bbox.max[0]),
+                random.uniform(object_range_bbox.min[1], object_range_bbox.max[1]),
+                _get_object_z(object_range_bbox.max[2], container_size),
+            ]
+        )
+        container_quat = np.array([1.0, 0.0, 0.0, 0.0])
+        if random_orientation:
+            container_quat = configs.object_cfg.get_object_init_quat(
+                np.random.uniform(-0.1, 0.1, size=3), upright=True
+            )
+        # Check whether the container is occluding with existing objects/containers
+        for eo in existing_objects["objects"] + existing_objects["containers"]:
+            if _is_bbox_overlap(
+                _get_object_bbox(container_position, container_size, container_quat),
+                _get_object_bbox(
+                    eo["pos"], eo["size"], eo["quat"], eo.get("lin_vel", None)
+                ),
+            ):
+                container_position = None
+                break
+
+    return {"pos": container_position, "quat": container_quat}
+
+
+def _get_object_bbox(position, size, quat, lin_vel=None):
+    # TODO: Consider the velocity of the object
+    dx, dy, dz = size / 2.0
+    corners = np.array(
         [
-            random.uniform(object_range_bbox.min[0], object_range_bbox.max[0]),
-            random.uniform(object_range_bbox.min[1], object_range_bbox.max[1]),
-            container_z,
+            [-dx, -dy, -dz],
+            [dx, -dy, -dz],
+            [dx, dy, -dz],
+            [-dx, dy, -dz],
+            [-dx, -dy, dz],
+            [dx, -dy, dz],
+            [dx, dy, dz],
+            [-dx, dy, dz],
         ]
     )
-    return {"pos": object_position}
+    rotated_corners = scipy.spatial.transform.Rotation.from_quat(
+        quat[[1, 2, 3, 0]]
+    ).apply(corners)
+
+    bbox = rotated_corners + position
+    z_min = np.min(bbox[:, 2])
+    return Polygon(bbox[np.isclose(bbox[:, 2], z_min, atol=1e-6), :2])
+
+
+def _is_bbox_overlap(bbox1, bbox2):
+    return bbox1.intersects(bbox2)
 
 
 def _set_up_scene_objects(scene_cfg, object_states):
@@ -559,7 +611,7 @@ def get_curr_state(
     curr_state = {}
     if ee_state is not None:
         curr_state["end_effector"] = {
-            "pos": _get_robot_relative_position(
+            "pos": helpers.get_robot_relative_position(
                 ee_state.target_pos_w[..., 0, :] - env_origins, robot_quat
             ),
             "quat": _get_robot_relative_quaternion(
@@ -570,13 +622,13 @@ def get_curr_state(
         curr_state["joints"] = robot_joint_pos
     if object_state is not None:
         curr_state["object"] = {
-            "pos": _get_robot_relative_position(
+            "pos": helpers.get_robot_relative_position(
                 object_state.root_pos_w - env_origins, robot_quat
             ),
             "quat": _get_robot_relative_quaternion(
                 object_state.root_quat_w, robot_quat
             ),
-            "velocity": _get_robot_relative_position(
+            "velocity": helpers.get_robot_relative_position(
                 object_state.root_lin_vel_w, robot_quat
             ),
         }
@@ -584,12 +636,12 @@ def get_curr_state(
         if "object" not in curr_state:
             curr_state["object"] = {}
 
-        curr_state["object"]["size"] = _get_object_relative_bbox(
+        curr_state["object"]["size"] = helpers.get_object_relative_bbox(
             object_size, object_state.root_quat_w, robot_quat
         )
     if container_state is not None:
         curr_state["container"] = {
-            "pos": _get_robot_relative_position(
+            "pos": helpers.get_robot_relative_position(
                 container_state.root_pos_w - env_origins, robot_quat
             ),
             "quat": _get_robot_relative_quaternion(
@@ -600,7 +652,7 @@ def get_curr_state(
         if "container" not in curr_state:
             curr_state["container"] = {}
 
-        curr_state["container"]["size"] = _get_object_relative_bbox(
+        curr_state["container"]["size"] = helpers.get_object_relative_bbox(
             container_size, container_state.root_quat_w, robot_quat
         )
     if device == "cpu":
@@ -613,35 +665,6 @@ def get_curr_state(
                 curr_state[csk] = csv.cpu().numpy()
 
     return curr_state
-
-
-def _get_object_relative_bbox(object_size, object_quat_w, robot_quat):
-    from isaaclab.utils.math import quat_apply
-
-    object_size_x_rot = quat_apply(
-        object_quat_w,
-        torch.tensor([[object_size[:, 0], 0.0, 0.0]], device=robot_quat.device),
-    )
-    object_size_y_rot = quat_apply(
-        object_quat_w,
-        torch.tensor([[0.0, object_size[:, 1], 0.0]], device=robot_quat.device),
-    )
-    object_size_z_rot = quat_apply(
-        object_quat_w,
-        torch.tensor([[0.0, 0.0, object_size[:, 2]]], device=robot_quat.device),
-    )
-    object_size_x_rot = _get_robot_relative_position(object_size_x_rot, robot_quat)
-    object_size_y_rot = _get_robot_relative_position(object_size_y_rot, robot_quat)
-    object_size_z_rot = _get_robot_relative_position(object_size_z_rot, robot_quat)
-    return torch.cat([object_size_x_rot, object_size_y_rot, object_size_z_rot], dim=0)
-
-
-def _get_robot_relative_position(point, robot_quat):
-    # inv_quat = scipy.spatial.transform.Rotation.from_quat(robot_quat).inv()
-    # inv_offset = inv_quat.apply(point)
-    from isaaclab.utils.math import quat_apply, quat_inv
-
-    return quat_apply(quat_inv(robot_quat), point)
 
 
 def _get_robot_relative_quaternion(w_quat, robot_quat):
@@ -774,11 +797,15 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
         object_metadata,
         env.unwrapped.device,
     )
-    container_size = get_object_size(
-        os.path.basename(env_cfg.scene.container.spawn.usd_path),
-        object_metadata,
-        env.unwrapped.device,
-    )
+    if "container" in env.unwrapped.scene.keys():
+        container_data = env.unwrapped.scene["container"].data
+        container_size = get_object_size(
+            os.path.basename(env_cfg.scene.container.spawn.usd_path),
+            object_metadata,
+            env.unwrapped.device,
+        )
+    else:
+        container_data, container_size = None, None
 
     # Enable Path Tracing
     if sim_cfg["enable_cameras"] and sim_cfg["path_tracing"]:
@@ -819,12 +846,8 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
             env.unwrapped.scene.state["articulation"]["robot"]["joint_position"],
             env.unwrapped.scene["object"].data,
             object_size,
-            (
-                env.unwrapped.scene["container"].data
-                if "container" in env.unwrapped.scene.keys()
-                else None
-            ),
-            (container_size if "container" in env.unwrapped.scene.keys() else None),
+            container_data,
+            container_size,
             env.unwrapped.scene["robot"].data.root_pos_w,
             env.unwrapped.scene["robot"].data.root_quat_w,
             env.unwrapped.device,

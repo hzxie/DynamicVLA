@@ -215,7 +215,7 @@ def add_table_planes(stage, heights):
 
 
 def _get_bounding_box(prim):
-    from pxr import Usd, UsdGeom, Gf
+    from pxr import Gf, Usd, UsdGeom
 
     DEFAULT_TIME = Usd.TimeCode.Default()
     bbox = Gf.Range3d()
