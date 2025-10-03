@@ -67,7 +67,8 @@ def is_object_placed(
     lowest_point = object.data.root_pos_w + object_negz_size.sum(dim=0)
 
     containier_relative_size = (
-        _get_object_relative_bbox(container_size, container.data.root_quat_w) / 2 + tolerance
+        _get_object_relative_bbox(container_size, container.data.root_quat_w) / 2
+        + tolerance
     )
     object_container_rela = lowest_point - container.data.root_pos_w
     containier_axis_lengths = torch.norm(containier_relative_size, dim=1)

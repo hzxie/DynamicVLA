@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-22 14:40:51
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-03 09:57:27
+# @Last Modified at: 2025-10-03 10:05:30
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -166,7 +166,7 @@ def contains_huge_prims(stage):
 def main(scene_dir, range=None):
     from pxr import Usd, UsdGeom
 
-    usd_files = [f for f in os.listdir(scene_dir) if f.endswith(".usd")]
+    usd_files = sorted([f for f in os.listdir(scene_dir) if f.endswith(".usd")])
     if range is not None:
         start, end = range
         logging.info("Processing USD files from %d to %d" % (start, end))
