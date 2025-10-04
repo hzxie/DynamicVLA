@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-03 20:02:42
+# @Last Modified at: 2025-10-04 09:38:05
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -15,6 +15,7 @@ import logging
 import os
 import random
 import uuid
+import sys
 
 import cv2
 import gymnasium as gym
@@ -27,10 +28,10 @@ import yaml
 from isaaclab.app import AppLauncher
 from shapely.geometry import Polygon
 
+PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
+sys.path.append(PROJECT_HOME)
 
 from simulations import helpers
-
-PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 
 
 def get_object_metadata(object_dir, target_categories=[]):
@@ -298,13 +299,16 @@ def _get_object_states(
         v for v in object_metadata.values() if v["category"] in container_categories
     ]
     for _ in range(container_cfg["n_containers"]):
-        _container = random.choice(container_candidates)  # TODO: Avoid duplicates
-        _state = _get_container_state(
-            _container["size"],
-            cntr_range_bbox,
-            random_orientation,
-            object_states,
-        )
+        _state = None
+        while _state is None:
+            _container = random.choice(container_candidates)  # TODO: Avoid duplicates
+            _state = _get_container_state(
+                _container["size"],
+                cntr_range_bbox,
+                random_orientation,
+                object_states,
+            )
+
         object_states["containers"].append(
             {
                 **_container,
@@ -425,8 +429,11 @@ def _get_container_state(
 ):
     import configs.object_cfg
 
+    N_MAX_TRIES = 100
+    n_tries = 0
     container_position = None
-    while container_position is None:
+    while container_position is None and n_tries < N_MAX_TRIES:
+        n_tries += 1
         container_position = np.array(
             [
                 random.uniform(object_range_bbox.min[0], object_range_bbox.max[0]),
@@ -450,7 +457,10 @@ def _get_container_state(
                 container_position = None
                 break
 
-    return {"pos": container_position, "quat": container_quat}
+    if container_position is not None:
+        return {"pos": container_position, "quat": container_quat}
+    else:
+        return None
 
 
 def _get_object_bbox(position, size, quat, lin_vel=None):

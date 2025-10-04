@@ -4,16 +4,16 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-02 15:21:56
+# @Last Modified at: 2025-10-04 16:56:06
 # @Email:  root@haozhexie.com
 
 import collections
 
-import numpy as np
 import torch
 import warp as wp
 
 from . import sm_utils
+from simulations import helpers
 
 
 class GripperState:
@@ -146,35 +146,6 @@ class PlaceStateMachine:
 
         return torch.cat([place_position, place_quat], dim=-1)
 
-    def _is_object_placed(
-        self,
-        object_projected_size: torch.Tensor,
-        object_position: torch.Tensor,
-        container_projected_size: torch.Tensor,
-        container_position: torch.Tensor,
-        tolerance: float = 0.02,
-    ) -> torch.Tensor:
-        object_relative_size = object_projected_size / 2
-        object_negz_mask = (object_relative_size[:, 2] > 0).unsqueeze(1)
-        object_negz_size = torch.where(
-            object_negz_mask, -object_relative_size, object_relative_size
-        )
-        lowest_point = object_position + object_negz_size.sum(dim=0)
-
-        containier_relative_size = container_projected_size / 2 + tolerance
-        object_container_rela = lowest_point - container_position
-        containier_axis_lengths = torch.norm(containier_relative_size, dim=1)
-        containier_axis_dirs = (
-            containier_relative_size / containier_axis_lengths[:, None]
-        )
-        object_container_projections = torch.matmul(
-            containier_axis_dirs, object_container_rela[0]
-        )
-
-        return torch.all(
-            torch.abs(object_container_projections) <= containier_axis_lengths
-        )
-
     def compute(self, curr_state: dict) -> torch.Tensor:
         ee_pose = torch.cat(
             [
@@ -204,12 +175,12 @@ class PlaceStateMachine:
         place_pose = self._get_place_pose(
             curr_state["container"]["pos"],
         )
-        is_object_placed = self._is_object_placed(
-            curr_state["object"]["size"],
+        object_placed = helpers.is_object_placed(
             curr_state["object"]["pos"],
-            curr_state["container"]["size"],
+            curr_state["object"]["size"],
             curr_state["container"]["pos"],
-        ).item()
+            curr_state["container"]["size"],
+        )
         grasp_pose = torch.cat([grasp_position, grasp_quat], dim=-1)
         object_pose = torch.cat([curr_state["object"]["pos"], grasp_quat], dim=-1)
 
@@ -221,6 +192,7 @@ class PlaceStateMachine:
         place_pose_wp = wp.from_torch(place_pose, wp.transform)
         final_eef_pose_wp = wp.from_torch(self.final_eef_pose, wp.transform)
         pose_angle_wp = wp.from_torch(pose_angle, wp.float32)
+        object_placed_wp = wp.from_torch(object_placed, wp.bool)
 
         # Run state machine
         wp.launch(
@@ -242,11 +214,11 @@ class PlaceStateMachine:
                 self.des_ee_pose_wp,
                 self.des_gripper_state_wp,
                 self.offset_wp,
+                object_placed_wp,
                 self.max_reach_dist,
                 self.grasp_dist_thres,
                 self.grasp_pose_thres,
                 self.object_dist_thres,
-                is_object_placed,
             ],
             device=self.device,
         )
@@ -280,13 +252,15 @@ def infer_state_machine(
     des_ee_pose: wp.array(dtype=wp.transform),
     gripper_state: wp.array(dtype=float),
     offset: wp.array(dtype=wp.transform),
+    object_placed: wp.array(dtype=bool),  # the object is placed
     max_reach_dist: float,  # the object is reachable
     grasp_dist_threshold: float,  # the object is graspable
     grasp_pose_threshold: float,  # the ee pose is aligned with object
     object_dist_threshold: float,  # the object to be considered grasped
-    is_object_placed: bool,  # the object is placed
 ):
-    debug = True
+    N_CHECK_PLACED_TIMES = 5
+
+    debug = False
     tid = wp.tid()
     state = sm_state[tid]
     # Thresholds for checking offsets
@@ -376,7 +350,7 @@ def infer_state_machine(
         if dist_ee_object > object_dist_threshold:
             sm_state[tid] = PlaceSmState.RESET
             sm_wait_time[tid] = 0.0
-        elif dist_ee_target < grasp_dist_threshold :
+        elif dist_ee_target < grasp_dist_threshold:
             sm_state[tid] = PlaceSmState.APPROACH_ABOVE_TARGET
             sm_wait_time[tid] = 0.0
         if debug:
@@ -439,13 +413,14 @@ def infer_state_machine(
             print("PLACE_OBJECT")
     elif state == PlaceSmState.TO_TARGET:
         des_ee_pose[tid] = final_eef_pose[tid]
+        is_object_placed = object_placed[tid]
         gripper_state[tid] = GripperState.OPEN
         if is_object_placed:
             sm_is_placed[tid] = 0
         else:
             sm_is_placed[tid] += 1
 
-        if sm_is_placed[tid] >= 5:
+        if sm_is_placed[tid] >= N_CHECK_PLACED_TIMES:
             sm_state[tid] = PlaceSmState.RESET
             sm_wait_time[tid] = 0.0
         if debug:

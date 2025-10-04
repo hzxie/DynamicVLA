@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-30 19:19:14
+# @Last Modified at: 2025-10-04 08:24:38
 # @Email:  root@haozhexie.com
 
 import collections
@@ -218,7 +218,7 @@ def infer_state_machine(
     grasp_pose_threshold: float,  # the ee pose is aligned with object
     object_dist_threshold: float,  # the object to be considered grasped
 ):
-    debug = True
+    debug = False
     tid = wp.tid()
     state = sm_state[tid]
 

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-29 18:47:08
+# @Last Modified at: 2025-10-04 09:38:57
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -22,11 +22,10 @@ import torch
 import zmq
 from isaaclab.app import AppLauncher
 
-from . import simulate as sim
-
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 sys.path.append(PROJECT_HOME)
 
+import simulate as sim
 import utils.instruction_generator
 
 

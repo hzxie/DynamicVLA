@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-09-26 10:24:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-03 19:14:29
+# @Last Modified at: 2025-10-04 16:53:05
 # @Email:  root@haozhexie.com
 
 import torch
@@ -59,37 +59,23 @@ def is_object_placed(
 
     env_origins = robot.data.root_pos_w
     robot_quat = robot.data.root_quat_w
-    object_pos = helpers.get_robot_relative_position(
+    object_position = helpers.get_robot_relative_position(
         object.data.root_pos_w - env_origins, robot_quat
     )
-    container_pos = helpers.get_robot_relative_position(
+    object_size = helpers.get_object_relative_bbox(
+        object_size, object.data.root_quat_w, robot_quat
+    )
+    container_position = helpers.get_robot_relative_position(
         container.data.root_pos_w - env_origins, robot_quat
     )
-
-    object_relative_size = (
-        helpers.get_object_relative_bbox(
-            object_size, object.data.root_quat_w, robot_quat
-        )
-        / 2
+    containier_size = helpers.get_object_relative_bbox(
+        container_size, container.data.root_quat_w, robot_quat
     )
-    object_negz_mask = (object_relative_size[:, 2] > 0).unsqueeze(1)
-    object_negz_size = torch.where(
-        object_negz_mask, -object_relative_size, object_relative_size
-    )
-    lowest_point = object_pos + object_negz_size.sum(dim=0)
-
-    containier_relative_size = (
-        helpers.get_object_relative_bbox(
-            container_size, container.data.root_quat_w, robot_quat
-        )
-        / 2
-        + tolerance
-    )
-    object_container_rela = lowest_point - container_pos
-    containier_axis_lengths = torch.norm(containier_relative_size, dim=1)
-    containier_axis_dirs = containier_relative_size / containier_axis_lengths[:, None]
-    object_container_projections = torch.matmul(
-        containier_axis_dirs, object_container_rela[0]
+    object_placed = helpers.is_object_placed(
+        object_position,
+        object_size,
+        container_position,
+        containier_size,
     )
 
     goal_position_r = goal_position.to(device=env_origins.device)
@@ -97,11 +83,7 @@ def is_object_placed(
         ee_frame.data.target_pos_w[..., 0, :] - env_origins, robot_quat
     )
     eef_goal_dist = torch.norm(goal_position_r - eef_position_r, dim=1)
-
-    return (
-        torch.all(torch.abs(object_container_projections) <= containier_axis_lengths)
-        and eef_goal_dist < tolerance
-    )
+    return torch.logical_and(object_placed, eef_goal_dist < tolerance)
 
 
 def get_done_term(terms: list[str]) -> str | None:

@@ -41,11 +41,11 @@ camera:
     # - depth
 
 lighting:
-  temperature: [5000, 7500]
-  intensity: [350, 650]
+  temperature: [4000, 8000]
+  intensity: [150, 750]
   position:
-    x: [-20, 20]
-    y: [-20, 20]
+    x: [-50, 50]
+    y: [-50, 50]
     z: [10, 20]
 
 tasks:
