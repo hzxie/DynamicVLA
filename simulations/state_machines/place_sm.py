@@ -12,8 +12,9 @@ import collections
 import torch
 import warp as wp
 
-from . import sm_utils
 from simulations import helpers
+
+from . import sm_utils
 
 
 class GripperState:

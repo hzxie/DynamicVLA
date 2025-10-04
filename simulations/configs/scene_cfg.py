@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-23 12:28:24
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-29 19:20:07
+# @Last Modified at: 2025-10-04 23:29:24
 # @Email:  root@haozhexie.com
 
 import logging
@@ -40,7 +40,7 @@ class SceneCfg(InteractiveSceneCfg):
     # end-effector sensor: will be populated by agent env cfg
     ee_frame: FrameTransformerCfg = MISSING
     # target object: placeholder. Can be replaced by calling `set_target_object`
-    # more objects can be added to the scene by calling `add_object_to_scene`
+    # more objects can be added to the scene by calling `add_object`
     object: RigidObjectCfg | DeformableObjectCfg = MISSING
 
     # Default house asset (as background): will be populated by agent env cfg
@@ -141,7 +141,7 @@ def get_quat_from_look_at(cam_pos, cam_look_at):
     return [quat[3], quat[0], quat[1], quat[2]]
 
 
-def add_object_to_scene(
+def add_object(
     scene_cfg: SceneCfg,
     object_name: str,
     object_cfg: RigidObjectCfg | DeformableObjectCfg,

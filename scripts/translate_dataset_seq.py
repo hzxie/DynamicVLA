@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 18:09:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-27 21:54:48
+# @Last Modified at: 2025-10-04 23:35:42
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -22,7 +22,7 @@ from isaaclab.app import AppLauncher
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 sys.path.append(PROJECT_HOME)
-sys.path.append(os.path.dirname(__file__))
+sys.path.append(os.path.join(PROJECT_HOME, "simulations"))
 
 import simulations.evaluate as eval
 import simulations.simulate as sim
@@ -86,14 +86,11 @@ def simulate(env, sim_states, debug=False):
     done_term = configs.termination_cfg.get_done_term(term_mgr.active_terms)
     for act_conter in range(action_seq.shape[0] - OFFSET):
         curr_state = sim.get_curr_state(
-            env.unwrapped.scene["ee_frame"].data,
-            env.unwrapped.scene.state["articulation"]["robot"]["joint_position"],
-            env.unwrapped.scene["object"].data,
-            None,
-            None,
-            env.unwrapped.scene["robot"].data.root_pos_w,
-            env.unwrapped.scene["robot"].data.root_quat_w,
-            env.unwrapped.device,
+            ee_state=env.unwrapped.scene["ee_frame"].data,
+            object_state=env.unwrapped.scene["object"].data,
+            env_origins=env.unwrapped.scene["robot"].data.root_pos_w,
+            robot_quat=env.unwrapped.scene["robot"].data.root_quat_w,
+            device=env.unwrapped.device,
         )
         cam_view = sim.get_camera_views(
             env.unwrapped.scene.sensors, ["rgb", "depth", "seg"]

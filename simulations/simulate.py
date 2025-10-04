@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-04 09:38:05
+# @Last Modified at: 2025-10-04 23:33:56
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -14,8 +14,8 @@ import json
 import logging
 import os
 import random
-import uuid
 import sys
+import uuid
 
 import cv2
 import gymnasium as gym
@@ -518,7 +518,7 @@ def _set_up_scene_objects(scene_cfg, object_states):
     # Add more objects to the scene
     for i, o in enumerate(other_objects):
         logging.info("Using BG object: %s" % os.path.basename(o["file_path"]))
-        scene_cfg = configs.scene_cfg.add_object_to_scene(
+        scene_cfg = configs.scene_cfg.add_object(
             scene_cfg,
             "object%02d" % (i + 1),
             configs.object_cfg.get_object_cfg(
@@ -541,7 +541,7 @@ def _set_up_scene_containers(scene_cfg, container_states):
     assert container_states, "No container states provided."
     for i, o in enumerate(container_states):
         logging.info("Using container object: %s" % os.path.basename(o["file_path"]))
-        scene_cfg = configs.scene_cfg.add_object_to_scene(
+        scene_cfg = configs.scene_cfg.add_object(
             scene_cfg,
             f"container{i:02d}" if i != 0 else "container",
             configs.object_cfg.get_object_cfg(

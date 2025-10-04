@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-04 09:38:57
+# @Last Modified at: 2025-10-04 23:49:21
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -22,10 +22,12 @@ import torch
 import zmq
 from isaaclab.app import AppLauncher
 
+from . import simulate as sim
+
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 sys.path.append(PROJECT_HOME)
 
-import simulate as sim
+
 import utils.instruction_generator
 
 
@@ -145,19 +147,20 @@ def _get_terimation_cfg(cfg, tolerance, device):
     import configs.termination_cfg
 
     if "object_picked" in cfg:
-        return configs.termination_cfg.get_termination_cfg(
-            "pick",
-            {
-                "tolerance": tolerance,
-                "goal_position": torch.tensor(
-                    cfg["object_picked"]["params"]["goal_position"],
-                    dtype=torch.float32,
-                    device=device,
-                ),
-            },
-        )
+        task = "pick"
+        args = cfg["object_picked"]["params"]
+    elif "object_placed" in cfg:
+        task = "place"
+        args = cfg["object_placed"]["params"]
     else:
         raise NotImplementedError("Unsupported termination config.")
+
+    args["tolerance"] = tolerance
+    for k, v in args.items():
+        if isinstance(v, list):
+            args[k] = torch.tensor(v, dtype=torch.float32, device=device)
+
+    return configs.termination_cfg.get_termination_cfg(task, args)
 
 
 def _set_up_scene_cameras(scene_cfg, cfg):
@@ -236,8 +239,11 @@ def _set_up_scene_objects(scene_cfg, cfg, object_dir):
             logging.info("Loading object from %s" % usd_file_path)
             assert os.path.exists(usd_file_path)
 
+        # Remove prefix: '/World/envs/env_.*'
+        prim_path = v["prim_path"]
+        prim_path = prim_path[prim_path.rfind("/") :]
         object_cfg = configs.object_cfg.get_object_cfg(
-            "/Object",
+            prim_path,
             {
                 "pos": v["init_state"]["pos"],
                 "quat": v["init_state"]["rot"],
@@ -253,7 +259,7 @@ def _set_up_scene_objects(scene_cfg, cfg, object_dir):
         if k == "object":
             scene_cfg = configs.scene_cfg.set_target_object(scene_cfg, object_cfg)
         else:
-            scene_cfg = configs.scene_cfg.set_target_object(scene_cfg, k, object_cfg)
+            scene_cfg = configs.scene_cfg.add_object(scene_cfg, k, object_cfg)
 
     return scene_cfg
 
