@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-04 23:33:56
+# @Last Modified at: 2025-10-06 09:57:24
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -1122,7 +1122,6 @@ def main(args):
                 % (episode_name, len(es["sm_state"]))
             )
             if args.save:
-                # TODO: Add object descriptions to the config
                 with open(
                     os.path.join(args.output_dir, "%s.json" % episode_name), "w"
                 ) as fp:

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-04 23:49:21
+# @Last Modified at: 2025-10-06 13:32:04
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -19,15 +19,15 @@ import time
 import gymnasium as gym
 import numpy as np
 import torch
+import yaml
 import zmq
 from isaaclab.app import AppLauncher
 
-from . import simulate as sim
-
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 sys.path.append(PROJECT_HOME)
+sys.path.append(os.path.join(PROJECT_HOME, "simulations"))
 
-
+import simulations.simulate as sim
 import utils.instruction_generator
 
 
@@ -293,7 +293,7 @@ def _get_action_tensor(action, num_envs, device):
     return action
 
 
-def simulate(env, obs_socket, act_socket):
+def simulate(env, obs_socket, act_socket, init_poses):
     import configs.robot_cfg
     import configs.termination_cfg
 
@@ -341,15 +341,7 @@ def simulate(env, obs_socket, act_socket):
             robot_name = configs.robot_cfg.get_robot_name(
                 env.unwrapped.scene["robot"].cfg.spawn.usd_path
             )
-            last_action = torch.cat(
-                [
-                    sim.get_rest_pose(robot_name, env.unwrapped.device).repeat(
-                        env.unwrapped.num_envs, 1
-                    ),
-                    torch.ones(env.unwrapped.num_envs, 1, device=env.unwrapped.device),
-                ],
-                dim=1,
-            )
+            last_action = init_poses[robot_name].repeat(env.unwrapped.num_envs, 1)
 
         env.step(last_action)
         if term_mgr.get_term(done_term).all():
@@ -357,6 +349,8 @@ def simulate(env, obs_socket, act_socket):
         elif term_mgr.dones.all():
             sim_results["status"] = 1 if action is not None else 2
 
+    # term_mgr.reset()  # NOT WORKING
+    term_mgr = term_mgr.__init__(term_mgr.cfg, env.env)
     return sim_results
 
 
@@ -422,7 +416,7 @@ def get_sim_results(sim_cfg, env_cfg_file_path, obs_socket, act_socket):
     instruction = get_task_instruction(env_cfg_file_path)
     # Send the task instruction at the beginning of the simulation
     obs_socket.send_pyobj({"task": instruction})
-    sim_results = simulate(env, obs_socket, act_socket)
+    sim_results = simulate(env, obs_socket, act_socket, sim_cfg["init_poses"])
     logging.info("Simulation finished with code: %d" % sim_results["status"])
     # Clear the action socket
     get_latest_action(act_socket)
@@ -431,6 +425,17 @@ def get_sim_results(sim_cfg, env_cfg_file_path, obs_socket, act_socket):
 
 
 def main(simulation_app, args):
+    # Load the initial poses of the robots (as the default action)
+    with open(args.sim_cfg_file) as fp:
+        sim_cfg = yaml.load(fp, Loader=yaml.FullLoader)
+        init_poses = {
+            # Add a gripper open/close flag at the end of the init pose
+            k: torch.tensor(
+                [v["init_pose"] + [1]], dtype=torch.float32, device=args.device
+            )
+            for k, v in sim_cfg["robots"].items()
+        }
+
     logging.info("Starting evaluation server...")
     # Set up Zero MQ context and sockets
     obs_socket, act_socket = get_zmq_sockets(args.host, args.img_port, args.act_port)
@@ -467,6 +472,7 @@ def main(simulation_app, args):
         "device": args.device,
         "disable_fabric": args.disable_fabric,
         "path_tracing": args.path_tracing,
+        "init_poses": init_poses,
     }
     while simulation_app.is_running():
         action = get_latest_action(act_socket)
@@ -592,6 +598,10 @@ if __name__ == "__main__":
         type=int,
         default=20,
         help="The number of tests to run",
+    )
+    parser.add_argument(
+        "--sim_cfg_file",
+        default=os.path.join(PROJECT_HOME, "simulations", "configs", "sim_cfg.yaml"),
     )
     parser.add_argument("--env_cfg", required=True)
     args = parser.parse_args(script_args)

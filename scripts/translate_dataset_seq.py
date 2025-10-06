@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 18:09:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-04 23:35:42
+# @Last Modified at: 2025-10-06 10:11:47
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -209,7 +209,7 @@ def main(args):
                 with open(
                     os.path.join(args.output_dir, "%s-tr.json" % seq[:-3]), "w"
                 ) as fp:
-                    json.dump(env_cfg, fp, indent=2)
+                    json.dump(sim.get_object_without_numpy(env_cfg), fp, indent=2)
 
                 with h5py.File(
                     os.path.join(args.output_dir, "%s-tr.h5" % seq[:-3]), "w"
