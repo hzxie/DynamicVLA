@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-17 18:15:34
+# @Last Modified at: 2025-10-07 10:47:17
 # @Email:  root@haozhexie.com
 
 import math
@@ -338,6 +338,7 @@ class DynamicVLAPolicy(PreTrainedPolicy):
     def reset(self):
         """This should be called whenever the environment is reset."""
         self._queues = {ACTION: deque(maxlen=self.config.n_action_steps)}
+        self._action_index = 0
         if hasattr(self, "q_in"):
             self.q_in.clear()  # Clear the input queue
         if hasattr(self, "q_out") and not self.q_out.empty():
@@ -504,7 +505,11 @@ class DynamicVLAPolicy(PreTrainedPolicy):
 
         # Merge actions into the queue
         if actions is not None:
+            # latest_index = self.q_in.get("obs")[0]["index"]
             assert actions["actions"].size(0) == self.config.n_action_steps
+            actions["actions"] = actions["actions"][self.config.skip_n_actions :]
+            actions["index"] += self.config.skip_n_actions
+
             prev_action_chunk = list(self._queues[ACTION])
             curr_action_chunk = [
                 {"index": actions["index"] + i, "action": a}
@@ -512,7 +517,9 @@ class DynamicVLAPolicy(PreTrainedPolicy):
             ]
             if not prev_action_chunk:
                 # The action queue is empty
-                self._queues[ACTION].extend(curr_action_chunk)
+                self._queues[ACTION].extend(
+                    [a for a in curr_action_chunk if a["index"] > self._action_index]
+                )
             else:
                 self._queues[ACTION].clear()
                 prev_index_start = prev_action_chunk[0]["index"]
@@ -530,6 +537,7 @@ class DynamicVLAPolicy(PreTrainedPolicy):
                     self._queues[ACTION].extend(curr_action_chunk[droplen:])
 
         action = self._queues[ACTION].popleft()
+        self._action_index = action["index"]
         return action["action"]
 
     @torch.no_grad()
@@ -542,18 +550,21 @@ class DynamicVLAPolicy(PreTrainedPolicy):
 
         batch = self._prepare_batch(batch)
         self._queues = populate_queues(self._queues, batch, exclude_keys=[ACTION])
-        # Action queue logic for n_action_steps > 1. When the action_queue is depleted, populate it by
-        # querying the policy.
+        # Action queue logic for n_action_steps > 1. When the action_queue is depleted,
+        # populate it by querying the policy.
         if len(self._queues[ACTION]) == 0:
             actions = self._get_action_chunk(batch, noise)
-            # `self.predict_action_chunk` returns a (batch_size, n_action_steps, action_dim) torch.Tensor, but the queue
-            # effectively has shape (n_action_steps, batch_size, *), hence the transpose.
+            # `self.predict_action_chunk` returns a (batch_size, n_action_steps, action_dim)
+            # torch.Tensor, but the queue effectively has shape (n_action_steps, batch_size, *),
+            # hence the transpose.
             if self.config.use_delta_action:
                 action_dim = actions.shape[-1] - 1
                 actions[..., :action_dim] += latest_state[..., :action_dim]
 
             self._queues[ACTION].extend(
-                actions.transpose(0, 1)[: self.config.n_action_steps]
+                actions.transpose(0, 1)[
+                    self.config.skip_n_actions : self.config.n_action_steps
+                ]
             )
 
         return self._queues[ACTION].popleft()

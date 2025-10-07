@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:22:31
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-17 14:54:37
+# @Last Modified at: 2025-10-06 14:50:37
 # @Email:  root@haozhexie.com
 
 from dataclasses import dataclass, field
@@ -39,16 +39,18 @@ class DynamicVLAConfig(PreTrainedConfig):
     # Add empty images. Used by dynamicvla_aloha_sim which adds the empty
     # left and right wrist cameras in addition to the top camera.
     empty_cameras: int = 0
-    # Converts the joint and gripper values from the standard Aloha space to
-    # the space used by the pi internal runtime which was used to train the base model.
+    # Converts the joint and gripper values from the standard Aloha space to the space
+    # used by the pi internal runtime which was used to train the base model.
     adapt_to_pi_aloha: bool = False
-    # Converts joint dimensions to deltas with respect to the current state before passing to the model.
-    # Gripper dimensions will remain in absolute values.
+    # Converts joint dimensions to deltas with respect to the current state before
+    # passing to the model. Gripper dimensions will remain in absolute values.
     use_delta_joint_actions_aloha: bool = False
     # Use delta action prediction (relative to the current robot state)
     use_delta_action: bool = True
     # Streaming inference
     enable_streaming: bool = False
+    # Skip first n actions during inference
+    skip_n_actions: int = 0
     # Multi-timestep fusion ("conv" or "attn")
     temporal_fusion: str = "conv"
     # Tokenizer
@@ -75,7 +77,8 @@ class DynamicVLAConfig(PreTrainedConfig):
     attention_mode: str = "cross_attn"
     prefix_length: int = -1
     pad_language_to: str = "longest"  # "max_length"
-    # Less or equal to 0 is the default where the action expert has the same number of layers of VLM. Otherwise the expert have less layers.
+    # Less or equal to 0 is the default where the action expert has the same number of
+    # layers of VLM. Otherwise the expert have less layers.
     num_expert_layers: int = -1
     # VLM settings
     vlm_model_name: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
@@ -101,12 +104,14 @@ class DynamicVLAConfig(PreTrainedConfig):
         """Input validation (not exhaustive)."""
         if self.n_action_steps > self.chunk_size:
             raise ValueError(
-                f"The chunk size is the upper bound for the number of action steps per model invocation. Got "
-                f"{self.n_action_steps} for `n_action_steps` and {self.chunk_size} for `chunk_size`."
+                "The chunk size is the upper bound for the number of action steps per"
+                f" model invocation. Got {self.n_action_steps} for `n_action_steps` and"
+                f" {self.chunk_size} for `chunk_size`."
             )
         if self.use_delta_joint_actions_aloha:
             raise NotImplementedError(
-                "`use_delta_joint_actions_aloha` is used by dynamicvla for aloha real models. It is not ported yet in LeRobot."
+                "`use_delta_joint_actions_aloha` is used by dynamicvla for aloha real"
+                " models. It is not ported yet in LeRobot."
             )
 
     def validate_features(self) -> None:

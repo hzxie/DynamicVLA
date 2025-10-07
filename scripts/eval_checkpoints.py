@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-01 07:40:13
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-18 13:37:03
+# @Last Modified at: 2025-10-06 14:34:39
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -65,6 +65,7 @@ def test_checkpoint(
     rotation,
     use_delta_action,
     streaming,
+    skip_n_actions,
     host,
     img_port,
     act_port,
@@ -88,6 +89,7 @@ def test_checkpoint(
         "-i", matches.group(2),
         "-p", work_dir,
         "-r", rotation,
+        "-n", str(skip_n_actions),
     ]
     # fmt: on
     if use_delta_action:
@@ -136,6 +138,7 @@ def main(
     rotation,
     use_delta_action,
     streaming,
+    skip_n_actions,
     host,
     img_port,
     act_port,
@@ -173,6 +176,7 @@ def main(
                 rotation,
                 use_delta_action,
                 streaming,
+                skip_n_actions,
                 host,
                 img_port,
                 act_port,
@@ -213,16 +217,26 @@ if __name__ == "__main__":
         "--rotation",
         type=str,
         default="quat",
+        help="The representation of rotation in the action space",
     )
     parser.add_argument(
         "-d",
         "--delta",
         action="store_true",
+        help="Whether to use delta action in the action space",
     )
     parser.add_argument(
         "-s",
         "--streaming",
         action="store_true",
+        help="Whether to enable streaming inference",
+    )
+    parser.add_argument(
+        "-n",
+        "--skip_n_actions",
+        type=int,
+        default=0,
+        help="The number of actions to skip",
     )
     parser.add_argument(
         "--log_dir",
@@ -258,6 +272,7 @@ if __name__ == "__main__":
         args.rotation,
         args.delta,
         args.streaming,
+        args.skip_n_actions,
         args.host,
         args.img_port,
         args.act_port,

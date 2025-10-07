@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-15 20:06:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-10 19:33:04
+# @Last Modified at: 2025-10-06 16:58:01
 # @Email:  root@haozhexie.com
 
 import json
@@ -166,6 +166,7 @@ def train(cfg):
         # Summary writer
         tb_writer = utils.summary_writer.SummaryWriter(cfg)
         # Log current config
+        tb_writer.add_config(cfg.DATASET)
         tb_writer.add_config(cfg.POLICY)
         tb_writer.add_config(cfg.TRAIN)
 

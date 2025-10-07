@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-18 13:34:59
+# @Last Modified at: 2025-10-06 15:45:28
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -29,7 +29,7 @@ sys.path.append(
 import utils.helpers
 
 
-def get_vla_model(pretrained_model, use_delta_action, streaming):
+def get_vla_model(pretrained_model, use_delta_action, streaming, skip_n_actions):
     pretrained_cfg = None
     if not os.path.exists(pretrained_model):
         raise FileNotFoundError(
@@ -46,6 +46,11 @@ def get_vla_model(pretrained_model, use_delta_action, streaming):
     # Check whether the delta action setting is consistent
     if hasattr(vla_cfg, "use_delta_action"):
         assert vla_cfg.use_delta_action == use_delta_action
+    # Update the config for inference
+    if hasattr(vla_cfg, "skip_n_actions"):
+        vla_cfg.skip_n_actions = skip_n_actions
+    else:
+        assert skip_n_actions == 0, "The model does not support action skipping."
 
     vla_model_class = utils.helpers.get_policy_class(model_cfg["type"])
     # Enable streaming inference if needed
@@ -389,6 +394,7 @@ def main(
     rotation,
     use_delta_action,
     streaming,
+    skip_n_actions,
     host,
     img_port,
     act_port,
@@ -396,7 +402,9 @@ def main(
 ):
     # Initialize the VLA model
     logging.info("Loading VLA model with weights: %s" % (vla_weights))
-    vla_model, vla_cfg = get_vla_model(vla_weights, use_delta_action, streaming)
+    vla_model, vla_cfg = get_vla_model(
+        vla_weights, use_delta_action, streaming, skip_n_actions
+    )
     vla_model.reset()
     logging.info(
         "Input features: %s; Output features: %s"
@@ -463,16 +471,26 @@ if __name__ == "__main__":
         "--rotation",
         type=str,
         default="quat",
+        help="The representation of rotation in the action space",
     )
     parser.add_argument(
         "-d",
         "--delta",
         action="store_true",
+        help="Whether to use delta action in the action space",
     )
     parser.add_argument(
         "-s",
         "--streaming",
         action="store_true",
+        help="Whether to enable streaming inference",
+    )
+    parser.add_argument(
+        "-n",
+        "--skip_n_actions",
+        type=int,
+        default=0,
+        help="The number of actions to skip",
     )
     parser.add_argument(
         "-p",
@@ -510,6 +528,7 @@ if __name__ == "__main__":
         args.rotation,
         args.delta,
         args.streaming,
+        args.skip_n_actions,
         args.host,
         args.img_port,
         args.act_port,
