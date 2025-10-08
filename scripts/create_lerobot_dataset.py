@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-29 09:58:34
+# @Last Modified at: 2025-10-08 18:37:45
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -477,7 +477,7 @@ def get_dataset_info(dataset_info, episode_metadata, n_tasks):
 def main(repo_id, input_dir, rot_fmt, remove_source, push_to_hub):
     output_dir = lerobot.constants.HF_LEROBOT_HOME / repo_id
     # Listing all episodes in the input directory
-    episodes = sorted([f for f in os.listdir(input_dir) if f.endswith(".h5")])
+    episodes = sorted([f[:-3] for f in os.listdir(input_dir) if f.endswith(".h5")])
     if not episodes:
         logging.error("No episodes found in the input directory: %s" % input_dir)
         sys.exit(2)
@@ -497,7 +497,7 @@ def main(repo_id, input_dir, rot_fmt, remove_source, push_to_hub):
             sys.exit(0)
 
     # Creating the dataset in LeRobot format
-    episode_metadata = get_episode_metadata(os.path.join(input_dir, episodes[0]))
+    episode_metadata = get_episode_metadata(os.path.join(input_dir, "%s.h5" % episodes[0]))
     logging.info("Episode metadata: %s" % episode_metadata)
 
     # Converting the dataset (.h5) to LeRobot format
@@ -515,7 +515,7 @@ def main(repo_id, input_dir, rot_fmt, remove_source, push_to_hub):
             convert_lerobot_episodes,
             [
                 (
-                    os.path.join(input_dir, e),
+                    os.path.join(input_dir, "%s.h5" % e),
                     episode_metadata,
                     rot_fmt,
                     episode_metadata["fps"],

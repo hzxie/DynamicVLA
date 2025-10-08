@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 18:09:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-06 10:11:47
+# @Last Modified at: 2025-10-08 16:30:05
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -143,6 +143,20 @@ def _get_action_tensor(action, num_envs, device):
     return action
 
 
+def is_cam_occluded(env_states):
+    TGT_OBJECT_ID = 3
+
+    for key in env_states.keys():
+        if not key.endswith("_seg"):
+            continue
+
+        es = np.stack(env_states[key])
+        if TGT_OBJECT_ID not in np.unique(es):
+            return True
+
+    return False
+
+
 def main(args):
     sequences = sorted([f for f in os.listdir(args.dataset_dir) if f.endswith(".h5")])
     if args.range is not None:
@@ -202,10 +216,9 @@ def main(args):
         env.reset(seed=env_cfg["seed"])
 
         env_states = simulate(env, env_states, args.debug)
-        for es in env_states:
-            env_state, success = es
-            if args.save:
-                assert success  # Only save successful episodes
+        for (env_state, success) in env_states:
+            if args.save and not is_cam_occluded(env_state):
+                assert success or args.debug  # Only save successful episodes
                 with open(
                     os.path.join(args.output_dir, "%s-tr.json" % seq[:-3]), "w"
                 ) as fp:

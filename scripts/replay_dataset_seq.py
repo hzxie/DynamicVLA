@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 07:17:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-19 18:25:26
+# @Last Modified at: 2025-10-08 09:50:49
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -96,6 +96,7 @@ def main(args):
         args.object_dir,
         args.physics_time_step,
         args.timeout,
+        args.tolerance,
         args.device,
         args.disable_fabric,
         args.path_tracing,
@@ -147,6 +148,7 @@ if __name__ == "__main__":
     parser.add_argument("--path_tracing", action="store_true")
     parser.add_argument("--physics_time_step", type=float, default=0.04)
     parser.add_argument("--timeout", type=float, default=10)
+    parser.add_argument("--tolerance", type=float, default=0.03)
     parser.add_argument(
         "--scene_dir", default=os.path.join(PROJECT_HOME, os.pardir, "scenes")
     )
