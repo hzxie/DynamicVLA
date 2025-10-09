@@ -117,7 +117,7 @@ class PickTerminationsCfg(TerminationsCfg):
 
     object_picked = TerminationTermCfg(
         func=is_object_picked,
-        params={"goal_position": None, "tolerance": 0.015},
+        params={"goal_position": None, "tolerance": 0.02},
         time_out=False,
     )
 

@@ -53,7 +53,7 @@ class FrankaActionCfg(ActionCfg):
         asset_name="robot",
         joint_names=["panda_finger.*"],
         open_command_expr={"panda_finger_.*": 0.04},
-        close_command_expr={"panda_finger_.*": 0.01},
+        close_command_expr={"panda_finger_.*": 0.0},
     )
 
 
