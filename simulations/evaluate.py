@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-06 13:32:04
+# @Last Modified at: 2025-10-09 15:31:05
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -28,7 +28,7 @@ sys.path.append(PROJECT_HOME)
 sys.path.append(os.path.join(PROJECT_HOME, "simulations"))
 
 import simulations.simulate as sim
-import utils.instruction_generator
+from utils.instruction_generator import InstructionGenerator
 
 
 def get_zmq_sockets(host, img_port, act_port):
@@ -41,12 +41,6 @@ def get_zmq_sockets(host, img_port, act_port):
     act_socket.bind("tcp://%s:%d" % (host, act_port))
 
     return obs_socket, act_socket
-
-
-def get_task_instruction(env_cfg_file_path):
-    return utils.instruction_generator.InstructionGenerator.generate_instruction(
-        filename=os.path.basename(env_cfg_file_path)
-    )
 
 
 def get_test_env(
@@ -302,6 +296,7 @@ def simulate(env, obs_socket, act_socket, init_poses):
     # The simulation loop
     term_mgr = env.env.termination_manager
     done_term = configs.termination_cfg.get_done_term(term_mgr.active_terms)
+    tick = time.time()
     while sim_results["status"] == -1:
         # scene_state = env.unwrapped.scene.state
         cam_view = sim.get_camera_views(env.unwrapped.scene.sensors, ["rgb"])
@@ -344,6 +339,7 @@ def simulate(env, obs_socket, act_socket, init_poses):
             last_action = init_poses[robot_name].repeat(env.unwrapped.num_envs, 1)
 
         env.step(last_action)
+        logging.debug("Sim. Step Time: %.4f" % (time.time() - tick))
         if term_mgr.get_term(done_term).all():
             sim_results["status"] = 0
         elif term_mgr.dones.all():
@@ -407,13 +403,14 @@ def get_sim_results(sim_cfg, env_cfg_file_path, obs_socket, act_socket):
         setattr(get_sim_results, "cfg", env_cfg)
         setattr(get_sim_results, "env", env)
 
+    # Randomize the task instruction before fixing the random seed
+    instruction = InstructionGenerator.generate_instruction(env_cfg["instruction"])
     # Fix random seed for reproducibility
     random.seed(env_cfg["seed"])
     np.random.seed(env_cfg["seed"])
     torch.manual_seed(env_cfg["seed"])
     env.reset(seed=env_cfg["seed"])
 
-    instruction = get_task_instruction(env_cfg_file_path)
     # Send the task instruction at the beginning of the simulation
     obs_socket.send_pyobj({"task": instruction})
     sim_results = simulate(env, obs_socket, act_socket, sim_cfg["init_poses"])

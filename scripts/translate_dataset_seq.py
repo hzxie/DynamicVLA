@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 18:09:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-08 16:30:05
+# @Last Modified at: 2025-10-09 09:44:59
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -216,7 +216,7 @@ def main(args):
         env.reset(seed=env_cfg["seed"])
 
         env_states = simulate(env, env_states, args.debug)
-        for (env_state, success) in env_states:
+        for env_state, success in env_states:
             if args.save and not is_cam_occluded(env_state):
                 assert success or args.debug  # Only save successful episodes
                 with open(

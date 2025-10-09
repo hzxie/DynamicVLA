@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-17 16:10:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-13 14:44:06
+# @Last Modified at: 2025-10-09 09:58:21
 # @Email:  root@haozhexie.com
 
 import logging
@@ -23,6 +23,8 @@ import torchvision.io
 import torchvision.transforms.v2
 import torchvision.transforms.v2.functional as F
 from tqdm import tqdm
+
+from utils.instruction_generator import InstructionGenerator
 
 
 def get_dataset(
@@ -312,8 +314,9 @@ class LeRobotDataset(torch.utils.data.Dataset):
 
         # Add task as a string
         task_idx = episode["task_index"][frame_idx].item()
-        item["task"] = self.meta.tasks[task_idx]
-
+        item["task"] = InstructionGenerator.generate_instruction(
+            self.meta.tasks[task_idx]
+        )
         return item
 
     def _get_episode_index(

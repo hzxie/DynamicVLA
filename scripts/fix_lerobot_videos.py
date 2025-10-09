@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-25 18:53:11
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-08-28 21:09:12
+# @Last Modified at: 2025-10-09 09:44:36
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -29,8 +29,10 @@ def fix_lerobot_video(episode_index, video_path, video_length, h5_dir, lerobot_d
     episode_meta = lerobot.datasets.utils.load_jsonlines(
         pathlib.Path(os.path.join(lerobot_dir, "meta", "camera.jsonl"))
     )
-    episode_meta = next(em for em in episode_meta if em["episode_idx"] == episode_index)
-    with h5py.File(os.path.join(h5_dir, episode_meta["filename"]), "r") as f:
+    episode_meta = next(
+        em for em in episode_meta if em["episode_index"] == episode_index
+    )
+    with h5py.File(os.path.join(h5_dir, "%s.h5" % episode_meta["filename"]), "r") as f:
         env_states = {k: f[k][()] for k in f.keys()}
 
     CAM_KEY = "side_cam_rgb"

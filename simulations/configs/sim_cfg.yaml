@@ -8,6 +8,8 @@ scene:
       position: [0.5, 1, 0.35]
       rotation: [-90, 0, 180]
       prim_path: "/Robot/SideCamera"
+  table:
+    friction: [0, 1]
   objects:
     n_objects: 1
     mass: 0.05

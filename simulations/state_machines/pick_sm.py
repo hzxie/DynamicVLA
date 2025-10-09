@@ -4,7 +4,7 @@
 # @Author: The Isaac Lab Project Developers
 # @Date:   2025-03-22 17:10:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-04 08:24:38
+# @Last Modified at: 2025-10-08 15:45:28
 # @Email:  root@haozhexie.com
 
 import collections
@@ -37,7 +37,7 @@ class PickSmState:
 class PickSmWaitTime:
     """Additional wait times (in s) for states for before switching."""
 
-    INIT = wp.constant(0.28)
+    INIT = wp.constant(0.48)
     RESET = wp.constant(0.08)
     APPROACH_ABOVE_OBJECT = wp.constant(0.4)
     APPROACH_OBJECT = wp.constant(0.72)

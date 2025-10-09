@@ -4,40 +4,34 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-31 19:42:51
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-06-12 16:37:45
+# @Last Modified at: 2025-10-09 15:50:09
 # @Email:  root@haozhexie.com
 
+import json
 import random
 
 
 class InstructionGenerator:
     @staticmethod
-    def generate_instruction(filename):
-        tokens = filename.split("_")
-        action_type = tokens[0]
-        object_name = tokens[2][:-3]
-        object_dyn = "the rolling" if tokens[2][-1:] == "d" else "the static"
+    def generate_instruction(inst_metadata):
+        inst_metadata = json.loads(inst_metadata)
+        tmpl = InstructionGenerator._get_instruction_template(inst_metadata["task"])
 
-        return "%s %s %s.\n" % (
-            InstructionGenerator._get_action_name(action_type),
-            object_dyn,
-            InstructionGenerator._get_object_name(object_name),
+        object_desc = random.choice(inst_metadata.get("objects", [""]))
+        container_desc = random.choice(inst_metadata.get("containers", [""]))
+        return tmpl.format_map({"object": object_desc, "container": container_desc})
+
+    @staticmethod
+    def _get_instruction_template(task):
+        pick_action = random.choice(
+            ["pick up", "grasp", "catch", "grab", "get hold of"]
         )
-
-    @staticmethod
-    def _get_action_name(action):
-        if action == "pick":
-            return random.choice(["Pick up", "Grasp", "Catch", "Grab", "Get hold of"])
-
-        raise ValueError("Unknown action type: %s" % action)
-
-    @staticmethod
-    def _get_object_name(object_name):
-        if object_name == "fcan":
-            return "food can"
-        elif object_name == "dbottle":
-            return "drink bottle"
-        elif object_name == "wbottle":
-            return "water bottle"
+        place_action = random.choice(
+            ["place on", "put on", "set on", "position on", "return to", "deposit in"]
+        )
+        if task == "pick":
+            return f"{pick_action} the {{object}}."
+        elif task == "place":
+            return f"{pick_action} the {{object}} and {place_action} the {{container}}."
         else:
-            return object_name
+            raise ValueError(f"Unknown task: {task}")

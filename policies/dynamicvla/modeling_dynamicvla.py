@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-07 10:47:17
+# @Last Modified at: 2025-10-07 14:18:07
 # @Email:  root@haozhexie.com
 
 import math
@@ -505,7 +505,6 @@ class DynamicVLAPolicy(PreTrainedPolicy):
 
         # Merge actions into the queue
         if actions is not None:
-            # latest_index = self.q_in.get("obs")[0]["index"]
             assert actions["actions"].size(0) == self.config.n_action_steps
             actions["actions"] = actions["actions"][self.config.skip_n_actions :]
             actions["index"] += self.config.skip_n_actions

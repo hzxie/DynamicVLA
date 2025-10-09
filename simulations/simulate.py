@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-06 09:57:24
+# @Last Modified at: 2025-10-09 10:23:08
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -45,6 +45,7 @@ def get_object_metadata(object_dir, target_categories=[]):
             "file_path": k,
             "size": v,
             "category": object_category,
+            "tags": [object_category],  # Default tag for instruction generation
         }
 
     # Load additional metadata if available
@@ -95,7 +96,6 @@ def _get_object_size(usd_path):
 
 
 def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
-    # The following packages MUST be imported after the simulation app is created
     import configs.scene_cfg
     import configs.termination_cfg
     import isaaclab_tasks
@@ -190,7 +190,10 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
     env_cfg.terminations = configs.termination_cfg.get_termination_cfg(
         task, terimation_args
     )
-    return env_cfg
+    # Return the tags of all objects in the scene (the duplicated tags will be removed)
+    return env_cfg, {
+        k: [o["tags"] for o in v] for k, v in object_states.items() if len(v) > 0
+    }
 
 
 def _set_up_scene_cameras(scene_cfg, sim_cfg, robot):
@@ -263,7 +266,7 @@ def _get_object_states(
     ]
     object_range_bbox = _get_object_range_bbox(table_bbox)
     for oi in range(object_cfg["n_objects"]):
-        _object = random.choice(object_candidates)  # TODO: Avoid duplicates
+        _object = random.choice(object_candidates).copy()  # TODO: Avoid duplicates
         random_orientation = random.random() < object_cfg.get("prob_rnd_quat", 0.5)
         random_static = (
             random.random() < object_cfg.get("prob_static", 0.5) if oi != 0 else False
@@ -301,7 +304,9 @@ def _get_object_states(
     for _ in range(container_cfg["n_containers"]):
         _state = None
         while _state is None:
-            _container = random.choice(container_candidates)  # TODO: Avoid duplicates
+            _container = random.choice(
+                container_candidates
+            ).copy()  # TODO: Avoid duplicates
             _state = _get_container_state(
                 _container["size"],
                 cntr_range_bbox,
@@ -370,11 +375,15 @@ def _get_object_state(
 ):
     # TODO: Consider the state of existing objects
     if moving_time is None:
-        return _get_static_object_state(object_range_bbox, object_z, random_orientation)
+        object_state = _get_static_object_state(
+            object_range_bbox, object_z, random_orientation
+        )
     else:
-        return _get_dynamic_object_state(
+        object_state = _get_dynamic_object_state(
             object_range_bbox, object_z, moving_time, robot_position
         )
+
+    return object_state
 
 
 def _get_static_object_state(object_range_bbox, object_z, random_orientation):
@@ -790,7 +799,7 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
     import configs.termination_cfg
 
     # Create a new environment
-    env_cfg = get_env_cfg(
+    env_cfg, object_tags = get_env_cfg(
         sim_cfg,
         task,
         robot,
@@ -884,11 +893,15 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
     # Ignore the simulation if the task is not finished
     # If in debug mode, save all simulation data even if the task is not finishedq
     is_done = term_mgr.get_term(done_term)
-    return env_cfg, [
-        es
-        for env_id, es in enumerate(env_states)
-        if is_done[env_id].item() or sim_cfg["debug"]
-    ]
+    return (
+        env_cfg,
+        object_tags,
+        [
+            es
+            for env_id, es in enumerate(env_states)
+            if is_done[env_id].item() or sim_cfg["debug"]
+        ],
+    )
 
 
 def get_episode_name(task, robot, seed, scene_cfg):
@@ -1104,7 +1117,7 @@ def main(args):
         np.random.seed(seed)
         torch.manual_seed(seed)
 
-        env_cfg, env_states = simulate(
+        env_cfg, object_tags, env_states = simulate(
             sim_cfg,
             args.task,
             args.robot,
@@ -1127,6 +1140,7 @@ def main(args):
                 ) as fp:
                     env_cfg = env_cfg.to_dict()
                     env_cfg["seed"] = seed
+                    env_cfg["instruction"] = {"task": args.task, **object_tags}
                     json.dump(get_object_without_numpy(env_cfg), fp, indent=2)
 
                 with h5py.File(
