@@ -43,13 +43,13 @@ def get_grasp_position(
     gripper_length: float,
 ) -> torch.Tensor:
     WAITING_TIME = 0.23
-    TABLE_HEIGHT_THRES = 0.006
+    TABLE_HEIGHT_THRES = 0.008
     OBJECT_HEIGHT_DISPLACEMENT = 0.008
     grasp_position = object_position.clone() + object_velocity * WAITING_TIME
     object_height = torch.norm(object_projected_size[:, :, 2], dim=1)
     grasp_position_z = grasp_position[:, 2]
 
-    # Plan B: Try to grasp the center of the object
+    # Try to grasp the center of the object
     grasp_position_z = torch.where(
         object_height > OBJECT_HEIGHT_DISPLACEMENT * 2,
         grasp_position_z - OBJECT_HEIGHT_DISPLACEMENT,
@@ -68,30 +68,6 @@ def get_grasp_position(
         grasp_position_z,
     )
     return grasp_position
-
-    # grasp_position = object_position.clone() + object_velocity * WAITING_TIME
-    # object_height = torch.norm(object_projected_size[:, :, 2])
-    # grasp_position_z = grasp_position[:, 2]
-
-    # # Plan B: Try to grasp the center of the object
-    # grasp_position_z = torch.where(
-    #     object_height > OBJECT_HEIGHT_DISPLACEMENT * 2,
-    #     grasp_position_z - OBJECT_HEIGHT_DISPLACEMENT,
-    #     grasp_position_z,
-    # )
-    # grasp_position_z = torch.where(
-    #     object_height > gripper_length * 2,
-    #     object_height - gripper_length,
-    #     grasp_position_z,
-    # )
-
-    # # ensure grasping height higher than table
-    # grasp_position[:, 2] = torch.where(
-    #     grasp_position_z < TABLE_HEIGHT_THRES,
-    #     TABLE_HEIGHT_THRES,
-    #     grasp_position_z,
-    # )
-    # return grasp_position
 
 
 def get_grasp_quat(
