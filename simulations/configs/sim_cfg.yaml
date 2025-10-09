@@ -17,7 +17,22 @@ scene:
     prob_static: 0.5
     moving_time: [0.5, 1.5]
     categories:
+      - apple
+      - avocado
+      - beer
+      - bottle
       - can
+      - cup
+      - egg
+      - kiwi
+      - lemon
+      - lime
+      - onion
+      - orange
+      - peach
+      - potato
+      - tangerine
+      - tomato
   containers:
     n_containers: 1
     mass: 0.1
