@@ -117,7 +117,7 @@ class PickTerminationsCfg(TerminationsCfg):
 
     object_picked = TerminationTermCfg(
         func=is_object_picked,
-        params={"goal_position": None, "tolerance": 0.02},
+        params={"goal_position": None, "tolerance": 0.015},
         time_out=False,
     )
 
@@ -132,7 +132,7 @@ class PlaceTerminationsCfg(TerminationsCfg):
             "goal_position": None,
             "object_size": None,
             "container_size": None,
-            "tolerance": 0.02,
+            "tolerance": 0.015,
         },
         time_out=False,
     )
