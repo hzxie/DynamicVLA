@@ -75,7 +75,7 @@ AGILEX_PIPER_CFG = ArticulationCfg(
         ),
         "hand": ImplicitActuatorCfg(
             joint_names_expr=["joint8", "joint7"],
-            effort_limit_sim=200.0,
+            effort_limit_sim=10.0,
             velocity_limit_sim=0.2,
             stiffness=2e3,
             damping=6e2,

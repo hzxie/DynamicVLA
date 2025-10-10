@@ -67,14 +67,14 @@ class PiperActionCfg(ActionCfg):
             command_type="pose", use_relative_mode=False, ik_method="dls"
         ),
         body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(
-            pos=[0.0, 0.0, 0.107]
+            pos=[0.0, 0.0, 0.137]
         ),
     )
     gripper_action = mdp.BinaryJointPositionActionCfg(
         asset_name="robot",
         joint_names=["joint8", "joint7"],
         open_command_expr={"joint8": -0.035, "joint7": 0.035},
-        close_command_expr={"joint8": -0.01, "joint7": 0.01},
+        close_command_expr={"joint8": 0.0, "joint7": 0.0},
     )
 
 
@@ -135,7 +135,7 @@ def get_ee_frame_cfg(robot: str) -> FrameTransformerCfg:
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Robot/gripper_base",
                     name="end_effector",
-                    offset=OffsetCfg(pos=[0.0, 0.0, 0.1304]),
+                    offset=OffsetCfg(pos=[0.0, 0.0, 0.1334]),
                 ),
             ],
         )
