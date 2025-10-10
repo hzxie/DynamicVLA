@@ -85,7 +85,7 @@ def get_object_init_quat(init_lin_vel: list[float], upright=False) -> list[float
         [
             0 if upright else np.pi / 2 * np.random.choice([-1, 1]),
             0,
-            -np.arctan2(init_lin_vel[1], init_lin_vel[0]),
+            np.arctan2(init_lin_vel[1], init_lin_vel[0]),
         ],
     ).as_quat()
     return quat[[3, 0, 1, 2]]
