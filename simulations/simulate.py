@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-09 10:23:08
+# @Last Modified at: 2025-10-10 20:19:47
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -133,6 +133,7 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
             logging.info("No table found in %s. Trying another scene." % scene)
         else:
             table = random.choice(tables)
+            logging.info("Using table %s." % table["name"])
 
     # Determine the robot pose
     robot_pose = random.choice([a for a in table["anchors"] if a["side"] == "long"])
@@ -191,9 +192,10 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
         task, terimation_args
     )
     # Return the tags of all objects in the scene (the duplicated tags will be removed)
-    return env_cfg, {
+    object_tags = {
         k: [o["tags"] for o in v] for k, v in object_states.items() if len(v) > 0
     }
+    return env_cfg, object_tags
 
 
 def _set_up_scene_cameras(scene_cfg, sim_cfg, robot):
@@ -271,11 +273,13 @@ def _get_object_states(
         random_static = (
             random.random() < object_cfg.get("prob_static", 0.5) if oi != 0 else False
         )  # The first object is always dynamic
+        random_friction = np.random.uniform(*object_cfg.get("friction", [0, 0]))
         _state = _get_object_state(
             _get_object_z(object_range_bbox.max[2], _object["size"]),
             robot_pose["pos"],
             object_range_bbox,
             None if random_static else object_cfg.get("moving_time", None),
+            random_friction,
             random_orientation,
             object_states["objects"],
         )
@@ -370,6 +374,7 @@ def _get_object_state(
     robot_position,
     object_range_bbox,
     moving_time,
+    friction,
     random_orientation,
     existing_objects,
 ):
@@ -380,7 +385,7 @@ def _get_object_state(
         )
     else:
         object_state = _get_dynamic_object_state(
-            object_range_bbox, object_z, moving_time, robot_position
+            object_range_bbox, object_z, moving_time, friction, robot_position
         )
 
     return object_state
@@ -405,7 +410,9 @@ def _get_static_object_state(object_range_bbox, object_z, random_orientation):
     return {"pos": object_position, "quat": object_quat}
 
 
-def _get_dynamic_object_state(object_range_bbox, object_z, moving_time, robot_position):
+def _get_dynamic_object_state(
+    object_range_bbox, object_z, moving_time, friction, robot_position
+):
     import configs.object_cfg
 
     object_position = np.array(
@@ -430,6 +437,7 @@ def _get_dynamic_object_state(object_range_bbox, object_z, moving_time, robot_po
         "pos": object_position,
         "quat": object_quat,
         "lin_vel": object_velocity,
+        "friction": friction,
     }
 
 
@@ -520,6 +528,7 @@ def _set_up_scene_objects(scene_cfg, object_states):
             configs.object_cfg.get_spawner_cfg(
                 file_path=target_object["file_path"],
                 mass=target_object["mass"],
+                friction=target_object["friction"],
                 semantic_tags=[("class", "OBJECT_MAIN")],
             ),
         ),

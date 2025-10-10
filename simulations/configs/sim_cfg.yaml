@@ -8,16 +8,30 @@ scene:
       position: [0.5, 1, 0.35]
       rotation: [-90, 0, 180]
       prim_path: "/Robot/SideCamera"
-  table:
-    friction: [0, 1]
   objects:
     n_objects: 1
     mass: 0.05
     prob_rnd_quat: 0.85
     prob_static: 0.5
     moving_time: [0.5, 1.5]
+    friction: [0.5, 1.5]
     categories:
+      - apple
+      - avocado
+      - beer
+      - bottle
       - can
+      - cup
+      - egg
+      - kiwi
+      - lemon
+      - lime
+      - onion
+      - orange
+      - peach
+      - potato
+      - tangerine
+      - tomato
   containers:
     n_containers: 1
     mass: 0.1
@@ -69,3 +83,4 @@ robots:
     final_pose: [0.373, 0.0, 0.271, -1, 0, 0, 0]
     gripper_length: 0.09
     max_reach_dist: 0.55
+
