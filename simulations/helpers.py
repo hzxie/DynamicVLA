@@ -50,24 +50,28 @@ def is_object_placed(
     object_projected_size: torch.Tensor,
     container_position: torch.Tensor,
     container_projected_size: torch.Tensor,
-    tolerance: float = 0.02,
+    tolerance: float = 0.015,
 ) -> torch.Tensor:
-    object_relative_size = object_projected_size / 2
-    object_negz_mask = (object_relative_size[:, :, 2] > 0).unsqueeze(2)
-    object_negz_size = torch.where(
-        object_negz_mask, -object_relative_size, object_relative_size
-    )
-    lowest_point = object_position + object_negz_size.sum(dim=1)
-
+    # Horizonal
     container_relative_size = container_projected_size / 2 + tolerance
     container_axis_lengths = torch.norm(container_relative_size, dim=2)
     container_axis_dirs = container_relative_size / container_axis_lengths.unsqueeze(2)
 
-    object_container_rela = lowest_point - container_position
+    object_container_rela = object_position - container_position
     object_container_projections = torch.matmul(
         container_axis_dirs, object_container_rela.unsqueeze(-1)
     ).squeeze(-1)
 
-    return torch.all(
-        torch.abs(object_container_projections) <= container_axis_lengths, dim=1
+    object_container_projections_xy = object_container_projections[:, :2]
+    container_axis_lengths_xy = container_axis_lengths[:, :2]
+    is_horizonal_in_container = torch.all(
+        torch.abs(object_container_projections_xy) <= container_axis_lengths_xy, dim=1
     )
+
+    # Vertical
+    object_relative_size = object_projected_size / 2
+    object_lowest_z = object_position[:, 2] - torch.sum(torch.abs(object_relative_size[:, :, 2]), dim=1)
+    container_highest_z = container_position[:, 2] + torch.sum(torch.abs(container_relative_size[:, :, 2]), dim=1)
+    is_vertical_in_container = object_lowest_z <= container_highest_z
+
+    return torch.logical_and(is_horizonal_in_container, is_vertical_in_container)
