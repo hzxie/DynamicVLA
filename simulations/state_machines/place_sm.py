@@ -98,6 +98,8 @@ class PlaceStateMachine:
         # next gripper state
         self.des_ee_pose = torch.zeros((num_envs, POSE_DIM), device=device)
         self.des_gripper_state = torch.full((num_envs,), 0.0, device=device)
+        # if use cache grasp quat
+        self.use_cache_grasp_quat = torch.zeros((num_envs,), dtype=torch.bool, device=device)
 
         # the final end-effector position after placing (quat in xyzw)
         self.final_eef_pose = final_pose.repeat(num_envs, 1)
@@ -128,6 +130,7 @@ class PlaceStateMachine:
         self.des_gripper_state_wp = wp.from_torch(self.des_gripper_state, wp.float32)
         self.offset_wp = wp.from_torch(self.offset, wp.transform)
         self.init_pose_wp = wp.from_torch(self.init_pose, wp.transform)
+        self.use_cache_grasp_quat_wp = wp.from_torch(self.use_cache_grasp_quat, wp.bool)
 
     def reset_idx(self, env_ids: collections.abc.Sequence[int] = None):
         if env_ids is None:
@@ -215,6 +218,7 @@ class PlaceStateMachine:
                 self.des_ee_pose_wp,
                 self.des_gripper_state_wp,
                 self.offset_wp,
+                self.use_cache_grasp_quat_wp, 
                 object_placed_wp,
                 self.max_reach_dist,
                 self.grasp_dist_thres,
@@ -253,6 +257,7 @@ def infer_state_machine(
     des_ee_pose: wp.array(dtype=wp.transform),
     gripper_state: wp.array(dtype=float),
     offset: wp.array(dtype=wp.transform),
+    use_cache_grasp_quat: wp.array(dtype=wp.bool),
     object_placed: wp.array(dtype=bool),  # the object is placed
     max_reach_dist: float,  # the object is reachable
     grasp_dist_threshold: float,  # the object is graspable
@@ -327,9 +332,18 @@ def infer_state_machine(
             wp.printf("APPROACH_ABOVE_OBJECT: pose_angle: %.4f\n", pose_angle[tid])
     elif state == PlaceSmState.APPROACH_OBJECT:
         gripper_state[tid] = GripperState.OPEN
-        des_ee_pose[tid] = grasp_pose[tid]
+        if not use_cache_grasp_quat[tid] :
+            des_ee_pose[tid] = grasp_pose[tid]
+            use_cache_grasp_quat[tid] = True
+        else :
+            des_ee_pose[tid] = wp.transformation(
+                wp.transform_get_translation(grasp_pose[tid]),
+                wp.transform_get_rotation(des_ee_pose[tid])
+            )
+        
         if sm_wait_time[tid] >= PlaceSmWaitTime.APPROACH_OBJECT:
             sm_state[tid] = PlaceSmState.GRASP_OBJECT
+            use_cache_grasp_quat[tid] = False
             sm_wait_time[tid] = 0.0
         if debug:
             print("APPROACH_OBJECT")
