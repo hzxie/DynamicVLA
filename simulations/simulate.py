@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-10 20:19:47
+# @Last Modified at: 2025-10-13 12:24:16
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -528,7 +528,7 @@ def _set_up_scene_objects(scene_cfg, object_states):
             configs.object_cfg.get_spawner_cfg(
                 file_path=target_object["file_path"],
                 mass=target_object["mass"],
-                friction=target_object["friction"],
+                friction=target_object.get("friction", 0.0),
                 semantic_tags=[("class", "OBJECT_MAIN")],
             ),
         ),
@@ -545,6 +545,7 @@ def _set_up_scene_objects(scene_cfg, object_states):
                 configs.object_cfg.get_spawner_cfg(
                     file_path=o["file_path"],
                     mass=o["mass"],
+                    friction=o.get("friction", 0.0),
                     semantic_tags=[("class", "OBJECT_BG")],
                 ),
             ),

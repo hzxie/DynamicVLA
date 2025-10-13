@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-09 15:31:05
+# @Last Modified at: 2025-10-13 12:21:31
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -247,6 +247,7 @@ def _set_up_scene_objects(scene_cfg, cfg, object_dir):
             configs.object_cfg.get_spawner_cfg(
                 usd_file_path,
                 v["spawn"]["mass_props"]["mass"],
+                v["spawn"]["rigid_props"]["angular_damping"],
                 v["spawn"]["semantic_tags"],
             ),
         )
