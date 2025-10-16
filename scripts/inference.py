@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-06 15:45:28
+# @Last Modified at: 2025-10-16 20:45:35
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -281,13 +281,9 @@ def _get_action(vla_model, observations, rotation, use_delta_action, debug=False
     # NOTE: All tensors are on CPU if streaming is enabled.
     #       Because IPC with CUDA tensors is not supported.
     device = "cuda" if not vla_model.config.enable_streaming else "cpu"
-    # Use the observation's index if available
-    index = observations[-1]["index"] if "index" in observations[-1] else None
     observations = _get_transformed_observations(
         observations, rotation, vla_model.config.input_features, device
     )
-    if index is not None:
-        observations["index"] = index
 
     # print(observations["index"], _count)
     # Update the state every chunk_size steps
@@ -325,7 +321,9 @@ def _get_transformed_observations(observations, rotation, feat_cfg, device="cuda
     tr_observations = {
         k: torch.stack(v, dim=1) for k, v in tr_observations.items() if k != "task"
     }
-    tr_observations["task"] = observations[-1]["task"]
+    for k in ["task", "index", "dt_scale"]:
+        tr_observations[k] = observations[-1][k] if k in observations[-1] else None
+
     return tr_observations
 
 

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-13 12:24:16
+# @Last Modified at: 2025-10-16 19:58:18
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -191,9 +191,11 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
     env_cfg.terminations = configs.termination_cfg.get_termination_cfg(
         task, terimation_args
     )
-    # Return the tags of all objects in the scene (the duplicated tags will be removed)
+    # Return the unique tags of target object and container (if any)
     object_tags = {
-        k: [o["tags"] for o in v] for k, v in object_states.items() if len(v) > 0
+        k: _get_unique_tags([o["tags"] for o in v])
+        for k, v in object_states.items()
+        if len(v) > 0
     }
     return env_cfg, object_tags
 
@@ -591,6 +593,24 @@ def get_object_size(object_name, object_metadata, device="cpu"):
     return _get_tensor(object_size, device=device, unsqueeze=True)
 
 
+def _get_unique_tags(object_tags):
+    assert isinstance(object_tags, list)
+    if len(object_tags) == 0:
+        return []
+
+    target_tags = set(object_tags[0])
+    other_tags = set(tag for obj in object_tags[1:] for tag in obj)
+    return list(target_tags - other_tags)
+
+
+def get_state_machine(task_cfg, robot_cfg, sm_args={}):
+    state_machine = _get_class(task_cfg["sm"])
+    for k, v in robot_cfg.items():
+        sm_args[k] = _get_tensor(v, sm_args.get("device"))
+
+    return state_machine(**sm_args)
+
+
 def _get_tensor(array, device="cpu", unsqueeze=True):
     if not isinstance(array, list) and not isinstance(array, np.ndarray):
         return array
@@ -600,14 +620,6 @@ def _get_tensor(array, device="cpu", unsqueeze=True):
         tensor = tensor.unsqueeze(0)
 
     return tensor
-
-
-def get_state_machine(task_cfg, robot_cfg, sm_args={}):
-    state_machine = _get_class(task_cfg["sm"])
-    for k, v in robot_cfg.items():
-        sm_args[k] = _get_tensor(v, sm_args.get("device"))
-
-    return state_machine(**sm_args)
 
 
 def _get_class(class_path):

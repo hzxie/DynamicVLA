@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-13 12:21:31
+# @Last Modified at: 2025-10-16 21:08:52
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -298,6 +298,7 @@ def simulate(env, obs_socket, act_socket, init_poses):
     term_mgr = env.env.termination_manager
     done_term = configs.termination_cfg.get_done_term(term_mgr.active_terms)
     tick = time.time()
+    step_time = None
     while sim_results["status"] == -1:
         # scene_state = env.unwrapped.scene.state
         cam_view = sim.get_camera_views(env.unwrapped.scene.sensors, ["rgb"])
@@ -313,6 +314,7 @@ def simulate(env, obs_socket, act_socket, init_poses):
         sim_results["ee_path"].append(curr_state["end_effector"]["pos"].cpu().numpy())
         obs_socket.send_pyobj(
             {
+                "dt_scale": 1.0 if step_time is None else step_time / env.env.step_dt,
                 "index": len(sim_results["cam_views"]) - 1,
                 "observation.state": {
                     "end_effector": {
@@ -340,7 +342,16 @@ def simulate(env, obs_socket, act_socket, init_poses):
             last_action = init_poses[robot_name].repeat(env.unwrapped.num_envs, 1)
 
         env.step(last_action)
-        logging.debug("Sim. Step Time: %.4f" % (time.time() - tick))
+        step_time = time.time() - tick
+        tick = time.time()
+        logging.debug(
+            "[Step%03d] Time: %.4fs; Scale: %.2f"
+            % (
+                len(sim_results["cam_views"]) - 1,
+                step_time,
+                step_time / env.env.step_dt,
+            )
+        )
         if term_mgr.get_term(done_term).all():
             sim_results["status"] = 0
         elif term_mgr.dones.all():
@@ -486,6 +497,7 @@ def main(simulation_app, args):
 
         os.makedirs(output_dir, exist_ok=True)
         logging.info("Evaluation started. Output Dir: %s" % (output_dir))
+        time.sleep(10)  # Wait for the VLA client to be ready
         for te in test_envs:
             n_tests = 0
             env_name = os.path.basename(te)[:-5]

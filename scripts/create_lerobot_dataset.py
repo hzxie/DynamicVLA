@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-30 10:43:57
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-09 11:18:38
+# @Last Modified at: 2025-10-16 19:54:50
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -314,11 +314,6 @@ def _get_fields(prefixes, rot_fmt="quat"):
 
 
 def get_task(instruction_metadata, dataset_tasks):
-    for k, v in instruction_metadata.items():
-        if not isinstance(v, list):
-            continue
-        instruction_metadata[k] = _get_unique_tags(instruction_metadata[k])
-
     task_prompt = json.dumps(instruction_metadata)
     if task_prompt in dataset_tasks:
         task_index = dataset_tasks.index(task_prompt)
@@ -327,16 +322,6 @@ def get_task(instruction_metadata, dataset_tasks):
         dataset_tasks.append(task_prompt)
 
     return task_index, task_prompt
-
-
-def _get_unique_tags(object_tags):
-    assert isinstance(object_tags, list)
-    if len(object_tags) == 0:
-        return []
-
-    target_tags = set(object_tags[0])
-    other_tags = set(tag for obj in object_tags[1:] for tag in obj)
-    return list(target_tags - other_tags)
 
 
 def save_lerobot_episodes(

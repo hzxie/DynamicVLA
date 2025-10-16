@@ -4,12 +4,13 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-07 14:18:07
+# @Last Modified at: 2025-10-16 20:59:17
 # @Email:  root@haozhexie.com
 
 import math
 import os
 import re
+import time
 from collections import deque
 
 import safetensors
@@ -439,6 +440,7 @@ class DynamicVLAPolicy(PreTrainedPolicy):
     def _get_action_chunk(
         self, batch: dict[str, torch.Tensor], noise: torch.Tensor | None = None
     ) -> torch.Tensor:
+        tick = time.time()
         for k in batch:
             if k in self._queues and k != ACTION:
                 batch[k] = torch.stack(list(self._queues[k]), dim=1)
@@ -458,6 +460,16 @@ class DynamicVLAPolicy(PreTrainedPolicy):
 
         if self.config.adapt_to_pi_aloha:
             actions = self._pi_aloha_encode_actions(actions)
+
+        inference_time = time.time() - tick
+        if "dt_scale" in batch:
+            # IMPORTANT: To align the inference time with the simulation time
+            sleep_time = inference_time * (batch["dt_scale"] - 1)
+            print(
+                "[Step%03d] Inference Time: %.4fs; Sleep Time: %.4fs"
+                % (batch["index"], inference_time, sleep_time)
+            )
+            time.sleep(sleep_time)
 
         return actions
 

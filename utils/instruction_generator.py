@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-31 19:42:51
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-09 15:50:09
+# @Last Modified at: 2025-10-16 20:10:51
 # @Email:  root@haozhexie.com
 
 import json
@@ -14,9 +14,10 @@ import random
 class InstructionGenerator:
     @staticmethod
     def generate_instruction(inst_metadata):
-        inst_metadata = json.loads(inst_metadata)
-        tmpl = InstructionGenerator._get_instruction_template(inst_metadata["task"])
+        if isinstance(inst_metadata, str):
+            inst_metadata = json.loads(inst_metadata)
 
+        tmpl = InstructionGenerator._get_instruction_template(inst_metadata["task"])
         object_desc = random.choice(inst_metadata.get("objects", [""]))
         container_desc = random.choice(inst_metadata.get("containers", [""]))
         return tmpl.format_map({"object": object_desc, "container": container_desc})

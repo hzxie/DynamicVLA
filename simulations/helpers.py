@@ -70,8 +70,12 @@ def is_object_placed(
 
     # Vertical
     object_relative_size = object_projected_size / 2
-    object_lowest_z = object_position[:, 2] - torch.sum(torch.abs(object_relative_size[:, :, 2]), dim=1)
-    container_highest_z = container_position[:, 2] + torch.sum(torch.abs(container_relative_size[:, :, 2]), dim=1)
+    object_lowest_z = object_position[:, 2] - torch.sum(
+        torch.abs(object_relative_size[:, :, 2]), dim=1
+    )
+    container_highest_z = container_position[:, 2] + torch.sum(
+        torch.abs(container_relative_size[:, :, 2]), dim=1
+    )
     is_vertical_in_container = object_lowest_z <= container_highest_z
 
     return torch.logical_and(is_horizonal_in_container, is_vertical_in_container)
