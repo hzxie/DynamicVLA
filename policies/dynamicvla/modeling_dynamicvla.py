@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-16 20:59:17
+# @Last Modified at: 2025-10-20 08:22:17
 # @Email:  root@haozhexie.com
 
 import math
@@ -339,6 +339,7 @@ class DynamicVLAPolicy(PreTrainedPolicy):
     def reset(self):
         """This should be called whenever the environment is reset."""
         self._queues = {ACTION: deque(maxlen=self.config.n_action_steps)}
+        self._obs_index = 0
         self._action_index = 0
         if hasattr(self, "q_in"):
             self.q_in.clear()  # Clear the input queue
@@ -465,10 +466,10 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         if "dt_scale" in batch:
             # IMPORTANT: To align the inference time with the simulation time
             sleep_time = inference_time * (batch["dt_scale"] - 1)
-            print(
-                "[Step%03d] Inference Time: %.4fs; Sleep Time: %.4fs"
-                % (batch["index"], inference_time, sleep_time)
-            )
+            # print(
+            #     "[Step%03d] Inference Time: %.4fs; Sleep Time: %.4fs"
+            #     % (batch["index"], inference_time, sleep_time)
+            # )
             time.sleep(sleep_time)
 
         return actions
@@ -509,17 +510,20 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         self.q_in.update({"obs": (batch, noise)})
 
         actions = None
-        if len(self._queues[ACTION]) == 0:
-            # Wait for the action from the streaming process
-            actions = self.q_out.get(timeout=5)
-        elif not self.q_out.empty():
+        if not self.q_out.empty():
             actions = self.q_out.get_nowait()
 
         # Merge actions into the queue
         if actions is not None:
             assert actions["actions"].size(0) == self.config.n_action_steps
-            actions["actions"] = actions["actions"][self.config.skip_n_actions :]
-            actions["index"] += self.config.skip_n_actions
+            skip_n_actions = batch["index"] - actions["index"]
+            # print(
+            #     "Curr. Step: %03d; Act. Step: %03d; Skip Steps: %03d"
+            #     % (batch["index"], actions["index"], skip_n_actions)
+            # )
+
+            actions["actions"] = actions["actions"][skip_n_actions:]
+            actions["index"] += skip_n_actions
 
             prev_action_chunk = list(self._queues[ACTION])
             curr_action_chunk = [
@@ -547,9 +551,13 @@ class DynamicVLAPolicy(PreTrainedPolicy):
                     droplen = prev_index_start - curr_index_start
                     self._queues[ACTION].extend(curr_action_chunk[droplen:])
 
-        action = self._queues[ACTION].popleft()
-        self._action_index = action["index"]
-        return action["action"]
+        # print(len(self._queues[ACTION]), self._action_index)
+        if len(self._queues[ACTION]) == 0:
+            return None
+        else:
+            action = self._queues[ACTION].popleft()
+            self._action_index = action["index"]
+            return action["action"]
 
     @torch.no_grad()
     def _get_non_streaming_action(
@@ -573,9 +581,7 @@ class DynamicVLAPolicy(PreTrainedPolicy):
                 actions[..., :action_dim] += latest_state[..., :action_dim]
 
             self._queues[ACTION].extend(
-                actions.transpose(0, 1)[
-                    self.config.skip_n_actions : self.config.n_action_steps
-                ]
+                actions.transpose(0, 1)[: self.config.n_action_steps]
             )
 
         return self._queues[ACTION].popleft()

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-16 20:45:35
+# @Last Modified at: 2025-10-20 08:25:23
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -29,7 +29,7 @@ sys.path.append(
 import utils.helpers
 
 
-def get_vla_model(pretrained_model, use_delta_action, streaming, skip_n_actions):
+def get_vla_model(pretrained_model, use_delta_action, streaming):
     pretrained_cfg = None
     if not os.path.exists(pretrained_model):
         raise FileNotFoundError(
@@ -46,11 +46,6 @@ def get_vla_model(pretrained_model, use_delta_action, streaming, skip_n_actions)
     # Check whether the delta action setting is consistent
     if hasattr(vla_cfg, "use_delta_action"):
         assert vla_cfg.use_delta_action == use_delta_action
-    # Update the config for inference
-    if hasattr(vla_cfg, "skip_n_actions"):
-        vla_cfg.skip_n_actions = skip_n_actions
-    else:
-        assert skip_n_actions == 0, "The model does not support action skipping."
 
     vla_model_class = utils.helpers.get_policy_class(model_cfg["type"])
     # Enable streaming inference if needed
@@ -177,6 +172,8 @@ def run_tests(
                     len(observation["actions"]),
                 )
             )
+            # Make sure the previous inference is finished
+            time.sleep(10)
             # Send ack to the server
             act_socket.send_pyobj({"ack": n_tests}, flags=zmq.NOBLOCK)
             continue
@@ -295,7 +292,11 @@ def _get_action(vla_model, observations, rotation, use_delta_action, debug=False
             states.append(_state)
             setattr(_get_action, "states", states)
 
-    action = vla_model.select_action(observations).cpu().numpy()
+    action = vla_model.select_action(observations)
+    if action is None:
+        return None
+
+    action = action.cpu().numpy()
     # If the model does not support delta action, we manually convert it here
     if not hasattr(vla_model.config, "use_delta_action") and use_delta_action:
         action_dim = action.shape[-1] - 1
@@ -365,9 +366,8 @@ def get_test_stats(test_results):
         path_length = []
         for tr in results:
             if not tr["success"]:
-                continue
+                n_success_trials += 1
 
-            n_success_trials += 1
             n_steps += len(tr["ee_path"])
             n_actions += len(tr["actions"])
             path_length.append(
@@ -392,7 +392,6 @@ def main(
     rotation,
     use_delta_action,
     streaming,
-    skip_n_actions,
     host,
     img_port,
     act_port,
@@ -400,9 +399,7 @@ def main(
 ):
     # Initialize the VLA model
     logging.info("Loading VLA model with weights: %s" % (vla_weights))
-    vla_model, vla_cfg = get_vla_model(
-        vla_weights, use_delta_action, streaming, skip_n_actions
-    )
+    vla_model, vla_cfg = get_vla_model(vla_weights, use_delta_action, streaming)
     vla_model.reset()
     logging.info(
         "Input features: %s; Output features: %s"
@@ -484,13 +481,6 @@ if __name__ == "__main__":
         help="Whether to enable streaming inference",
     )
     parser.add_argument(
-        "-n",
-        "--skip_n_actions",
-        type=int,
-        default=0,
-        help="The number of actions to skip",
-    )
-    parser.add_argument(
         "-p",
         "--weights",
         type=str,
@@ -526,7 +516,6 @@ if __name__ == "__main__":
         args.rotation,
         args.delta,
         args.streaming,
-        args.skip_n_actions,
         args.host,
         args.img_port,
         args.act_port,

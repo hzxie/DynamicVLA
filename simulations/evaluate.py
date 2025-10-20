@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-16 21:08:52
+# @Last Modified at: 2025-10-20 08:27:14
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -292,6 +292,7 @@ def simulate(env, obs_socket, act_socket, init_poses):
     import configs.robot_cfg
     import configs.termination_cfg
 
+    rcv_action = False
     last_action = None
     sim_results = {"status": -1, "cam_views": [], "ee_path": []}
     # The simulation loop
@@ -314,7 +315,7 @@ def simulate(env, obs_socket, act_socket, init_poses):
         sim_results["ee_path"].append(curr_state["end_effector"]["pos"].cpu().numpy())
         obs_socket.send_pyobj(
             {
-                "dt_scale": 1.0 if step_time is None else step_time / env.env.step_dt,
+                "dt_scale": 1.0 if step_time is None else max(1.0, step_time / env.env.step_dt),
                 "index": len(sim_results["cam_views"]) - 1,
                 "observation.state": {
                     "end_effector": {
@@ -332,6 +333,7 @@ def simulate(env, obs_socket, act_socket, init_poses):
                 action["action"], env.unwrapped.num_envs, env.unwrapped.device
             )
             last_action = action
+            rcv_action = True
 
         # If no action is received, use the previous action to make the
         # simulation continuous
@@ -343,19 +345,24 @@ def simulate(env, obs_socket, act_socket, init_poses):
 
         env.step(last_action)
         step_time = time.time() - tick
+        # Make sure each step takes at least step_dt seconds
+        if step_time < env.env.step_dt:
+            time.sleep(env.env.step_dt - step_time)
+
         tick = time.time()
         logging.debug(
-            "[Step%03d] Time: %.4fs; Scale: %.2f"
+            "[Step%03d] Time: %.4fs; Scale: %.2f. Action shape: %s"
             % (
                 len(sim_results["cam_views"]) - 1,
                 step_time,
                 step_time / env.env.step_dt,
+                (action.shape if isinstance(action, torch.Tensor) else None),
             )
         )
         if term_mgr.get_term(done_term).all():
             sim_results["status"] = 0
         elif term_mgr.dones.all():
-            sim_results["status"] = 1 if action is not None else 2
+            sim_results["status"] = 1 if rcv_action else 2
 
     # term_mgr.reset()  # NOT WORKING
     term_mgr = term_mgr.__init__(term_mgr.cfg, env.env)
@@ -497,7 +504,6 @@ def main(simulation_app, args):
 
         os.makedirs(output_dir, exist_ok=True)
         logging.info("Evaluation started. Output Dir: %s" % (output_dir))
-        time.sleep(10)  # Wait for the VLA client to be ready
         for te in test_envs:
             n_tests = 0
             env_name = os.path.basename(te)[:-5]
@@ -517,8 +523,8 @@ def main(simulation_app, args):
                 if sim_results["status"] == 0:
                     success_rates[env_name] += 1
                 elif sim_results["status"] == 2:
-                    logging.info("No action received in this episode.")
-                    continue
+                    logging.info("No action received. VLA client may be disconnected.")
+                    break
 
                 episode_name = get_episode_name(env_name, sim_results["status"])
                 obs_socket.send_pyobj(
@@ -541,12 +547,22 @@ def main(simulation_app, args):
                         ),
                         episode_file_path,
                     )
-                # Wait for VLA client to acknowledge the end of this episode
+
+                # Wait for VLA client to acknowledge the start of this test
                 logging.info("VLA client ACK pending...")
+                n_waits = 0
                 action = get_latest_action(act_socket)
                 while action is None or "ack" not in action:
                     time.sleep(1)
                     action = get_latest_action(act_socket)
+                    n_waits += 1
+                    if n_waits >= 30:
+                        break
+                if n_waits >= 30:
+                    logging.warning(
+                        "VLA client[%s] ACK timeout. Skip this env." % vla_name
+                    )
+                    break
 
             # Calcuate the success rate for this env
             success_rates[env_name] /= n_tests

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:22:31
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-06 14:50:37
+# @Last Modified at: 2025-10-18 12:42:18
 # @Email:  root@haozhexie.com
 
 from dataclasses import dataclass, field
@@ -49,8 +49,6 @@ class DynamicVLAConfig(PreTrainedConfig):
     use_delta_action: bool = True
     # Streaming inference
     enable_streaming: bool = False
-    # Skip first n actions during inference
-    skip_n_actions: int = 0
     # Multi-timestep fusion ("conv" or "attn")
     temporal_fusion: str = "conv"
     # Tokenizer
