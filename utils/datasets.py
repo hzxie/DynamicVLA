@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-17 16:10:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-21 10:30:56
+# @Last Modified at: 2025-10-21 15:06:36
 # @Email:  root@haozhexie.com
 
 import logging
@@ -24,7 +24,7 @@ import torchvision.io
 import torchvision.transforms.v2
 import torchvision.transforms.v2.functional as F
 
-import utils.io
+import utils.memcached
 from utils.instruction_generator import InstructionGenerator
 
 
@@ -141,7 +141,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         tolerance_s: float = 1e-4,
     ):
         super().__init__()
-        self._memcached = utils.io.MCClient(enabled=pin_memory)
+        self._memcached = utils.memcached.MCClient(enabled=pin_memory)
         self.repo_id = repo_id
         self.root = (
             pathlib.Path(root) if root else lerobot.constants.HF_LEROBOT_HOME / repo_id
