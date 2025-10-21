@@ -4,7 +4,7 @@ CONST:
   N_WORKERS: 8
 
 DATASET:
-  NAME: "lerobot/hzxie/dynamic-objects"
+  NAME: "hzxie/dynamic-objects"
   PIN_MEMORY: false
   USE_DELTA_ACTION: true
   IMG_SIZE:

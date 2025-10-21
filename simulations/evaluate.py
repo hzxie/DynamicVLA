@@ -315,7 +315,9 @@ def simulate(env, obs_socket, act_socket, init_poses):
         sim_results["ee_path"].append(curr_state["end_effector"]["pos"].cpu().numpy())
         obs_socket.send_pyobj(
             {
-                "dt_scale": 1.0 if step_time is None else max(1.0, step_time / env.env.step_dt),
+                "dt_scale": (
+                    1.0 if step_time is None else max(1.0, step_time / env.env.step_dt)
+                ),
                 "index": len(sim_results["cam_views"]) - 1,
                 "observation.state": {
                     "end_effector": {

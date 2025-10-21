@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-17 16:10:33
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-09 09:58:21
+# @Last Modified at: 2025-10-21 10:30:56
 # @Email:  root@haozhexie.com
 
 import logging
@@ -16,14 +16,15 @@ import lerobot.datasets.compute_stats
 import lerobot.datasets.lerobot_dataset
 import lerobot.datasets.utils
 import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 import torchcodec.decoders
 import torchvision.io
 import torchvision.transforms.v2
 import torchvision.transforms.v2.functional as F
-from tqdm import tqdm
 
+import utils.io
 from utils.instruction_generator import InstructionGenerator
 
 
@@ -36,18 +37,15 @@ def get_dataset(
     image_transforms: typing.Callable | None = None,
     delta_timestamps: dict[str, list[float]] | None = None,
 ) -> torch.utils.data.Dataset:
-    if dataset_name.startswith("lerobot/"):
-        return LeRobotDataset(
-            dataset_name[8:],  # Remove 'lerobot/' prefix
-            split=split,
-            pin_memory=pin_memory,
-            delta_action=delta_action,
-            required_features=required_features,
-            image_transforms=image_transforms,
-            delta_timestamps=delta_timestamps,
-        )
-    else:
-        raise ValueError(f"Unknown dataset {dataset_name}")
+    return LeRobotDataset(
+        dataset_name,
+        split=split,
+        pin_memory=pin_memory,
+        delta_action=delta_action,
+        required_features=required_features,
+        image_transforms=image_transforms,
+        delta_timestamps=delta_timestamps,
+    )
 
 
 class ImageTransforms:
@@ -143,7 +141,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         tolerance_s: float = 1e-4,
     ):
         super().__init__()
-        self._memcached = {}
+        self._memcached = utils.io.MCClient(enabled=pin_memory)
         self.repo_id = repo_id
         self.root = (
             pathlib.Path(root) if root else lerobot.constants.HF_LEROBOT_HOME / repo_id
@@ -167,16 +165,6 @@ class LeRobotDataset(torch.utils.data.Dataset):
                 self.episodes = [e for e in self.episodes if e % 1000 == 0]
             else:
                 raise ValueError(f"Unknown split {split}.")
-
-        # Loading episode to RAM if pin_memory is True
-        if pin_memory:
-            logging.info(
-                f"Loading {len(self.episodes)} episodes from the dataset {self.repo_id}"
-                " into memory."
-            )
-            self._memcached = {
-                ep_idx: self._get_episode(ep_idx) for ep_idx in tqdm(self.episodes)
-            }
 
         # Compute dataset stats
         self.stats = lerobot.datasets.compute_stats.aggregate_stats(
@@ -232,7 +220,9 @@ class LeRobotDataset(torch.utils.data.Dataset):
         episode = {}
         # Load episode data
         data_frame = pq.read_table(
-            self.root / self.meta.get_data_file_path(ep_idx)
+            pa.BufferReader(
+                self._memcached.get(self.root / self.meta.get_data_file_path(ep_idx))
+            )
         ).to_pandas()
         for col in data_frame.columns:
             if col in self.meta.image_keys:
@@ -248,8 +238,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
 
     def _get_video_bytes(self, ep_idx: int, video_key: str) -> torch.Tensor:
         video_path = self.root / self.meta.get_video_file_path(ep_idx, video_key)
-        with open(video_path, "rb") as f:
-            return f.read()
+        return self._memcached.get(video_path)
 
     def __getitem__(self, idx) -> dict:
         ep_idx = self._get_episode_index(
@@ -258,11 +247,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         frame_idx = idx - self.episode_data_index["from"][ep_idx].item()
 
         g_ep_idx = self.episodes[ep_idx]
-        episode = (
-            self._memcached[g_ep_idx]
-            if g_ep_idx in self._memcached
-            else self._get_episode(g_ep_idx)
-        )
+        episode = self._get_episode(g_ep_idx)
         item = {
             k: v[frame_idx] for k, v in episode.items() if k in self.required_features
         }

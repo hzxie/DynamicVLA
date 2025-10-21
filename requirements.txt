@@ -4,6 +4,7 @@ imageio
 num2words
 numpy==1.26.4
 opencv-python-headless<4.12
+pylibmc
 pynvml
 pytest
 PyYAML
