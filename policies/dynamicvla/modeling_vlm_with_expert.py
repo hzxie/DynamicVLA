@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-09-16 11:23:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-17 15:22:55
+# @Last Modified at: 2025-10-22 20:42:00
 # @Email:  root@haozhexie.com
 
 import copy
@@ -141,20 +141,20 @@ class VLMWithExpertModel(torch.nn.Module):
         expert_model = AutoModel.from_config(expert_config)
         if "cross" in attention_mode:
             # Reshape qkv projections to have the same input dimension as the vlm
-            for layer_idx in range(len(self.lm_expert.layers)):
+            for layer_idx in range(len(expert_model.layers)):
                 if (
                     self_attn_every_n_layers > 0
                     and layer_idx % self_attn_every_n_layers == 0
                 ):
                     continue
 
-                self.lm_expert.layers[layer_idx].self_attn.k_proj = torch.nn.Linear(
+                expert_model.layers[layer_idx].self_attn.k_proj = torch.nn.Linear(
                     self.vlm_config.text_config.num_key_value_heads
                     * self.vlm_config.text_config.head_dim,
                     expert_config.num_key_value_heads * expert_config.head_dim,
                     bias=expert_config.attention_bias,
                 )
-                self.lm_expert.layers[layer_idx].self_attn.v_proj = torch.nn.Linear(
+                expert_model.layers[layer_idx].self_attn.v_proj = torch.nn.Linear(
                     self.vlm_config.text_config.num_key_value_heads
                     * self.vlm_config.text_config.head_dim,
                     expert_config.num_key_value_heads * expert_config.head_dim,
@@ -175,7 +175,7 @@ class VLMWithExpertModel(torch.nn.Module):
             self.get_vlm_model().text_model.eval()
             for params in self.get_vlm_model().text_model.parameters():
                 params.requires_grad = False
-        if self.freeze_connector:
+        if self.freeze_connector and hasattr(self.get_vlm_model(), "connector"):
             self.get_vlm_model().connector.eval()
             for params in self.get_vlm_model().connector.parameters():
                 params.requires_grad = False
@@ -184,7 +184,7 @@ class VLMWithExpertModel(torch.nn.Module):
         super().train(mode)
         if self.freeze_vision_model:
             self.get_vlm_model().vision_model.eval()
-        if self.freeze_connector:
+        if self.freeze_connector and hasattr(self.get_vlm_model(), "connector"):
             self.get_vlm_model().connector.eval()
         if self.freeze_text_model:
             self.get_vlm_model().text_model.eval()
@@ -315,11 +315,8 @@ class VLMWithExpertModel(torch.nn.Module):
                 position_ids[:, seq_len:],
             )
             prefix_attention_mask = attention_mask[:, :seq_len, :seq_len]
-
             layer = model_layers[0][layer_idx]
-
             hidden_states = layer.input_layernorm(inputs_embeds[0])
-
             input_shape = hidden_states.shape[:-1]
             hidden_shape = (*input_shape, -1, layer.self_attn.head_dim)
 
@@ -442,22 +439,10 @@ class VLMWithExpertModel(torch.nn.Module):
         use_cache: bool | None = None,
         fill_kv_cache: bool | None = None,
     ) -> tuple[list[torch.FloatTensor], list[torch.FloatTensor] | None]:
+        batch_size = attention_mask.size(0)
         models = [self.get_vlm_model().text_model, self.lm_expert]
         model_layers = self._get_model_layers(models)
-        for hidden_states in inputs_embeds:
-            # TODO this is very inefficient
-            # dtype is always the same, batch size too (if > 1 len)
-            # device could be trickier in multi gpu edge cases but that's it
-            if hidden_states is None:
-                continue
 
-            batch_size = hidden_states.shape[0]
-
-        # RMSNorm
-        head_dim = (
-            self.vlm.config.text_config.hidden_size
-            // self.vlm.config.text_config.num_attention_heads
-        )
         for layer_idx in range(self.num_vlm_layers):
             if (
                 fill_kv_cache
@@ -474,7 +459,7 @@ class VLMWithExpertModel(torch.nn.Module):
                     position_ids,
                     attention_mask,
                     batch_size,
-                    head_dim,
+                    self.vlm.config.text_config.head_dim,
                     use_cache=use_cache,
                     fill_kv_cache=fill_kv_cache,
                     past_key_values=past_key_values,
@@ -487,13 +472,14 @@ class VLMWithExpertModel(torch.nn.Module):
                     position_ids,
                     attention_mask,
                     batch_size,
-                    head_dim,
+                    self.vlm.config.text_config.head_dim,
                     use_cache=use_cache,
                     fill_kv_cache=fill_kv_cache,
                     past_key_values=past_key_values,
                 )
-            outputs_embeds = []
+
             start = 0
+            outputs_embeds = []
             for i, hidden_states in enumerate(inputs_embeds):
                 layer = model_layers[i][layer_idx]
                 att_output = (
@@ -503,10 +489,11 @@ class VLMWithExpertModel(torch.nn.Module):
                     if layer is None:
                         outputs_embeds.append(hidden_states)
                         continue
-                    end = start + hidden_states.shape[1]
 
+                    end = start + hidden_states.shape[1]
                     if att_output.dtype != layer.self_attn.o_proj.weight.dtype:
                         att_output = att_output.to(layer.self_attn.o_proj.weight.dtype)
+
                     att_out = att_output[:, start:end]
                     out_emb = layer.self_attn.o_proj(att_out)
 
@@ -519,7 +506,6 @@ class VLMWithExpertModel(torch.nn.Module):
                     out_emb += after_first_residual
 
                     outputs_embeds.append(out_emb)
-
                     start = end if len(att_outputs) == 1 else 0
                 else:
                     outputs_embeds.append(None)

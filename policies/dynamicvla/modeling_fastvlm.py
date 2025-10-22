@@ -4,11 +4,11 @@
 # @Author: Haozhe Xie
 # @Date:   2025-09-10 20:19:11
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-17 14:41:46
+# @Last Modified at: 2025-10-22 16:40:08
 # @Email:  root@haozhexie.com
 
-import copy
 import functools
+import logging
 import typing
 
 import torch
@@ -22,19 +22,31 @@ from transformers import (
     PretrainedConfig,
     PreTrainedModel,
 )
-from transformers.cache_utils import DynamicCache
+from transformers.cache_utils import Cache, DynamicCache
 from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
-from transformers.models.smolvlm.modeling_smolvlm import (
-    SmolVLMBaseModelOutputWithPast,
-    SmolVLMCausalLMOutputWithPast,
-)
+from transformers.modeling_outputs import ModelOutput
 from transformers.processing_utils import Unpack
-from transformers.utils import LossKwargs, logging
-
-logger = logging.get_logger(__name__)
+from transformers.utils import TransformersKwargs
 
 
-class KwargsForCausalLM(FlashAttentionKwargs, LossKwargs): ...
+class KwargsForCausalLM(FlashAttentionKwargs, TransformersKwargs): ...
+
+
+class FastVLMBaseModelOutputWithPast(ModelOutput):
+    last_hidden_state: typing.Optional[torch.FloatTensor] = None
+    past_key_values: typing.Optional[Cache] = None
+    hidden_states: typing.Optional[tuple[torch.FloatTensor]] = None
+    attentions: typing.Optional[tuple[torch.FloatTensor]] = None
+    image_hidden_states: typing.Optional[tuple[torch.FloatTensor]] = None
+
+
+class FastVLMCausalLMOutputWithPast(ModelOutput):
+    loss: typing.Optional[torch.FloatTensor] = None
+    logits: typing.Optional[torch.FloatTensor] = None
+    past_key_values: typing.Optional[Cache] = None
+    hidden_states: typing.Optional[tuple[torch.FloatTensor]] = None
+    attentions: typing.Optional[tuple[torch.FloatTensor]] = None
+    image_hidden_states: typing.Optional[tuple[torch.FloatTensor]] = None
 
 
 class FastViTConfig(PretrainedConfig):
@@ -179,8 +191,8 @@ class FastVLMForConditionalGeneration(FastVLMPreTrainedModel, GenerationMixin):
 
     def enable_input_require_grads(self):
         """
-        Enables the gradients for the input embeddings. This is useful for fine-tuning adapter weights while keeping
-        the model weights fixed.
+        Enables the gradients for the input embeddings. This is useful for fine-tuning
+        adapter weights while keeping the model weights fixed.
         """
 
         def make_inputs_require_grads(module, input, output):
@@ -222,14 +234,14 @@ class FastVLMForConditionalGeneration(FastVLMPreTrainedModel, GenerationMixin):
         pixel_attention_mask: typing.Optional[torch.BoolTensor] = None,
         image_hidden_states: typing.Optional[torch.FloatTensor] = None,
         labels: typing.Optional[torch.LongTensor] = None,
-        use_cache: typing.Optional[bool] = None,
         output_attentions: typing.Optional[bool] = None,
         output_hidden_states: typing.Optional[bool] = None,
+        use_cache: typing.Optional[bool] = None,
         cache_position: typing.Optional[torch.LongTensor] = None,
         return_dict: typing.Optional[bool] = None,
         logits_to_keep: typing.Union[int, torch.Tensor] = 0,
         **kwargs: Unpack[KwargsForCausalLM],
-    ) -> typing.Union[typing.Tuple, SmolVLMCausalLMOutputWithPast]:
+    ) -> typing.Union[typing.Tuple, FastVLMCausalLMOutputWithPast]:
         output_attentions = (
             output_attentions
             if output_attentions is not None
@@ -254,9 +266,9 @@ class FastVLMForConditionalGeneration(FastVLMPreTrainedModel, GenerationMixin):
             pixel_values=pixel_values,
             pixel_attention_mask=pixel_attention_mask,
             image_hidden_states=image_hidden_states,
-            use_cache=use_cache,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            use_cache=use_cache,
             cache_position=cache_position,
             return_dict=True,
             **kwargs,
@@ -281,7 +293,7 @@ class FastVLMForConditionalGeneration(FastVLMPreTrainedModel, GenerationMixin):
                 **kwargs,
             )
 
-        return SmolVLMCausalLMOutputWithPast(
+        return FastVLMCausalLMOutputWithPast(
             loss=loss,
             logits=logits,
             past_key_values=outputs.past_key_values,
@@ -289,58 +301,6 @@ class FastVLMForConditionalGeneration(FastVLMPreTrainedModel, GenerationMixin):
             attentions=outputs.attentions,
             image_hidden_states=outputs.image_hidden_states,
         )
-
-    def prepare_inputs_for_generation(
-        self,
-        input_ids,
-        past_key_values=None,
-        attention_mask=None,
-        inputs_embeds=None,
-        cache_position=None,
-        pixel_values=None,
-        pixel_attention_mask=None,
-        image_hidden_states=None,
-        logits_to_keep=None,
-        **kwargs,
-    ):
-        # Overwritten -- there are mutually exclusive inputs (if the logic to make
-        # `image_hidden_states` takeprecedence is moved to the model, we can remove
-        # this fn)
-        model_inputs = super().prepare_inputs_for_generation(
-            input_ids,
-            past_key_values=past_key_values,
-            attention_mask=attention_mask,
-            inputs_embeds=inputs_embeds,
-            cache_position=cache_position,
-            pixel_values=pixel_values,
-            pixel_attention_mask=pixel_attention_mask,
-            image_hidden_states=image_hidden_states,
-            logits_to_keep=logits_to_keep,
-            **kwargs,
-        )
-        # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
-        # but IDEFICS requires both ids and embeds to be present
-        if inputs_embeds is not None and cache_position[0] == 0:
-            model_inputs["input_ids"] = input_ids
-
-        if image_hidden_states is not None:
-            model_inputs["pixel_values"] = None
-            model_inputs["pixel_attention_mask"] = None
-
-        return model_inputs
-
-    def _update_model_kwargs_for_generation(
-        self, outputs, model_kwargs, is_encoder_decoder, **kwargs
-    ):
-        model_kwargs = super()._update_model_kwargs_for_generation(
-            outputs=outputs,
-            model_kwargs=model_kwargs,
-            is_encoder_decoder=is_encoder_decoder,
-            **kwargs,
-        )
-        # Get the precomputed image_hidden_states
-        model_kwargs["image_hidden_states"] = outputs.image_hidden_states
-        return model_kwargs
 
 
 class FastVLMModel(FastVLMPreTrainedModel):
@@ -358,7 +318,8 @@ class FastVLMModel(FastVLMPreTrainedModel):
         This is useful for lora when using gradient checkpointing.
         c.f. https://github.com/huggingface/peft/issues/1402#issuecomment-1913675032
 
-        Override to set output.requires_grad = True for both the decoder's and vision model's embeddings.
+        Override to set output.requires_grad = True for both the decoder's and vision model's
+        embeddings.
         """
 
         def get_lowest_module(module):
@@ -443,13 +404,13 @@ class FastVLMModel(FastVLMPreTrainedModel):
         inputs_embeds: typing.Optional[torch.FloatTensor] = None,
         pixel_values: typing.Optional[torch.FloatTensor] = None,
         image_hidden_states: typing.Optional[torch.FloatTensor] = None,
-        use_cache: typing.Optional[bool] = None,
         output_attentions: typing.Optional[bool] = None,
         output_hidden_states: typing.Optional[bool] = None,
+        use_cache: typing.Optional[bool] = None,
         cache_position: typing.Optional[torch.LongTensor] = None,
         return_dict: typing.Optional[bool] = None,
         **kwargs: Unpack[FlashAttentionKwargs],
-    ) -> SmolVLMBaseModelOutputWithPast:
+    ) -> FastVLMBaseModelOutputWithPast:
         output_attentions = (
             output_attentions
             if output_attentions is not None
@@ -466,8 +427,9 @@ class FastVLMModel(FastVLMPreTrainedModel):
         )
 
         if self.training and self.text_model.gradient_checkpointing and use_cache:
-            logger.warning_once(
-                "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`..."
+            logging.warning(
+                "`use_cache=True` is incompatible with gradient checkpointing. "
+                "Setting `use_cache=False`..."
             )
             use_cache = False
 
@@ -490,7 +452,8 @@ class FastVLMModel(FastVLMPreTrainedModel):
 
         if inputs_embeds is not None and input_ids is None and past_seen_tokens == 0:
             raise ValueError(
-                "When first calling the model, if input_embeds are passed, input_ids should not be None."
+                "When first calling the model, if input_embeds are passed, input_ids "
+                "should not be None."
             )
 
         if inputs_embeds is None:
@@ -501,7 +464,8 @@ class FastVLMModel(FastVLMPreTrainedModel):
         # START VISUAL INPUTS INTEGRATION
         if pixel_values is not None and image_hidden_states is not None:
             raise ValueError(
-                "You cannot specify both pixel_values and image_hidden_states at the same time"
+                "You cannot specify both pixel_values and image_hidden_states at the "
+                "same time"
             )
         elif pixel_values is not None:
             image_hidden_states = self.get_image_features(pixel_values).to(
@@ -524,13 +488,13 @@ class FastVLMModel(FastVLMPreTrainedModel):
             attention_mask=attention_mask,
             position_ids=position_ids,
             past_key_values=past_key_values,
-            use_cache=use_cache,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            use_cache=use_cache,
             cache_position=cache_position,
             **kwargs,
         )
-        return SmolVLMBaseModelOutputWithPast(
+        return FastVLMBaseModelOutputWithPast(
             last_hidden_state=outputs.last_hidden_state,
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
@@ -744,7 +708,8 @@ class FastVLMConnector(torch.nn.Module):
         return self.connector(x)
 
 
-# NOTE: The following components are copied from https://huggingface.co/apple/FastVLM-0.5B/blob/main/llava_qwen.py
+# NOTE: The following components are copied from
+# https://huggingface.co/apple/FastVLM-0.5B/blob/main/llava_qwen.py
 #
 #    Licensed under the Apache License, Version 2.0 (the "License");
 #    you may not use this file except in compliance with the License.

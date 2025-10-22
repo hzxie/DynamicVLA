@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-20 08:27:14
+# @Last Modified at: 2025-10-22 18:48:22
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -298,7 +298,7 @@ def simulate(env, obs_socket, act_socket, init_poses):
     # The simulation loop
     term_mgr = env.env.termination_manager
     done_term = configs.termination_cfg.get_done_term(term_mgr.active_terms)
-    tick = time.time()
+    tick = time.perf_counter()
     step_time = None
     while sim_results["status"] == -1:
         # scene_state = env.unwrapped.scene.state
@@ -346,12 +346,12 @@ def simulate(env, obs_socket, act_socket, init_poses):
             last_action = init_poses[robot_name].repeat(env.unwrapped.num_envs, 1)
 
         env.step(last_action)
-        step_time = time.time() - tick
+        step_time = time.perf_counter() - tick
         # Make sure each step takes at least step_dt seconds
         if step_time < env.env.step_dt:
             time.sleep(env.env.step_dt - step_time)
 
-        tick = time.time()
+        tick = time.perf_counter()
         logging.debug(
             "[Step%03d] Time: %.4fs; Scale: %.2f. Action shape: %s"
             % (

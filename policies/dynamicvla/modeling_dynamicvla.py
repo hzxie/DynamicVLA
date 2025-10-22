@@ -4,9 +4,10 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-20 08:22:17
+# @Last Modified at: 2025-10-22 20:28:02
 # @Email:  root@haozhexie.com
 
+import logging
 import math
 import os
 import re
@@ -29,6 +30,11 @@ from policies.dynamicvla.modeling_fastvlm import (
     FastViTConfig,
     FastVLMConfig,
     FastVLMForConditionalGeneration,
+)
+from policies.dynamicvla.modeling_neo import (
+    NeoVisionConfig,
+    NeoVLMConfig,
+    NeoVLMForConditionalGeneration,
 )
 from policies.dynamicvla.modeling_vlm_with_expert import VLMWithExpertModel
 
@@ -67,9 +73,11 @@ def standardise_state_dict(
 
     if verbose:
         for canon, variants in collisions.items():
-            print(f"[standardise_state_dict] '{canon}'  ←  {variants}")
+            logging.info(f"[standardise_state_dict] '{canon}'  ←  {variants}")
         if unmatched:
-            print(f"[standardise_state_dict] kept {len(unmatched)} unmatched keys")
+            logging.info(
+                f"[standardise_state_dict] kept {len(unmatched)} unmatched keys"
+            )
 
     out.update({k: checkpoint[k] for k in unmatched})
     return out, unmatched
@@ -362,6 +370,9 @@ class DynamicVLAPolicy(PreTrainedPolicy):
     def _inference_loop(
         pretrained_model: str, vla_cfg: DynamicVLAConfig, q_in: dict, q_out: mp.Queue
     ):
+        logging.basicConfig(
+            level=logging.INFO, format="[%(levelname)s] %(asctime)s %(message)s"
+        )
         # Initialization
         vla_model = DynamicVLAPolicy.from_pretrained(pretrained_model, config=vla_cfg)
         vla_model.eval()
@@ -411,8 +422,9 @@ class DynamicVLAPolicy(PreTrainedPolicy):
                 actions[..., :action_dim] += latest_state[..., :action_dim]
 
             if q_out.full():
-                print("The output queue is full. Skipping an action.")
+                logging.warning("The output queue is full. Skipping an action.")
                 continue
+
             # NOTE: All torch.Tensors are on CPU if streaming is enabled. Because IPC with
             #       CUDA torch.Tensors is not supported.
             q_out.put_nowait({"actions": actions.transpose(0, 1).cpu(), "index": index})
@@ -441,7 +453,7 @@ class DynamicVLAPolicy(PreTrainedPolicy):
     def _get_action_chunk(
         self, batch: dict[str, torch.Tensor], noise: torch.Tensor | None = None
     ) -> torch.Tensor:
-        tick = time.time()
+        tick = time.perf_counter()
         for k in batch:
             if k in self._queues and k != ACTION:
                 batch[k] = torch.stack(list(self._queues[k]), dim=1)
@@ -462,14 +474,14 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         if self.config.adapt_to_pi_aloha:
             actions = self._pi_aloha_encode_actions(actions)
 
-        inference_time = time.time() - tick
-        if "dt_scale" in batch:
+        inference_time = time.perf_counter() - tick
+        if "dt_scale" in batch and batch["dt_scale"] > 1.0:
             # IMPORTANT: To align the inference time with the simulation time
             sleep_time = inference_time * (batch["dt_scale"] - 1)
-            # print(
-            #     "[Step%03d] Inference Time: %.4fs; Sleep Time: %.4fs"
-            #     % (batch["index"], inference_time, sleep_time)
-            # )
+            logging.info(
+                "[Step%03d] Inference Time: %.4fs; Sleep Time: %.4fs"
+                % (batch["index"], inference_time, sleep_time)
+            )
             time.sleep(sleep_time)
 
         return actions
@@ -517,10 +529,10 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         if actions is not None:
             assert actions["actions"].size(0) == self.config.n_action_steps
             skip_n_actions = batch["index"] - actions["index"]
-            # print(
-            #     "Curr. Step: %03d; Act. Step: %03d; Skip Steps: %03d"
-            #     % (batch["index"], actions["index"], skip_n_actions)
-            # )
+            logging.debug(
+                "Curr. Step: %03d; Act. Step: %03d; Skip Steps: %03d"
+                % (batch["index"], actions["index"], skip_n_actions)
+            )
 
             actions["actions"] = actions["actions"][skip_n_actions:]
             actions["index"] += skip_n_actions
@@ -551,7 +563,6 @@ class DynamicVLAPolicy(PreTrainedPolicy):
                     droplen = prev_index_start - curr_index_start
                     self._queues[ACTION].extend(curr_action_chunk[droplen:])
 
-        # print(len(self._queues[ACTION]), self._action_index)
         if len(self._queues[ACTION]) == 0:
             return None
         else:
@@ -851,7 +862,7 @@ class VLAFlowMatching(torch.nn.Module):
                 config.smolvlm_intermediate_size
             )
             vlm = SmolVLMForConditionalGeneration(config=vlm_config)
-        elif vlm_model_name.startswith("HuggingFaceTB/SmolLM2-360M"):
+        elif vlm_model_name.startswith("HuggingFaceTB/SmolLM2"):
             text_config = AutoConfig.from_pretrained(vlm_model_name)
             vision_config = FastViTConfig(
                 in_channels=vlm_input_channels,
@@ -864,11 +875,23 @@ class VLAFlowMatching(torch.nn.Module):
                 ],
                 inference_mode=config.fastvlm_inference_mode,
             )
-            vlm_config = FastVLMConfig(
-                text_config=text_config,
-                vision_config=vision_config,
+            vlm = FastVLMForConditionalGeneration(
+                config=FastVLMConfig(
+                    text_config=text_config,
+                    vision_config=vision_config,
+                )
             )
-            vlm = FastVLMForConditionalGeneration(config=vlm_config)
+        elif vlm_model_name.startswith("Qwen/Qwen"):
+            text_config = AutoConfig.from_pretrained(vlm_model_name)
+            vision_config = NeoVisionConfig(
+                in_channels=vlm_input_channels,
+            )
+            vlm = NeoVLMForConditionalGeneration(
+                config=NeoVLMConfig(
+                    text_config=text_config,
+                    vision_config=vision_config,
+                )
+            )
         else:
             raise ValueError(f"Unknown VLM: {vlm_model_name}")
 
@@ -880,6 +903,7 @@ class VLAFlowMatching(torch.nn.Module):
             freeze_text_model=config.freeze_text_model,
             num_vlm_layers=self.config.num_vlm_layers,
             num_expert_layers=config.num_expert_layers,
+            attention_mode=config.attention_mode,
             self_attn_every_n_layers=self.config.self_attn_every_n_layers,
             expert_width_multiplier=self.config.expert_width_multiplier,
         )
@@ -1068,12 +1092,12 @@ class VLAFlowMatching(torch.nn.Module):
         return losses
 
     def sample_vlm_embedding(
-        self, images, img_masks, lang_tokens, lang_masks, state, noise=None
+        self, images, img_masks, lang_tokens, lang_masks, state
     ) -> torch.Tensor:
         """Do a half inference forward and compute the VLM embedding"""
 
         prefix_embs, prefix_pad_masks, prefix_att_masks = self._embed_prefix(
-            images, img_masks, lang_tokens, lang_masks, state=state
+            images, img_masks, lang_tokens, lang_masks, state
         )
         prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
         prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
@@ -1086,8 +1110,7 @@ class VLAFlowMatching(torch.nn.Module):
             use_cache=self.config.use_cache,
             fill_kv_cache=True,
         )
-
-        return past_key_values
+        return prefix_pad_masks, past_key_values
 
     def sample_actions(
         self, images, img_masks, lang_tokens, lang_masks, state, noise=None
@@ -1095,24 +1118,12 @@ class VLAFlowMatching(torch.nn.Module):
         """Do a full inference forward and compute the action (batch_size x num_steps x num_motors)"""
         bsize = state.shape[0]
         device = state.device
-
         if noise is None:
             actions_shape = (bsize, self.config.chunk_size, self.config.max_action_dim)
             noise = self._sample_noise(actions_shape, device)
 
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self._embed_prefix(
-            images, img_masks, lang_tokens, lang_masks, state=state
-        )
-        prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
-        prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
-        # Compute image and language key value cache
-        _, past_key_values = self.vlm_with_expert.forward(
-            attention_mask=prefix_att_2d_masks,
-            position_ids=prefix_position_ids,
-            past_key_values=None,
-            inputs_embeds=[prefix_embs, None],
-            use_cache=self.config.use_cache,
-            fill_kv_cache=True,
+        prefix_pad_masks, past_key_values = self.sample_vlm_embedding(
+            images, img_masks, lang_tokens, lang_masks, state
         )
         dt = -1.0 / self.config.num_steps
         dt = torch.tensor(dt, dtype=torch.float32, device=device)

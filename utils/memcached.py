@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-10-21 10:13:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-21 20:25:11
+# @Last Modified at: 2025-10-22 10:35:41
 # @Email:  root@haozhexie.com
 
 import hashlib
@@ -24,7 +24,7 @@ class MCClient:
         servers: list[str] = ["127.0.0.1"],
     ) -> None:
         self.ttl = 86400  # 1 day
-        self.chunk_size = 1024 * 1024  # 1 MB
+        self.chunk_size = 512 * 1024  # 512 KB
         self.mc_cfg = (
             {
                 "servers": servers,
@@ -113,7 +113,7 @@ class MCClient:
                 with self._get_mc_client().reserve() as mc:
                     return fn(mc, *args)
             except (pylibmc.ConnectionError, pylibmc.ServerDown) as ex:
-                logging.info(f"MemCached Stats: {mc.get_stats()}")
+                logging.debug(f"MemCached Stats: {mc.get_stats()}")
                 logging.warning(
                     f"[{i + 1}/{N_TRIES}] MemCached connection error: {ex} while "
                     f"invoking {fn.__name__}."
