@@ -283,7 +283,7 @@ def _get_object_states(
             _get_object_z(object_range_bbox.max[2], _object["size"]),
             robot_pose["pos"],
             object_range_bbox,
-            None if random_static else object_cfg.get("moving_time", None),
+            None if random_static else object_cfg.get("moving_speed", None),
             random_friction,
             random_orientation,
             [0, 0] if not random_perturb else object_cfg.get("perturb_range", [0, 0]),
@@ -379,20 +379,20 @@ def _get_object_state(
     object_z,
     robot_position,
     object_range_bbox,
-    moving_time,
+    moving_speed,
     friction,
     random_orientation,
     perturb_range,
     existing_objects,
 ):
     # TODO: Consider the state of existing objects
-    if moving_time is None:
+    if moving_speed is None:
         object_state = _get_static_object_state(
             object_range_bbox, object_z, random_orientation
         )
     else:
         object_state = _get_dynamic_object_state(
-            object_range_bbox, object_z, moving_time, friction, perturb_range, robot_position
+            object_range_bbox, object_z, moving_speed, friction, perturb_range, robot_position
         )
 
     return object_state
@@ -418,7 +418,7 @@ def _get_static_object_state(object_range_bbox, object_z, random_orientation):
 
 
 def _get_dynamic_object_state(
-    object_range_bbox, object_z, moving_time, friction, perturb_range, robot_position
+    object_range_bbox, object_z, moving_speed, friction, perturb_range, robot_position
 ):
     import configs.object_cfg
 
@@ -436,8 +436,9 @@ def _get_dynamic_object_state(
     random_position = tbl_ctr + random_ratio * (robot_position - tbl_ctr)
     random_position[2] = object_z
     # Determine the linear velocity of the object
-    assert moving_time is not None and len(moving_time) == 2
-    object_velocity = (random_position - object_position) / random.uniform(*moving_time)
+    assert moving_speed is not None and len(moving_speed) == 2
+    object_direction = random_position - object_position
+    object_velocity = object_direction / np.linalg.norm(object_direction) * random.uniform(*moving_speed)
     random_perturb = [random.uniform(perturb_range[0], perturb_range[1]) for _ in range(2)]
     object_quat = configs.object_cfg.get_object_init_quat(object_velocity, perturb=random_perturb)
 
