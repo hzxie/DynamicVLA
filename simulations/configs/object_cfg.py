@@ -79,13 +79,20 @@ def get_spawner_cfg(
     return spawner_cfg
 
 
-def get_object_init_quat(init_lin_vel: list[float], upright=False) -> list[float]:
+def get_object_init_quat(init_lin_vel: list[float], upright=False, perturb=None) -> list[float]:
+
+    lin_vel_angle = np.arctan2(init_lin_vel[1], init_lin_vel[0])
+    verticle_angle = np.pi / 2 * np.random.choice([-1, 1])
+    if perturb is not None:
+        lin_vel_angle += np.deg2rad(perturb[0])
+        verticle_angle += np.deg2rad(perturb[1])
+    
     quat = scipy.spatial.transform.Rotation.from_euler(
         "xyz",
         [
-            0 if upright else np.pi / 2 * np.random.choice([-1, 1]),
+            0 if upright else verticle_angle,
             0,
-            np.arctan2(init_lin_vel[1], init_lin_vel[0]),
+            lin_vel_angle,
         ],
     ).as_quat()
     return quat[[3, 0, 1, 2]]

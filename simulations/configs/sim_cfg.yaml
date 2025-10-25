@@ -15,6 +15,8 @@ scene:
     prob_static: 0.5
     moving_time: [0.5, 1.5]
     friction: [0.5, 1.5]
+    prob_init_perturb: 0.5
+    perturb_range: [-30, 30]
     categories:
       - apple
       - avocado
