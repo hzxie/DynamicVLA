@@ -4,20 +4,20 @@ CONST:
   N_WORKERS: 8
 
 DATASET:
-  NAME: "hzxie/dynamic-objects"
+  NAME: hzxie/dynamic-objects
   PIN_MEMORY: false
   USE_DELTA_ACTION: true
   IMG_SIZE:
   DELTA_TIMESTAMPS:
   REQUIRED_FEATURES:
-    - "observation.images.opst_cam"
-    - "observation.images.wrist_cam"
-    - "observation.state"
-    - "action"
+    - observation.images.opst_cam
+    - observation.images.wrist_cam
+    - observation.state
+    - action
 
 POLICY:
-  TYPE: "smolvla"
-  CHECKPOINT: "lerobot/smolvla_base"
+  TYPE: smolvla
+  CHECKPOINT: lerobot/smolvla_base
   CHUNK_SIZE: 
   N_ACTION_STEPS: 
   LOAD_VLM_WEIGHTS: false
@@ -25,13 +25,13 @@ POLICY:
   TRAIN_EXPERT_ONLY: true
 
 DIR:
-  OUTPUT: "./runs"
+  OUTPUT: ./runs
 
 WANDB:
   ENABLED: false
-  PROJECT: "DynamicVLA"
-  ENTITY: "haozhexie"
-  MODE: "online"
+  PROJECT: DynamicVLA
+  ENTITY: haozhexie
+  MODE: online
   RUN_ID: null
   LOG_CODE: true
   SYNC_TENSORBOARD: false
@@ -49,7 +49,7 @@ TRAIN:
     WEIGHT_DECAY: 1.0e-10
     BETAS: [0.9, 0.95]
   LR_SCHEDULER:
-    NAME: "cosine"
+    NAME: cosine
     N_WARMUP_STEPS: 1000
   IMAGE_TRANSFORMS:
     BRIGHTNESS: [0.8, 1.2]

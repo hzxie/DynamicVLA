@@ -4,9 +4,10 @@
 # @Author: Haozhe Xie
 # @Date:   2025-09-16 11:23:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-22 20:42:00
+# @Last Modified at: 2025-10-30 10:53:23
 # @Email:  root@haozhexie.com
 
+import collections
 import copy
 import logging
 
@@ -14,16 +15,18 @@ import torch
 from transformers import AutoModel, AutoTokenizer, PretrainedConfig, PreTrainedModel
 
 
-def apply_rope(x, positions, max_wavelength=10_000):
+def apply_rope(
+    hidden_states: torch.Tensor, positions: torch.Tensor, max_wavelength: int = 10_000
+):
     """
-    Applies RoPE positions [B, L] to x [B, L, H, D].
+    Applies RoPE positions [B, L] to hidden_states [B, L, H, D].
     """
-    d_half = x.shape[-1] // 2
-    device = x.device
-    dtype = x.dtype
-    x = x.to(torch.float32)
+    d_half = hidden_states.shape[-1] // 2
+    device = hidden_states.device
+    dtype = hidden_states.dtype
+    x = hidden_states.to(torch.float32)
 
-    freq_exponents = (2.0 / x.shape[-1]) * torch.arange(
+    freq_exponents = (2.0 / hidden_states.shape[-1]) * torch.arange(
         d_half, dtype=torch.float32, device=device
     )
     timescale = max_wavelength**freq_exponents
@@ -32,11 +35,10 @@ def apply_rope(x, positions, max_wavelength=10_000):
     )
 
     radians = radians[..., None, :]
-
     sin = torch.sin(radians)  # .to(dtype=dtype)
     cos = torch.cos(radians)  # .to(dtype=dtype)
 
-    x1, x2 = x.split(d_half, dim=-1)
+    x1, x2 = hidden_states.split(d_half, dim=-1)
     res = torch.empty_like(x)
     res[..., :d_half] = x1 * cos - x2 * sin
     res[..., d_half:] = x2 * cos + x1 * sin
@@ -54,6 +56,7 @@ class VLMWithExpertModel(torch.nn.Module):
         freeze_vision_model: bool = False,
         attention_mode: str = "self_attn",
         num_expert_layers: int = -1,
+        num_expert_skip_layers: int = 0,
         num_vlm_layers: int = -1,
         self_attn_every_n_layers: int = -1,
         expert_width_multiplier: float = 0.5,
@@ -84,15 +87,20 @@ class VLMWithExpertModel(torch.nn.Module):
             self.vlm_config.text_config, num_expert_layers, expert_width_multiplier
         )
         self.lm_expert = self._get_expert_model(
-            lm_expert_config, attention_mode, self_attn_every_n_layers
+            lm_expert_config,
+            attention_mode,
+            num_expert_skip_layers,
+            self_attn_every_n_layers,
         )
+        # Remove token embeddings
         if hasattr(self.lm_expert, "embed_tokens"):
             del self.lm_expert.embed_tokens
 
         self.num_attention_heads = self.vlm_config.text_config.num_attention_heads
         self.num_key_value_heads = self.vlm_config.text_config.num_key_value_heads
         self.num_vlm_layers = len(self.get_vlm_model().text_model.layers)
-        self.num_expert_layers = len(self.lm_expert.layers)
+        self.num_expert_layers = len(self.lm_expert.layers) - num_expert_skip_layers
+        self.num_expert_skip_layers = num_expert_skip_layers
         self.self_attn_every_n_layers = self_attn_every_n_layers
 
         self.freeze_vision_model = freeze_vision_model
@@ -125,7 +133,7 @@ class VLMWithExpertModel(torch.nn.Module):
         return expert_config
 
     def _get_intermediate_size(
-        self, hidden_dim, ffn_dim_multiplier=4, multiple_of=256
+        self, hidden_dim: int, ffn_dim_multiplier: int = 4, multiple_of: int = 256
     ) -> int:
         hidden_dim = int(2 * hidden_dim / 3)
         hidden_dim = int(ffn_dim_multiplier * hidden_dim)
@@ -136,12 +144,13 @@ class VLMWithExpertModel(torch.nn.Module):
         self,
         expert_config: PretrainedConfig,
         attention_mode: str,
+        num_expert_skip_layers: int,
         self_attn_every_n_layers: int,
     ) -> PreTrainedModel:
         expert_model = AutoModel.from_config(expert_config)
         if "cross" in attention_mode:
             # Reshape qkv projections to have the same input dimension as the vlm
-            for layer_idx in range(len(expert_model.layers)):
+            for layer_idx in range(num_expert_skip_layers, len(expert_model.layers)):
                 if (
                     self_attn_every_n_layers > 0
                     and layer_idx % self_attn_every_n_layers == 0
@@ -202,46 +211,107 @@ class VLMWithExpertModel(torch.nn.Module):
     def embed_language_tokens(self, tokens: torch.Tensor) -> torch.Tensor:
         return self.get_vlm_model().text_model.get_input_embeddings()(tokens)
 
-    def forward_attn_layer(
+    def _forward_attn_layer(
         self,
-        model_layers,
-        inputs_embeds,
-        layer_idx,
-        position_ids,
-        attention_mask,
-        batch_size,
-        head_dim,
+        layer: torch.nn.Module,
+        position_ids: torch.Tensor,
+        q_in: torch.Tensor,
+        k_in: torch.Tensor | None = None,
+        v_in: torch.Tensor | None = None,
+    ) -> tuple[
+        dict[int, torch.Tensor], dict[int, torch.Tensor], dict[int, torch.Tensor]
+    ]:
+        assert q_in is not None, "q_in should not be None"
+
+        attn_layer = layer.self_attn
+        q_in = layer.input_layernorm(q_in).to(dtype=attn_layer.q_proj.weight.dtype)
+        if k_in is None or v_in is None:
+            k_in = q_in
+            v_in = q_in
+        else:
+            k_in = k_in.to(dtype=attn_layer.k_proj.weight.dtype)
+            v_in = v_in.to(dtype=attn_layer.v_proj.weight.dtype)
+
+        q_shape = (*q_in.shape[:-1], -1, attn_layer.head_dim)
+        k_shape = (*k_in.shape[:-1], -1, attn_layer.head_dim)
+        v_shape = (*v_in.shape[:-1], -1, attn_layer.head_dim)
+
+        q_states, k_states, v_states = {}, {}, {}
+        if position_ids.ndim == 2:  # 1D Rope
+            q_states[0] = attn_layer.q_proj(q_in).view(q_shape)
+            k_states[0] = attn_layer.k_proj(k_in).view(k_shape)
+            v_states[0] = attn_layer.v_proj(v_in).view(v_shape)
+        elif position_ids.ndim == 3 and position_ids.shape[2] == 3:  # 3D Rope
+            # Query
+            q_states[0] = attn_layer.q_norm(
+                attn_layer.q_proj(q_in).view(q_shape)
+            ).transpose(1, 2)
+            _query_state_h, _query_state_w = (
+                attn_layer.q_proj_hw(q_in)
+                .view(q_shape)
+                .transpose(1, 2)
+                .chunk(2, dim=-1)
+            )
+            q_states[1] = attn_layer.q_norm_h(_query_state_h)
+            q_states[2] = attn_layer.q_norm_w(_query_state_w)
+            # Key
+            k_states[0] = attn_layer.k_norm(
+                attn_layer.k_proj(k_in).view(k_shape)
+            ).transpose(1, 2)
+            _key_state_h, _key_state_w = (
+                attn_layer.k_proj_hw(k_in)
+                .view(k_shape)
+                .transpose(1, 2)
+                .chunk(2, dim=-1)
+            )
+            k_states[1] = attn_layer.k_norm_h(_key_state_h)
+            k_states[2] = attn_layer.k_norm_w(_key_state_w)
+            # Value
+            v_states[0] = attn_layer.v_proj(v_in).view(v_shape).transpose(1, 2)
+        else:
+            raise ValueError(f"Unknown position_ids shape: {position_ids.shape}")
+
+        return q_states, k_states, v_states
+
+    def forward_self_attn_layer(
+        self,
+        model_layers: list[list[torch.nn.Module]],
+        inputs_embeds: list[torch.Tensor],
+        layer_idx: int,
+        position_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        batch_size: int,
+        head_dim: int,
         use_cache: bool = True,
         fill_kv_cache: bool = True,
         past_key_values=None,
     ) -> list[torch.Tensor]:
-        query_states = []
-        key_states = []
-        value_states = []
+        query_states = collections.defaultdict(list)
+        key_states = collections.defaultdict(list)
+        value_states = collections.defaultdict(list)
         for i, hidden_states in enumerate(inputs_embeds):
             layer = model_layers[i][layer_idx]
             if hidden_states is None or layer is None:
                 continue
-            hidden_states = layer.input_layernorm(hidden_states)
 
-            input_shape = hidden_states.shape[:-1]
-            hidden_shape = (*input_shape, -1, layer.self_attn.head_dim)
+            q_states, k_states, v_states = self._forward_attn_layer(
+                layer, position_ids, hidden_states
+            )
+            for dst, src in (
+                (query_states, q_states),
+                (key_states, k_states),
+                (value_states, v_states),
+            ):
+                for k, v in src.items():
+                    dst[k].append(v)
 
-            hidden_states = hidden_states.to(dtype=layer.self_attn.q_proj.weight.dtype)
-            query_state = layer.self_attn.q_proj(hidden_states).view(hidden_shape)
-            key_state = layer.self_attn.k_proj(hidden_states).view(hidden_shape)
-            value_state = layer.self_attn.v_proj(hidden_states).view(hidden_shape)
+        # B, L, H, D with L sequence length, H number of heads, D head dim
+        # Concatenate on the number of embeddings/tokens
+        for states in (query_states, key_states, value_states):
+            for k, v_list in states.items():
+                states[k] = torch.cat(v_list, dim=1)
 
-            query_states.append(query_state)
-            key_states.append(key_state)
-            value_states.append(value_state)
-
-        # B,L,H,D with L sequence length, H number of heads, D head dim
-        # concatenate on the number of embeddings/tokens
-        query_states = torch.cat(query_states, dim=1)
-        key_states = torch.cat(key_states, dim=1)
-        value_states = torch.cat(value_states, dim=1)
-        seq_len = query_states.shape[1]
+        seq_len = query_states[0].shape[1]
         if seq_len < position_ids.shape[1]:
             _position_ids = position_ids[:, :seq_len]
             _attention_mask = attention_mask[:, :seq_len, :seq_len]
@@ -249,27 +319,26 @@ class VLMWithExpertModel(torch.nn.Module):
             _position_ids = position_ids
             _attention_mask = attention_mask
 
-        attention_mask_ = _attention_mask
-        position_ids_ = _position_ids
+        # Rotary Position Embedding
+        if position_ids.ndim == 2:  # 1D Rope
+            query_states = apply_rope(query_states[0], _position_ids)
+            key_states = apply_rope(key_states[0], _position_ids)
+            value_states = value_states[0]
+        elif position_ids.ndim == 3 and position_ids.shape[2] == 3:  # 3D Rope
+            raise NotImplementedError
+        else:
+            raise ValueError(f"Unknown position_ids shape: {position_ids.shape}")
 
-        query_states = apply_rope(query_states, position_ids_)
-        key_states = apply_rope(key_states, position_ids_)
-
+        # KV Cache
         if use_cache and past_key_values is None:
             past_key_values = {}
-
         if use_cache:
             if fill_kv_cache:
                 past_key_values[layer_idx] = {
                     "key_states": key_states,
                     "value_states": value_states,
                 }
-            else:
-                # TODO here, some optimization can be done - similar to a `StaticCache`
-                # we can declare the `max_len` before. So we create an empty cache, with
-                # just one cuda malloc, and if (in autoregressive case) we reach the max
-                # len, then we (for instance) double the cache size. This implementation
-                # already exists in `transformers`. (molbap)
+            else:  # TODO: some optimization can be done, similar to `StaticCache`
                 key_states = torch.cat(
                     [past_key_values[layer_idx]["key_states"], key_states], dim=1
                 )
@@ -277,9 +346,10 @@ class VLMWithExpertModel(torch.nn.Module):
                     [past_key_values[layer_idx]["value_states"], value_states], dim=1
                 )
 
+        # Eager Attention
         attention_interface = self._get_attention_interface()
         att_output = attention_interface(
-            attention_mask_,
+            _attention_mask,
             batch_size,
             head_dim,
             query_states,
@@ -308,27 +378,29 @@ class VLMWithExpertModel(torch.nn.Module):
         ), f"Both len(inputs_embeds) == {len(inputs_embeds)} and past_key_values is {past_key_values}"
 
         if len(inputs_embeds) == 2 and not past_key_values:
+            vlm_layer = model_layers[0][layer_idx]
             # Prefix attention
             seq_len = inputs_embeds[0].shape[1]
-            position_id, expert_position_id = (
+            prefix_position_ids, suffix_position_ids = (
                 position_ids[:, :seq_len],
                 position_ids[:, seq_len:],
             )
             prefix_attention_mask = attention_mask[:, :seq_len, :seq_len]
-            layer = model_layers[0][layer_idx]
-            hidden_states = layer.input_layernorm(inputs_embeds[0])
-            input_shape = hidden_states.shape[:-1]
-            hidden_shape = (*input_shape, -1, layer.self_attn.head_dim)
+            _query_states, _key_states, value_states = self._forward_attn_layer(
+                vlm_layer, prefix_position_ids, inputs_embeds[0]
+            )
 
-            hidden_states = hidden_states.to(dtype=layer.self_attn.q_proj.weight.dtype)
-            query_state = layer.self_attn.q_proj(hidden_states).view(hidden_shape)
-            key_state = layer.self_attn.k_proj(hidden_states).view(hidden_shape)
-            value_states = layer.self_attn.v_proj(hidden_states).view(hidden_shape)
+            # Rotary Position Embedding
+            if position_ids.ndim == 2:  # 1D Rope
+                query_states = apply_rope(_query_states[0], prefix_position_ids)
+                key_states = apply_rope(_key_states[0], prefix_position_ids)
+                value_states = value_states[0]
+            elif position_ids.ndim == 3 and position_ids.shape[2] == 3:  # 3D Rope
+                raise NotImplementedError
+            else:
+                raise ValueError(f"Unknown position_ids shape: {position_ids.shape}")
 
-            # B,L,H,D with L sequence length, H number of heads, D head dim
-            query_states = apply_rope(query_state, position_id)
-            key_states = apply_rope(key_state, position_id)
-
+            # Eager Attention
             att_output = attention_interface(
                 prefix_attention_mask,
                 batch_size,
@@ -339,92 +411,82 @@ class VLMWithExpertModel(torch.nn.Module):
             )
             att_outputs.append(att_output)
         else:
-            expert_position_id = position_ids
+            suffix_position_ids = position_ids
 
         if use_cache and past_key_values is None:
             past_key_values = {}
-
         if use_cache:
             if fill_kv_cache:
                 past_key_values[layer_idx] = {
                     "key_states": key_states,
                     "value_states": value_states,
                 }
-            else:
-                # TODO here, some optimization can be done - similar to a `StaticCache` we can declare the `max_len` before.
-                # so we create an empty cache, with just one cuda malloc, and if (in autoregressive case) we reach
-                # the max len, then we (for instance) double the cache size. This implementation already exists
-                # in `transformers`. (molbap)
+            else:  # TODO: some optimization can be done, similar to `StaticCache`
                 key_states = past_key_values[layer_idx]["key_states"]
                 value_states = past_key_values[layer_idx]["value_states"]
 
         # Expert
         expert_layer = model_layers[1][layer_idx]
         if expert_layer is not None:
-            expert_hidden_states = expert_layer.input_layernorm(inputs_embeds[1])
-
-            expert_input_shape = expert_hidden_states.shape[:-1]
-            expert_hidden_shape = (
-                *expert_input_shape,
-                -1,
-                expert_layer.self_attn.head_dim,
+            _query_states, _key_states, _value_states = self._forward_attn_layer(
+                expert_layer,
+                suffix_position_ids,
+                inputs_embeds[1],
+                key_states.view(*key_states.shape[:2], -1),
+                value_states.view(*value_states.shape[:2], -1),
             )
-
-            expert_hidden_states = expert_hidden_states.to(
-                dtype=expert_layer.self_attn.q_proj.weight.dtype
-            )
-            expert_query_state = expert_layer.self_attn.q_proj(
-                expert_hidden_states
-            ).view(expert_hidden_shape)
-
-            _key_states = key_states.to(
-                dtype=expert_layer.self_attn.k_proj.weight.dtype
-            ).view(*key_states.shape[:2], -1)
-            expert_key_states = expert_layer.self_attn.k_proj(_key_states).view(
-                *_key_states.shape[:-1], -1, expert_layer.self_attn.head_dim
-            )  # k_proj should have same dim as kv
-
-            _value_states = value_states.to(
-                dtype=expert_layer.self_attn.v_proj.weight.dtype
-            ).view(*value_states.shape[:2], -1)
-            expert_value_states = expert_layer.self_attn.v_proj(_value_states).view(
-                *_value_states.shape[:-1], -1, expert_layer.self_attn.head_dim
-            )
-
-            expert_position_id = (
-                expert_position_id
-                - torch.min(expert_position_id, dim=1, keepdim=True).values
+            suffix_position_ids = (
+                suffix_position_ids
+                - torch.min(suffix_position_ids, dim=1, keepdim=True).values
             )  # start from 0
-            expert_attention_mask = attention_mask[
-                :, -inputs_embeds[1].shape[1] :, : expert_key_states.shape[1] :
-            ]  # take into account kv
 
-            expert_query_states = apply_rope(expert_query_state, expert_position_id)
+            # Rotary Position Embedding
+            if position_ids.ndim == 2:  # 1D Rope
+                query_states = apply_rope(_query_states[0], suffix_position_ids)
+                key_states = _key_states[0]
+                value_states = _value_states[0]
+            elif position_ids.ndim == 3 and position_ids.shape[2] == 3:  # 3D Rope
+                raise NotImplementedError
+            else:
+                raise ValueError(f"Unknown position_ids shape: {position_ids.shape}")
+
+            suffix_attention_mask = attention_mask[
+                :, -inputs_embeds[1].shape[1] :, : key_states.shape[1] :
+            ]  # take into account kv
+            # Eager Attention
             att_output = attention_interface(
-                expert_attention_mask,
+                suffix_attention_mask,
                 batch_size,
                 head_dim,
-                expert_query_states,
-                expert_key_states,
-                expert_value_states,
+                query_states,
+                key_states,
+                value_states,
             )
             att_outputs.append(att_output)
         else:
             att_outputs.append(None)
 
-        # att_output = att_output.to(dtype=models[i].dtype)
         return att_outputs, past_key_values
 
-    def _get_model_layers(self, models: list) -> list:
+    def _get_model_layers(
+        self, models: list[PreTrainedModel]
+    ) -> list[list[torch.nn.Module]]:
         vlm_layers = []
         expert_layers = []
-        multiple_of = self.num_vlm_layers // self.num_expert_layers
-        for i in range(self.num_vlm_layers):
+        for i in range(self.num_expert_skip_layers):
+            vlm_layers.append(models[0].layers[i])
+            expert_layers.append(None)
+
+        multiple_of = (
+            self.num_vlm_layers - self.num_expert_skip_layers
+        ) // self.num_expert_layers
+        for i in range(self.num_expert_skip_layers, self.num_vlm_layers):
             if multiple_of > 0 and i > 0 and i % multiple_of != 0:
                 expert_layer = None
             else:
                 expert_layer_index = i // multiple_of if multiple_of > 0 else i
                 expert_layer = models[1].layers[expert_layer_index]
+
             vlm_layers.append(models[0].layers[i])
             expert_layers.append(expert_layer)
 
@@ -443,16 +505,19 @@ class VLMWithExpertModel(torch.nn.Module):
         models = [self.get_vlm_model().text_model, self.lm_expert]
         model_layers = self._get_model_layers(models)
 
+        # Decoder Layers
         for layer_idx in range(self.num_vlm_layers):
+            # Attention Layer in Decoder Layer
             if (
                 fill_kv_cache
                 or "cross" not in self.attention_mode
+                or layer_idx < self.num_expert_skip_layers
                 or (
                     self.self_attn_every_n_layers > 0
                     and layer_idx % self.self_attn_every_n_layers == 0
                 )
             ):
-                att_outputs, past_key_values = self.forward_attn_layer(
+                att_outputs, past_key_values = self.forward_self_attn_layer(
                     model_layers,
                     inputs_embeds,
                     layer_idx,
@@ -500,6 +565,7 @@ class VLMWithExpertModel(torch.nn.Module):
                     out_emb += hidden_states
                     after_first_residual = out_emb.clone()
 
+                    # Fully Connected Layer in Decoder Layer
                     out_emb = layer.post_attention_layernorm(out_emb)
                     out_emb = layer.mlp(out_emb)
 
@@ -512,7 +578,7 @@ class VLMWithExpertModel(torch.nn.Module):
 
             inputs_embeds = outputs_embeds
 
-        # final norm
+        # Final norm
         outputs_embeds = []
         for i, hidden_states in enumerate(inputs_embeds):
             if hidden_states is not None:

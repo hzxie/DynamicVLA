@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-20 08:25:23
+# @Last Modified at: 2025-10-27 16:10:45
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -365,7 +365,7 @@ def get_test_stats(test_results):
         n_success_trials = 0
         path_length = []
         for tr in results:
-            if not tr["success"]:
+            if tr["success"]:
                 n_success_trials += 1
 
             n_steps += len(tr["ee_path"])

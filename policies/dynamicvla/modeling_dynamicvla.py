@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-22 20:28:02
+# @Last Modified at: 2025-10-29 20:46:28
 # @Email:  root@haozhexie.com
 
 import logging
@@ -23,7 +23,7 @@ from lerobot.policies.normalize import Normalize, Unnormalize
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import populate_queues
 from lerobot.utils.utils import get_safe_dtype
-from transformers import AutoConfig, SmolVLMForConditionalGeneration
+from transformers import AutoConfig, AutoModel, SmolVLMForConditionalGeneration
 
 from policies.dynamicvla.configuration_dynamicvla import DynamicVLAConfig
 from policies.dynamicvla.modeling_fastvlm import (
@@ -32,11 +32,20 @@ from policies.dynamicvla.modeling_fastvlm import (
     FastVLMForConditionalGeneration,
 )
 from policies.dynamicvla.modeling_neo import (
+    NeoTextConfig,
     NeoVisionConfig,
+    NeoTextModel,
     NeoVLMConfig,
     NeoVLMForConditionalGeneration,
+    NeoVLMPreTrainedModel,
 )
 from policies.dynamicvla.modeling_vlm_with_expert import VLMWithExpertModel
+
+# Register New Models
+AutoConfig.register("neo_text", NeoTextConfig)
+AutoConfig.register("neo_vlm", NeoVLMConfig)
+AutoModel.register(NeoTextConfig, NeoTextModel)
+AutoModel.register(NeoVLMConfig, NeoVLMPreTrainedModel)
 
 # Matches ".soNNN", optionally followed by "-something", up to the "_buffer_" marker
 _VARIANT_RE = re.compile(r"\.so\d+(?:-[\w]+)?_buffer_")
@@ -882,7 +891,10 @@ class VLAFlowMatching(torch.nn.Module):
                 )
             )
         elif vlm_model_name.startswith("Qwen/Qwen"):
-            text_config = AutoConfig.from_pretrained(vlm_model_name)
+            qwen_config = AutoConfig.from_pretrained(vlm_model_name).to_dict()
+            qwen_config["max_window_layers"] = config.neovlm_num_layers
+            qwen_config["num_hidden_layers"] = config.neovlm_num_layers
+            text_config = NeoTextConfig(**qwen_config)
             vision_config = NeoVisionConfig(
                 in_channels=vlm_input_channels,
             )
@@ -903,6 +915,7 @@ class VLAFlowMatching(torch.nn.Module):
             freeze_text_model=config.freeze_text_model,
             num_vlm_layers=self.config.num_vlm_layers,
             num_expert_layers=config.num_expert_layers,
+            num_expert_skip_layers=config.num_expert_skip_layers,
             attention_mode=config.attention_mode,
             self_attn_every_n_layers=self.config.self_attn_every_n_layers,
             expert_width_multiplier=self.config.expert_width_multiplier,
@@ -931,9 +944,6 @@ class VLAFlowMatching(torch.nn.Module):
     def _embed_prefix(
         self, images, img_masks, lang_tokens, lang_masks, state: torch.Tensor = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Embed images with SigLIP and language tokens with embedding layer to prepare
-        for vision encoder processing.
-        """
         embs = []
         pad_masks = []
         att_masks = []
@@ -968,7 +978,6 @@ class VLAFlowMatching(torch.nn.Module):
         lang_emb = lang_emb * math.sqrt(lang_emb_dim)
         embs.append(lang_emb)
         pad_masks.append(lang_masks)
-
         num_lang_embs = lang_emb.shape[1]
         att_masks += [0] * num_lang_embs
 
@@ -1002,7 +1011,6 @@ class VLAFlowMatching(torch.nn.Module):
         return embs, pad_masks, att_masks
 
     def _embed_suffix(self, noisy_actions, timestep):
-        """Embed state, noisy_actions, timestep to prepare for Expert Gemma processing."""
         embs = []
         pad_masks = []
         att_masks = []
@@ -1075,8 +1083,15 @@ class VLAFlowMatching(torch.nn.Module):
         pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
         att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
         att_2d_masks = make_att_2d_masks(pad_masks, att_masks)
-        position_ids = torch.cumsum(pad_masks, dim=1) - 1
-        (_, suffix_out), _ = self.vlm_with_expert.forward(
+
+        if self.config.neovlm_use_3d_rope:
+            position_ids = torch.cumsum(pad_masks, dim=1) - 1
+            # TODO: Replace it with real position IDs
+            position_ids = position_ids[..., None].repeat(1, 1, 3)
+        else:
+            position_ids = torch.cumsum(pad_masks, dim=1) - 1
+
+        (_, suffix_out), _ = self.vlm_with_expert(
             attention_mask=att_2d_masks,
             position_ids=position_ids,
             past_key_values=None,

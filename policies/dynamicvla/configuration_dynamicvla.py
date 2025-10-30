@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:22:31
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-18 12:42:18
+# @Last Modified at: 2025-10-30 10:53:31
 # @Email:  root@haozhexie.com
 
 from dataclasses import dataclass, field
@@ -78,8 +78,9 @@ class DynamicVLAConfig(PreTrainedConfig):
     # Less or equal to 0 is the default where the action expert has the same number of
     # layers of VLM. Otherwise the expert have less layers.
     num_expert_layers: int = -1
+    num_expert_skip_layers: int = 0
     # VLM settings
-    vlm_model_name: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
+    vlm_model_name: str = "Qwen/Qwen3-0.6B"
     num_vlm_layers: int = 16
     # SmolVLM Settings
     smolvlm_patch_size: int = 16
@@ -88,6 +89,9 @@ class DynamicVLAConfig(PreTrainedConfig):
     smolvlm_intermediate_size: int = 3072
     # FastVLM Settings
     fastvlm_inference_mode: bool = True
+    # NeoVLM Settings
+    neovlm_num_layers: int = 40
+    neovlm_use_3d_rope: bool = True
     # Interleave SA layers each self_attn_every_n_layers
     self_attn_every_n_layers: int = 2
     # The action expert hidden size (wrt to the VLM)
