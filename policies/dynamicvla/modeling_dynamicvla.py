@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-29 20:46:28
+# @Last Modified at: 2025-10-31 16:11:18
 # @Email:  root@haozhexie.com
 
 import logging
@@ -860,6 +860,7 @@ class VLAFlowMatching(torch.nn.Module):
         vlm_config = AutoConfig.from_pretrained(vlm_model_name)
 
         if vlm_model_name.startswith("HuggingFaceTB/SmolVLM2"):
+            assert not self.config.neovlm_use_3d_rope, "Not supported"
             vlm_config = AutoConfig.from_pretrained(vlm_model_name)
             vlm_config.vision_config.num_channels = vlm_input_channels
             vlm_config.vision_config.patch_size = config.smolvlm_patch_size
@@ -872,6 +873,7 @@ class VLAFlowMatching(torch.nn.Module):
             )
             vlm = SmolVLMForConditionalGeneration(config=vlm_config)
         elif vlm_model_name.startswith("HuggingFaceTB/SmolLM2"):
+            assert not self.config.neovlm_use_3d_rope, "Not supported"
             text_config = AutoConfig.from_pretrained(vlm_model_name)
             vision_config = FastViTConfig(
                 in_channels=vlm_input_channels,
@@ -919,6 +921,7 @@ class VLAFlowMatching(torch.nn.Module):
             attention_mode=config.attention_mode,
             self_attn_every_n_layers=self.config.self_attn_every_n_layers,
             expert_width_multiplier=self.config.expert_width_multiplier,
+            use_3d_rope=self.config.neovlm_use_3d_rope,
         )
 
     def _set_requires_grad(self):
@@ -1054,6 +1057,23 @@ class VLAFlowMatching(torch.nn.Module):
         att_masks = att_masks[None, :].expand(bsize, len(att_masks))
         return embs, pad_masks, att_masks
 
+    def _get_position_ids(
+        self,
+        prefix_offsets: torch.Tensor | None,
+        pad_masks: torch.Tensor,
+        use_3d_rope: bool,
+    ) -> torch.Tensor:
+        position_ids = torch.cumsum(pad_masks, dim=1) - 1
+        if use_3d_rope:
+            # TODO: Replace it with real position IDs
+            position_ids = position_ids[..., None].repeat(1, 1, 3)
+        else:
+            position_ids = torch.cumsum(pad_masks, dim=1) - 1
+            if prefix_offsets is not None:
+                position_ids += prefix_offsets
+
+        return position_ids
+
     def forward(
         self,
         images,
@@ -1083,13 +1103,9 @@ class VLAFlowMatching(torch.nn.Module):
         pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
         att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
         att_2d_masks = make_att_2d_masks(pad_masks, att_masks)
-
-        if self.config.neovlm_use_3d_rope:
-            position_ids = torch.cumsum(pad_masks, dim=1) - 1
-            # TODO: Replace it with real position IDs
-            position_ids = position_ids[..., None].repeat(1, 1, 3)
-        else:
-            position_ids = torch.cumsum(pad_masks, dim=1) - 1
+        position_ids = self._get_position_ids(
+            None, pad_masks, self.config.neovlm_use_3d_rope
+        )
 
         (_, suffix_out), _ = self.vlm_with_expert(
             attention_mask=att_2d_masks,
@@ -1115,7 +1131,9 @@ class VLAFlowMatching(torch.nn.Module):
             images, img_masks, lang_tokens, lang_masks, state
         )
         prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
-        prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
+        prefix_position_ids = self._get_position_ids(
+            None, prefix_pad_masks, self.config.neovlm_use_3d_rope
+        )
         # Compute image and language key value cache
         _, past_key_values = self.vlm_with_expert.forward(
             attention_mask=prefix_att_2d_masks,
@@ -1181,7 +1199,9 @@ class VLAFlowMatching(torch.nn.Module):
         suffix_att_2d_masks = make_att_2d_masks(suffix_pad_masks, suffix_att_masks)
         full_att_2d_masks = torch.cat([prefix_pad_2d_masks, suffix_att_2d_masks], dim=2)
         prefix_offsets = torch.sum(prefix_pad_masks, dim=-1)[:, None]
-        position_ids = prefix_offsets + torch.cumsum(suffix_pad_masks, dim=1) - 1
+        position_ids = self._get_position_ids(
+            prefix_offsets, suffix_pad_masks, self.config.neovlm_use_3d_rope
+        )
 
         outputs_embeds, _ = self.vlm_with_expert.forward(
             attention_mask=full_att_2d_masks,
