@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-09-16 11:23:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-31 18:30:22
+# @Last Modified at: 2025-11-01 16:02:51
 # @Email:  root@haozhexie.com
 
 import collections
@@ -182,7 +182,7 @@ class VLMWithExpertModel(torch.nn.Module):
     def embed_language_tokens(self, tokens: torch.Tensor) -> torch.Tensor:
         return self.get_vlm_model().text_model.get_input_embeddings()(tokens)
 
-    def _forward_attn_layer(
+    def _qkv_proj_layer(
         self,
         layer: torch.nn.Module,
         position_ids: torch.Tensor,
@@ -296,27 +296,26 @@ class VLMWithExpertModel(torch.nn.Module):
         res[..., d_half:] = x2 * cos + x1 * sin
         return res.to(dtype)
 
-    def forward_self_attn_layer(
+    def _self_attn_layer(
         self,
-        model_layers: list[list[torch.nn.Module]],
+        model_layer: list[torch.nn.Module],
         inputs_embeds: list[torch.Tensor],
-        layer_idx: int,
         position_ids: torch.Tensor,
         attention_mask: torch.Tensor,
         head_dim: int,
         use_cache: bool = True,
         fill_kv_cache: bool = True,
-        past_key_values=None,
+        past_key_values: dict[str, torch.Tensor] | None = None,
     ) -> list[torch.Tensor]:
         query_states = collections.defaultdict(list)
         key_states = collections.defaultdict(list)
         value_states = collections.defaultdict(list)
         for i, hidden_states in enumerate(inputs_embeds):
-            layer = model_layers[i][layer_idx]
+            layer = model_layer[i]
             if hidden_states is None or layer is None:
                 continue
 
-            q_states, k_states, v_states = self._forward_attn_layer(
+            q_states, k_states, v_states = self._qkv_proj_layer(
                 layer, position_ids, hidden_states
             )
             for dst, src in (
@@ -351,25 +350,22 @@ class VLMWithExpertModel(torch.nn.Module):
         key_states = self.apply_rope(key_states, _position_ids)
 
         # KV Cache
-        if use_cache and past_key_values is None:
-            past_key_values = {}
-        if use_cache:
+        if use_cache and past_key_values is not None:
             if fill_kv_cache:
-                past_key_values[layer_idx] = {
+                past_key_values = {
                     "key_states": key_states,
                     "value_states": value_states,
                 }
             else:  # TODO: some optimization can be done, similar to `StaticCache`
                 key_states = torch.cat(
-                    [past_key_values[layer_idx]["key_states"], key_states], dim=1
+                    [past_key_values["key_states"], key_states], dim=1
                 )
                 value_states = torch.cat(
-                    [past_key_values[layer_idx]["value_states"], value_states], dim=1
+                    [past_key_values["value_states"], value_states], dim=1
                 )
 
         # Eager Attention
-        attention_interface = self._eager_attention_forward
-        att_output = attention_interface(
+        att_output = self._eager_attention(
             head_dim,
             query_states,
             key_states,
@@ -378,45 +374,40 @@ class VLMWithExpertModel(torch.nn.Module):
         )
         return [att_output], past_key_values
 
-    def forward_cross_attn_layer(
+    def _cross_attn_layer(
         self,
-        model_layers,
-        inputs_embeds,
-        layer_idx,
-        position_ids,
-        attention_mask,
+        model_layer: list[torch.nn.Module],
+        inputs_embeds: list[torch.Tensor],
+        position_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
         head_dim: int,
         use_cache: bool = True,
         fill_kv_cache: bool = True,
-        past_key_values=None,
+        past_key_values: dict[str, torch.Tensor] | None = None,
     ) -> list[torch.Tensor]:
         assert len(inputs_embeds) == 2 or (
             use_cache and past_key_values is not None and not fill_kv_cache
         )
 
-        attention_interface = self._eager_attention_forward
         att_outputs = []
         # VLM
         if len(inputs_embeds) == 2 and not past_key_values:
-            vlm_layer = model_layers[0][layer_idx]
             # Prefix attention
             seq_len = inputs_embeds[0].shape[1]
             prefix_position_ids, suffix_position_ids = (
                 position_ids[:, :seq_len],
                 position_ids[:, seq_len:],
             )
-            _query_states, _key_states, value_states = self._forward_attn_layer(
-                vlm_layer, prefix_position_ids, inputs_embeds[0]
+            _query_states, _key_states, value_states = self._qkv_proj_layer(
+                model_layer[0], prefix_position_ids, inputs_embeds[0]
             )
-
             # Rotary Position Embedding
             value_states = value_states["t"]
             query_states = self.apply_rope(_query_states, prefix_position_ids)
             key_states = self.apply_rope(_key_states, prefix_position_ids)
-
             # Eager Attention
             prefix_attention_mask = attention_mask[:, :seq_len, :seq_len]
-            att_output = attention_interface(
+            att_output = self._eager_attention(
                 head_dim,
                 query_states,
                 key_states,
@@ -427,23 +418,21 @@ class VLMWithExpertModel(torch.nn.Module):
         else:
             suffix_position_ids = position_ids
 
-        if use_cache and past_key_values is None:
-            past_key_values = {}
-        if use_cache:
+        if use_cache and past_key_values is not None:
             if fill_kv_cache:
-                past_key_values[layer_idx] = {
+                past_key_values = {
                     "key_states": key_states,
                     "value_states": value_states,
                 }
             else:  # TODO: some optimization can be done, similar to `StaticCache`
-                key_states = past_key_values[layer_idx]["key_states"]
-                value_states = past_key_values[layer_idx]["value_states"]
+                key_states = past_key_values["key_states"]
+                value_states = past_key_values["value_states"]
 
         # Expert
-        expert_layer = model_layers[1][layer_idx]
+        expert_layer = model_layer[1]
         if expert_layer is not None:
             # NOTE: key_states has been ROPEd before. Directly use it here.
-            _query_states, _, _value_states = self._forward_attn_layer(
+            _query_states, _, _value_states = self._qkv_proj_layer(
                 expert_layer,
                 suffix_position_ids,
                 inputs_embeds[1],
@@ -454,16 +443,14 @@ class VLMWithExpertModel(torch.nn.Module):
                 suffix_position_ids
                 - torch.min(suffix_position_ids, dim=1, keepdim=True).values
             )  # start from 0
-
             # Rotary Position Embedding
             query_states = self.apply_rope(_query_states, suffix_position_ids)
             value_states = _value_states["t"]
-
             # Eager Attention
             suffix_attention_mask = attention_mask[
                 :, -inputs_embeds[1].shape[1] :, : key_states.shape[1] :
-            ]  # take into account kv
-            att_output = attention_interface(
+            ]
+            att_output = self._eager_attention(
                 head_dim,
                 query_states,
                 key_states,
@@ -498,13 +485,14 @@ class VLMWithExpertModel(torch.nn.Module):
             vlm_layers.append(models[0].layers[i])
             expert_layers.append(expert_layer)
 
-        return [vlm_layers, expert_layers]
+        assert len(vlm_layers) == len(expert_layers)
+        return [(vlm_layers[i], expert_layers[i]) for i in range(len(vlm_layers))]
 
     def forward(
         self,
         attention_mask: torch.Tensor | None = None,
         position_ids: torch.LongTensor | None = None,
-        past_key_values: list[torch.FloatTensor] | None = None,
+        past_key_values: dict[int, dict[str, torch.FloatTensor]] | None = None,
         inputs_embeds: list[torch.FloatTensor] = None,
         use_cache: bool | None = None,
         fill_kv_cache: bool | None = None,
@@ -513,6 +501,11 @@ class VLMWithExpertModel(torch.nn.Module):
         model_layers = self._get_model_layers(models)
 
         # Decoder Layers
+        past_key_values = (
+            {i: {} for i in range(self.num_vlm_layers)}
+            if use_cache and past_key_values is None
+            else past_key_values
+        )
         for layer_idx in range(self.num_vlm_layers):
             attn_layer = None
             if (
@@ -524,28 +517,29 @@ class VLMWithExpertModel(torch.nn.Module):
                     and layer_idx % self.self_attn_every_n_layers == 0
                 )
             ):
-                attn_layer = self.forward_self_attn_layer
+                attn_layer = self._self_attn_layer
             else:
-                attn_layer = self.forward_cross_attn_layer
+                attn_layer = self._cross_attn_layer
 
             start = 0
             outputs_embeds = []
-            att_outputs, past_key_values = attn_layer(
-                model_layers,
+            att_outputs, _past_key_values = attn_layer(
+                model_layers[layer_idx],
                 inputs_embeds,
-                layer_idx,
                 position_ids,
                 attention_mask,
                 self.vlm.config.text_config.head_dim,
                 use_cache,
                 fill_kv_cache,
-                past_key_values,
+                past_key_values[layer_idx] if past_key_values is not None else None,
             )
             if att_outputs is None:
                 continue
+            if past_key_values is not None:
+                past_key_values[layer_idx] = _past_key_values
 
             for i, hidden_states in enumerate(inputs_embeds):
-                layer = model_layers[i][layer_idx]
+                layer = model_layers[layer_idx][i]
                 att_output = (
                     att_outputs[i] if i < len(att_outputs) else att_outputs[0]
                 )  # in case of self_attn
@@ -567,7 +561,6 @@ class VLMWithExpertModel(torch.nn.Module):
                     # Fully Connected Layer in Decoder Layer
                     out_emb = layer.post_attention_layernorm(out_emb)
                     out_emb = layer.mlp(out_emb)
-
                     out_emb += after_first_residual
 
                     outputs_embeds.append(out_emb)
@@ -600,7 +593,7 @@ class VLMWithExpertModel(torch.nn.Module):
             batch, seq_len, num_key_value_heads * n_rep, head_dim
         )
 
-    def _eager_attention_forward(
+    def _eager_attention(
         self,
         head_dim: int,
         query: torch.Tensor,

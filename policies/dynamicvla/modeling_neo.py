@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-10-22 09:51:08
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-29 16:58:53
+# @Last Modified at: 2025-11-01 23:54:43
 # @Email:  root@haozhexie.com
 
 import copy
@@ -36,24 +36,27 @@ from transformers.utils import TransformersKwargs
 def get_patch_abs_pos(
     grid_hw: torch.Tensor,
 ) -> typing.Tuple[torch.Tensor, torch.Tensor]:
-    B = grid_hw.shape[0]
+    batch_size = grid_hw.shape[0]
+    device = grid_hw.device
     # Get the number of patches per image
-    H, W = grid_hw[:, 0], grid_hw[:, 1]
-    N = H * W
+    patch_h, patch_w = grid_hw[:, 0], grid_hw[:, 1]
+    n_patches = patch_h * patch_w
     # Create the batch index for each patch (B x patch count)
-    patch_to_sample = torch.repeat_interleave(torch.arange(B, device=grid_hw.device), N)
+    patch_to_sample = torch.repeat_interleave(
+        torch.arange(batch_size, device=device), n_patches
+    )
     # Generate intra-image patch index (row-major order)
-    patch_id_within_image = torch.arange(N.sum(), device=grid_hw.device)
+    patch_id_within_image = torch.arange(n_patches.sum(), device=device)
     patch_id_within_image = (
         patch_id_within_image
         - torch.cumsum(
-            torch.cat([torch.tensor([0], device=grid_hw.device), N[:-1]]), dim=0
+            torch.cat([torch.tensor([0], device=device), n_patches[:-1]]), dim=0
         )[patch_to_sample]
     )
     # Get H/W for each patch according to its image
-    W_per_patch = W[patch_to_sample]
-    abs_x = patch_id_within_image % W_per_patch
-    abs_y = patch_id_within_image // W_per_patch
+    w_per_patch = patch_w[patch_to_sample]
+    abs_x = patch_id_within_image % w_per_patch
+    abs_y = patch_id_within_image // w_per_patch
     return abs_x, abs_y
 
 
@@ -425,86 +428,6 @@ class NeoVLMForConditionalGeneration(NeoVLMPreTrainedModel, GenerationMixin):
     def set_output_embeddings(self, new_embeddings):
         self.lm_head = new_embeddings
 
-    def forward(
-        self,
-        indexes: typing.Optional[torch.LongTensor] = None,
-        input_ids: typing.Optional[torch.LongTensor] = None,
-        attention_mask: typing.Optional[torch.Tensor] = None,
-        position_ids: typing.Optional[torch.LongTensor] = None,
-        past_key_values: typing.Optional[Cache] = None,
-        inputs_embeds: typing.Optional[torch.FloatTensor] = None,
-        pixel_values: typing.Optional[torch.FloatTensor] = None,
-        pixel_attention_mask: typing.Optional[torch.BoolTensor] = None,
-        image_hidden_states: typing.Optional[torch.FloatTensor] = None,
-        labels: typing.Optional[torch.LongTensor] = None,
-        output_attentions: typing.Optional[bool] = None,
-        output_hidden_states: typing.Optional[bool] = None,
-        use_cache: typing.Optional[bool] = None,
-        cache_position: typing.Optional[torch.LongTensor] = None,
-        return_dict: typing.Optional[bool] = None,
-        logits_to_keep: typing.Union[int, torch.Tensor] = 0,
-        **kwargs: Unpack[TransformersKwargs],
-    ) -> NeoVLMCausalLMOutputWithPast:
-        output_attentions = (
-            output_attentions
-            if output_attentions is not None
-            else self.config.output_attentions
-        )
-        output_hidden_states = (
-            output_hidden_states
-            if output_hidden_states is not None
-            else self.config.output_hidden_states
-        )
-        return_dict = (
-            return_dict if return_dict is not None else self.config.use_return_dict
-        )
-        if indexes is None:
-            indexes = self.model.get_thw_indexes(input_ids, pixel_values)
-
-        outputs = self.model(
-            indexes=indexes,
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            past_key_values=past_key_values,
-            inputs_embeds=inputs_embeds,
-            pixel_values=pixel_values,
-            pixel_attention_mask=pixel_attention_mask,
-            image_hidden_states=image_hidden_states,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            use_cache=use_cache,
-            cache_position=cache_position,
-            **kwargs,
-        )
-        hidden_states = outputs.last_hidden_state
-        # Only compute necessary logits, and do not upcast them to float if we are not
-        # computing the loss
-        slice_indices = (
-            slice(-logits_to_keep, None)
-            if isinstance(logits_to_keep, int)
-            else logits_to_keep
-        )
-        logits = self.lm_head(hidden_states[:, slice_indices, :])
-
-        loss = None
-        if labels is not None:
-            loss = self.loss_function(
-                logits=logits,
-                labels=labels,
-                vocab_size=self.config.vocab_size,
-                **kwargs,
-            )
-
-        return NeoVLMCausalLMOutputWithPast(
-            loss=loss,
-            logits=logits,
-            past_key_values=outputs.past_key_values,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
-            image_hidden_states=outputs.image_hidden_states,
-        )
-
 
 class NeoVLMModel(NeoVLMPreTrainedModel):
     def __init__(self, config: NeoVLMConfig):
@@ -556,31 +479,44 @@ class NeoVLMModel(NeoVLMPreTrainedModel):
         return self.vision_model(pixel_values).last_hidden_state
 
     def get_thw_indexes(
-        self, input_ids: torch.LongTensor, pixel_values: torch.FloatTensor
+        self,
+        pad_masks: torch.Tensor,
+        image_embedding_size: dict[str, int] | None,
     ) -> torch.LongTensor:
-        grid_hw = self.vision_model.get_grid_hw(pixel_values=pixel_values)
-        img_start_shift = torch.cat(
-            [
-                torch.zeros(1, dtype=torch.long).to(input_ids.device),
-                (input_ids == self.img_start_token_id).long(),
-            ],
-            dim=0,
-        )[:-1]
+        n_img_tokens = 0
+        if image_embedding_size is not None:
+            n_img_tokens = image_embedding_size["t"] * image_embedding_size["l"]
 
-        not_img_token = (input_ids != self.img_context_token_id).long()
-        t_indexes = (img_start_shift + not_img_token).cumsum(0) - 1
+        non_img_token = pad_masks.clone()
+        non_img_token[:, :n_img_tokens] = False
+        if n_img_tokens > 0:
+            # Make image start tokens also non-image tokens
+            idx = (
+                torch.arange(image_embedding_size["t"], device=non_img_token.device)
+                * image_embedding_size["l"]
+            )
+            non_img_token[:, idx] = True
+
+        t_indexes = torch.cumsum(non_img_token, dim=1) - 1
         h_indexes = torch.zeros_like(t_indexes).to(t_indexes.device)
         w_indexes = torch.zeros_like(t_indexes).to(t_indexes.device)
-
-        selected = input_ids == self.img_context_token_id
-        if selected.long().sum() > 0:
+        if n_img_tokens > 0:
             abs_pos_w, abs_pos_h = get_patch_abs_pos(
-                grid_hw // int(1 / self.downsample_ratio)
+                torch.tensor(
+                    [
+                        [
+                            image_embedding_size["h"],
+                            image_embedding_size["w"],
+                        ]
+                    ],
+                    dtype=t_indexes.dtype,
+                    device=non_img_token.device,
+                ).repeat(non_img_token.size(0) * image_embedding_size["t"], 1)
             )
-            h_indexes[selected] = abs_pos_h.to(t_indexes.device, t_indexes.dtype)
-            w_indexes[selected] = abs_pos_w.to(t_indexes.device, t_indexes.dtype)
+            h_indexes[:, :n_img_tokens] = abs_pos_h.reshape(non_img_token.size(0), -1)
+            w_indexes[:, :n_img_tokens] = abs_pos_w.reshape(non_img_token.size(0), -1)
 
-        return torch.stack([t_indexes, h_indexes, w_indexes], dim=0)
+        return torch.stack([t_indexes, h_indexes, w_indexes], dim=-1)
 
 
 class NeoVisionModel(PreTrainedModel):

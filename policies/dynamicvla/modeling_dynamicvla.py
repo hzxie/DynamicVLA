@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-31 16:11:18
+# @Last Modified at: 2025-11-02 00:03:11
 # @Email:  root@haozhexie.com
 
 import logging
@@ -702,7 +702,6 @@ class DynamicVLAPolicy(PreTrainedPolicy):
             tasks = [tasks[0] for _ in range(batch[OBS_STATE].shape[0])]
 
         tasks = [task if task.endswith("\n") else f"{task}\n" for task in tasks]
-
         tokenized_prompt = self.language_tokenizer.__call__(
             tasks,
             padding=self.config.pad_language_to,
@@ -831,6 +830,18 @@ class VLAFlowMatching(torch.nn.Module):
         self.vlm_with_expert: VLMWithExpertModel = self._get_vlm_with_expert(
             config, config.vlm_model_name, vlm_input_channels
         )
+        # Cached Image downscaling factor (for 3D RoPE)
+        self.img_downscale = None
+        if (
+            config.neovlm_use_3d_rope
+            and "patch_size" in self.vlm_with_expert.vlm_config.vision_config
+            and "downsample_ratio" in self.vlm_with_expert.vlm_config
+        ):
+            self.img_downscale = int(
+                self.vlm_with_expert.vlm_config.vision_config.patch_size
+                / self.vlm_with_expert.vlm_config.downsample_ratio
+            )
+
         self.state_proj = torch.nn.Linear(
             config.max_state_dim,
             self.vlm_with_expert.vlm_config.text_config.hidden_size,
@@ -975,6 +986,16 @@ class VLAFlowMatching(torch.nn.Module):
             pad_masks.append(img_mask)
             att_masks += [0] * (num_img_embs)
 
+        # Statistics for 3D RoPE
+        img_emb_size = None
+        if self.img_downscale is not None:
+            img_emb_size = {
+                "t": len(embs),
+                "l": img_emb.size(1),
+                "h": img.size(-2) // self.img_downscale,
+                "w": img.size(-1) // self.img_downscale,
+            }
+
         lang_emb = self.vlm_with_expert.embed_language_tokens(lang_tokens)
         # Normalize language embeddings
         lang_emb_dim = lang_emb.shape[-1]
@@ -1011,7 +1032,7 @@ class VLAFlowMatching(torch.nn.Module):
             att_masks = pad_tensor(att_masks, self.config.prefix_length, pad_value=0)
 
         att_masks = att_masks.expand(bsize, -1)
-        return embs, pad_masks, att_masks
+        return embs, pad_masks, att_masks, img_emb_size
 
     def _embed_suffix(self, noisy_actions, timestep):
         embs = []
@@ -1060,13 +1081,16 @@ class VLAFlowMatching(torch.nn.Module):
     def _get_position_ids(
         self,
         prefix_offsets: torch.Tensor | None,
+        image_embedding_size: dict[str, int] | None,
         pad_masks: torch.Tensor,
         use_3d_rope: bool,
     ) -> torch.Tensor:
-        position_ids = torch.cumsum(pad_masks, dim=1) - 1
         if use_3d_rope:
-            # TODO: Replace it with real position IDs
-            position_ids = position_ids[..., None].repeat(1, 1, 3)
+            position_ids = self.vlm_with_expert.vlm.model.get_thw_indexes(
+                pad_masks, image_embedding_size
+            )
+            if prefix_offsets is not None:
+                position_ids[..., 0] += prefix_offsets[..., None, 0]
         else:
             position_ids = torch.cumsum(pad_masks, dim=1) - 1
             if prefix_offsets is not None:
@@ -1095,8 +1119,8 @@ class VLAFlowMatching(torch.nn.Module):
         time_expanded = time[:, None, None]
         x_t = time_expanded * noise + (1 - time_expanded) * actions
         u_t = noise - actions
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self._embed_prefix(
-            images, img_masks, lang_tokens, lang_masks, state=state
+        prefix_embs, prefix_pad_masks, prefix_att_masks, img_emb_size = (
+            self._embed_prefix(images, img_masks, lang_tokens, lang_masks, state=state)
         )
         suffix_embs, suffix_pad_masks, suffix_att_masks = self._embed_suffix(x_t, time)
 
@@ -1104,7 +1128,10 @@ class VLAFlowMatching(torch.nn.Module):
         att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
         att_2d_masks = make_att_2d_masks(pad_masks, att_masks)
         position_ids = self._get_position_ids(
-            None, pad_masks, self.config.neovlm_use_3d_rope
+            None,
+            img_emb_size,
+            pad_masks,
+            self.config.neovlm_use_3d_rope,
         )
 
         (_, suffix_out), _ = self.vlm_with_expert(
@@ -1127,12 +1154,12 @@ class VLAFlowMatching(torch.nn.Module):
     ) -> torch.Tensor:
         """Do a half inference forward and compute the VLM embedding"""
 
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self._embed_prefix(
-            images, img_masks, lang_tokens, lang_masks, state
+        prefix_embs, prefix_pad_masks, prefix_att_masks, img_emb_size = (
+            self._embed_prefix(images, img_masks, lang_tokens, lang_masks, state)
         )
         prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
         prefix_position_ids = self._get_position_ids(
-            None, prefix_pad_masks, self.config.neovlm_use_3d_rope
+            None, img_emb_size, prefix_pad_masks, self.config.neovlm_use_3d_rope
         )
         # Compute image and language key value cache
         _, past_key_values = self.vlm_with_expert.forward(
@@ -1200,7 +1227,7 @@ class VLAFlowMatching(torch.nn.Module):
         full_att_2d_masks = torch.cat([prefix_pad_2d_masks, suffix_att_2d_masks], dim=2)
         prefix_offsets = torch.sum(prefix_pad_masks, dim=-1)[:, None]
         position_ids = self._get_position_ids(
-            prefix_offsets, suffix_pad_masks, self.config.neovlm_use_3d_rope
+            prefix_offsets, None, suffix_pad_masks, self.config.neovlm_use_3d_rope
         )
 
         outputs_embeds, _ = self.vlm_with_expert.forward(
