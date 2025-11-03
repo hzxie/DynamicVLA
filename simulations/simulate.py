@@ -509,8 +509,7 @@ def _get_object_bbox(position, size, quat, lin_vel=None):
     ).apply(corners)
 
     bbox = rotated_corners + position
-    z_min = np.min(bbox[:, 2])
-    return Polygon(bbox[np.isclose(bbox[:, 2], z_min, atol=1e-6), :2])
+    return Polygon(bbox[np.argsort(bbox[:, 2])[:4], :2])
 
 
 def _is_bbox_overlap(bbox1, bbox2):
