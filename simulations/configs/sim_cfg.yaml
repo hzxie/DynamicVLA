@@ -9,7 +9,7 @@ scene:
       rotation: [-90, 0, 180]
       prim_path: "/Robot/SideCamera"
   objects:
-    n_objects: 1
+    n_objects: 3
     mass: 0.05
     prob_rnd_quat: 0.85
     prob_static: 0.5
@@ -35,7 +35,7 @@ scene:
       - tangerine
       - tomato
   containers:
-    n_containers: 1
+    n_containers: 2
     mass: 0.1
     categories:
       - bowl
