@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-09-16 11:23:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-11-01 16:02:51
+# @Last Modified at: 2025-11-04 21:13:36
 # @Email:  root@haozhexie.com
 
 import collections
@@ -131,15 +131,12 @@ class VLMWithExpertModel(torch.nn.Module):
                     continue
 
                 # Remove projectors for key (as ROPE has been applied in VLM)
-                del expert_model.layers[layer_idx].self_attn.k_proj
-                if use_3d_rope:
-                    del expert_model.layers[layer_idx].self_attn.k_proj_hw
-
                 expert_model.layers[layer_idx].self_attn.v_proj = torch.nn.Linear(
                     text_config.num_key_value_heads * text_config.head_dim,
                     expert_config.num_key_value_heads * expert_config.head_dim,
                     bias=expert_config.attention_bias,
                 )
+                del expert_model.layers[layer_idx].self_attn.k_proj
 
         return expert_model
 
@@ -216,24 +213,26 @@ class VLMWithExpertModel(torch.nn.Module):
             if hasattr(attn_layer, "k_proj"):
                 k_states["t"] = attn_layer.k_proj(k_in).view(k_shape)
         elif position_ids.ndim == 3 and position_ids.shape[2] == 3:  # 3D Rope
+            qtr_head_dim = attn_layer.head_dim // 4
             # Value
             v_states["t"] = attn_layer.v_proj(v_in).view(v_shape)
             # Query
-            q_states["t"] = attn_layer.q_norm(attn_layer.q_proj(q_in).view(q_shape))
-            _query_state_h, _query_state_w = (
-                attn_layer.q_proj_hw(q_in).view(q_shape).chunk(2, dim=-1)
-            )
-            q_states["h"] = attn_layer.q_norm_h(_query_state_h)
-            q_states["w"] = attn_layer.q_norm_w(_query_state_w)
+            _query_states = attn_layer.q_proj(q_in).view(q_shape)
+            q_states["t"] = _query_states[..., : qtr_head_dim * 2]
+            q_states["h"] = _query_states[..., qtr_head_dim * 2 : -qtr_head_dim]
+            q_states["w"] = _query_states[..., -qtr_head_dim:]
+            q_states["t"] = attn_layer.q_norm_t(q_states["t"])
+            q_states["h"] = attn_layer.q_norm_h(q_states["h"])
+            q_states["w"] = attn_layer.q_norm_w(q_states["w"])
             # Key (can be skipped in cross-attention)
             if hasattr(attn_layer, "k_proj"):
-                k_states["t"] = attn_layer.k_norm(attn_layer.k_proj(k_in).view(k_shape))
-            if hasattr(attn_layer, "k_proj_hw"):
-                _key_state_h, _key_state_w = (
-                    attn_layer.k_proj_hw(k_in).view(k_shape).chunk(2, dim=-1)
-                )
-                k_states["h"] = attn_layer.k_norm_h(_key_state_h)
-                k_states["w"] = attn_layer.k_norm_w(_key_state_w)
+                _key_states = attn_layer.k_proj(k_in).view(k_shape)
+                k_states["t"] = _key_states[..., : qtr_head_dim * 2]
+                k_states["h"] = _key_states[..., qtr_head_dim * 2 : -qtr_head_dim]
+                k_states["w"] = _key_states[..., -qtr_head_dim:]
+                k_states["t"] = attn_layer.k_norm_t(k_states["t"])
+                k_states["h"] = attn_layer.k_norm_h(k_states["h"])
+                k_states["w"] = attn_layer.k_norm_w(k_states["w"])
         else:
             raise ValueError(f"Unknown position_ids shape: {position_ids.shape}")
 

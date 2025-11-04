@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-10-22 09:51:08
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-11-01 23:54:43
+# @Last Modified at: 2025-11-04 20:41:38
 # @Email:  root@haozhexie.com
 
 import copy
@@ -172,6 +172,7 @@ class NeoAttention(torch.nn.Module):
         self.head_dim = getattr(
             config, "head_dim", config.hidden_size // config.num_attention_heads
         )
+
         self.num_key_value_groups = (
             config.num_attention_heads // config.num_key_value_heads
         )
@@ -183,17 +184,7 @@ class NeoAttention(torch.nn.Module):
             config.num_attention_heads * self.head_dim,
             bias=config.attention_bias,
         )
-        self.q_proj_hw = torch.nn.Linear(
-            config.hidden_size,
-            config.num_attention_heads * self.head_dim,
-            bias=config.attention_bias,
-        )
         self.k_proj = torch.nn.Linear(
-            config.hidden_size,
-            config.num_key_value_heads * self.head_dim,
-            bias=config.attention_bias,
-        )
-        self.k_proj_hw = torch.nn.Linear(
             config.hidden_size,
             config.num_key_value_heads * self.head_dim,
             bias=config.attention_bias,
@@ -209,22 +200,21 @@ class NeoAttention(torch.nn.Module):
             bias=config.attention_bias,
         )
 
-        self.q_norm = Qwen3RMSNorm(self.head_dim, eps=config.rms_norm_eps)
-        self.q_norm_h = Qwen3RMSNorm(self.head_dim // 2, eps=config.rms_norm_eps)
-        self.q_norm_w = Qwen3RMSNorm(self.head_dim // 2, eps=config.rms_norm_eps)
-        self.k_norm = Qwen3RMSNorm(self.head_dim, eps=config.rms_norm_eps)
-        self.k_norm_h = Qwen3RMSNorm(self.head_dim // 2, eps=config.rms_norm_eps)
-        self.k_norm_w = Qwen3RMSNorm(self.head_dim // 2, eps=config.rms_norm_eps)
+        self.q_norm_t = Qwen3RMSNorm(self.head_dim // 2, eps=config.rms_norm_eps)
+        self.q_norm_h = Qwen3RMSNorm(self.head_dim // 4, eps=config.rms_norm_eps)
+        self.q_norm_w = Qwen3RMSNorm(self.head_dim // 4, eps=config.rms_norm_eps)
+        self.k_norm_t = Qwen3RMSNorm(self.head_dim // 2, eps=config.rms_norm_eps)
+        self.k_norm_h = Qwen3RMSNorm(self.head_dim // 4, eps=config.rms_norm_eps)
+        self.k_norm_w = Qwen3RMSNorm(self.head_dim // 4, eps=config.rms_norm_eps)
 
         self.sliding_window = (
             config.sliding_window
             if config.layer_types[layer_idx] == "sliding_attention"
             else None
         )
-
         self.rotary_emb = Qwen3RotaryEmbedding(config=config)
         hw_config = copy.deepcopy(config)
-        hw_config.head_dim = config.head_dim // 2
+        hw_config.head_dim = config.head_dim // 4
         hw_config.rope_theta = config.rope_theta_hw
         hw_config.max_position_embeddings = config.max_position_embeddings_hw
         self.rotary_emb_hw = Qwen3RotaryEmbedding(config=hw_config)
@@ -242,31 +232,27 @@ class NeoAttention(torch.nn.Module):
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, self.head_dim)
 
-        query_states_t = self.q_norm(
-            self.q_proj(hidden_states).view(hidden_shape)
-        ).transpose(1, 2)
-        query_states_h, query_states_w = (
-            self.q_proj_hw(hidden_states)
+        query_states = (
+            self.q_proj(hidden_states)
             .view(hidden_shape)
             .transpose(1, 2)
-            .chunk(2, dim=-1)
+            .chunk(4, dim=-1)
         )
-        query_states_h, query_states_w = self.q_norm_h(query_states_h), self.q_norm_w(
-            query_states_w
+        query_states_t = self.q_norm_t(
+            torch.cat([query_states[0], query_states[1]], dim=-1)
         )
+        query_states_h = self.q_norm_h(query_states[2])
+        query_states_w = self.q_norm_w(query_states[3])
 
-        key_states_t = self.k_norm(
-            self.k_proj(hidden_states).view(hidden_shape)
-        ).transpose(1, 2)
-        key_states_h, key_states_w = (
-            self.k_proj_hw(hidden_states)
+        key_states = (
+            self.k_proj(hidden_states)
             .view(hidden_shape)
             .transpose(1, 2)
-            .chunk(2, dim=-1)
+            .chunk(4, dim=-1)
         )
-        key_states_h, key_states_w = self.k_norm_h(key_states_h), self.k_norm_w(
-            key_states_w
-        )
+        key_states_t = self.k_norm_t(torch.cat([key_states[0], key_states[1]], dim=-1))
+        key_states_h = self.k_norm_h(key_states[2])
+        key_states_w = self.k_norm_w(key_states[3])
 
         value_states = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
         cos_t, sin_t = self.rotary_emb(hidden_states, indexes[0].unsqueeze(0))
