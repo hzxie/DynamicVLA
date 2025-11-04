@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-16 19:58:18
+# @Last Modified at: 2025-11-03 21:08:42
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -21,11 +21,12 @@ import cv2
 import gymnasium as gym
 import h5py
 import imageio.v3
+import math
 import numpy as np
-import scipy.spatial.transform
 import torch
 import yaml
 from isaaclab.app import AppLauncher
+from scipy.spatial.transform import Rotation as R
 from shapely.geometry import Polygon
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
@@ -53,11 +54,12 @@ def get_object_metadata(object_dir, target_categories=[]):
     if os.path.exists(metadata_file):
         with open(metadata_file, "r") as f:
             metadata = json.load(f)
-        for k, v in metadata.items():
-            if k in object_metadata:
-                object_metadata[k].update(v)
+        for file_name, _metadata in metadata.items():
+            if file_name in object_metadata:
+                for k, v in _metadata.items():
+                    object_metadata[file_name][k] = v
             else:
-                logging.warning("Metadata found for unknown object %s." % k)
+                logging.warning("Metadata found for unknown object %s." % file_name)
 
     return object_metadata
 
@@ -192,12 +194,177 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
         task, terimation_args
     )
     # Return the unique tags of target object and container (if any)
+    # Reverse=True indicates that the position is related to the object camera
+    object_states = _get_state_tags(
+        object_states, robot_pose, table["bbox"], reverse=True
+    )
     object_tags = {
         k: _get_unique_tags([o["tags"] for o in v])
         for k, v in object_states.items()
         if len(v) > 0
     }
+    logging.debug("Object tags: %s" % object_tags)
     return env_cfg, object_tags
+
+
+def _get_state_rankings(data, key_func, attr_name, object_type):
+    RANK_TAGS = {
+        "FIRST": {
+            "height": "the tallest %s",
+            "length": "the longest %s",
+            "project area": "the %s with the largest area",
+            "volume": "the %s with the largest volume",
+            "position from the left": "the leftmost %s",
+            "position from the bottom": "the %s closest to the robot mounting edge",
+            "distance from robot": "the %s closest to the robot",
+            "distance from table center": "the %s closest to the table center",
+            "velocity": "the fastest %s",
+        },
+        "LAST": {
+            "height": "the shortest %s",
+            "length": "the shortest %s",
+            "project area": "the %s with the smallest area",
+            "volume": "the %s with the smallest volume",
+            "position from the left": "the rightmost %s",
+            "position from the bottom": "the %s farthest from the robot mounting edge",
+            "distance from robot": "the %s farthest from the robot",
+            "distance from table center": "the %s farthest from the table center",
+            "velocity": "the slowest %s",
+        },
+        "MEDIUM": {
+            "height": "the %s of medium height",
+            "length": "the %s of medium length",
+            "project area": "the %s with medium area",
+            "volume": "the %s with medium volume",
+            "position from the left": "the %s in the middle from left to right",
+            "position from the bottom": "the %s with medium distance to the robot mounting edge",
+            "distance from robot": "the %s with medium distance to the robot",
+            "distance from table center": "the %s with medium distance to the table center",
+            "velocity": "the %s with medium velocity",
+        },
+    }
+    THRESHOLDS = {
+        "height": 0.005,
+        "length": 0.005,
+        "project area": 0.0005,
+        "volume": 0,
+        "position from the left": 0.005,
+        "position from the bottom": 0.005,
+        "distance from robot": 0.01,
+        "distance from table center": 0.01,
+        "velocity": 0.02,
+    }
+
+    assert object_type in ["object", "container"]
+    if not data:
+        return []
+
+    n = len(data)
+    sorted_data = sorted(data, key=key_func, reverse=True)
+    cur_rk = 1
+    if sorted_data:
+        lst_val = key_func(sorted_data[0])
+    else:
+        return data
+
+    for i, item in enumerate(sorted_data):
+        object_name = item["category"] if object_type == "container" else object_type
+        cur = key_func(item)
+        if abs(cur - lst_val) > THRESHOLDS[attr_name]:
+            cur_rk = i + 1
+        if cur_rk == 1:
+            item["tags"].append(RANK_TAGS["FIRST"][attr_name] % object_name)
+        elif cur_rk == n and n != 1:
+            item["tags"].append(RANK_TAGS["LAST"][attr_name] % object_name)
+        elif cur_rk == 2 and n == 3:
+            item["tags"].append(RANK_TAGS["MEDIUM"][attr_name] % object_name)
+
+        lst_val = cur
+
+    return data
+
+
+def _get_direction_tags(data, robot_quat_xyzw, object_type, reverse):
+    DIRECTION_TAGS = [
+        "forward",
+        "forward-left",
+        "left",
+        "backward-left",
+        "backward",
+        "backward-right",
+        "right",
+        "forward-right",
+    ]
+
+    for item in data:
+        if "lin_vel" not in item or np.linalg.norm(item["lin_vel"]) < 1e-3:
+            item["tags"].append("stationary %s" % object_type)
+            continue
+
+        rel_velocity = _get_relative_velocity(item["lin_vel"], robot_quat_xyzw, reverse)
+        angle = math.degrees(math.atan2(rel_velocity[1], rel_velocity[0])) % 360
+        index = int((angle + 22.5) // 45) % 8
+        item["tags"].append("moving-%s %s" % (DIRECTION_TAGS[index], object_type))
+
+    return data
+
+
+def _get_relative_velocity(lin_vel, robot_quat_xyzw, reverse):
+    rev_factor = -1 if reverse else 1
+    R_robot = R.from_quat(robot_quat_xyzw)
+    R_W_to_R_matrix = R_robot.inv().as_matrix()
+    v_local = R_W_to_R_matrix @ lin_vel
+    return v_local * rev_factor
+
+
+def _get_state_tags(object_states, robot_pose, table_bbox, reverse=False):
+    rev_factor = -1 if reverse else 1
+    robot_quat = torch.as_tensor(robot_pose["quat"], dtype=torch.float64)
+    robot_pos = robot_pose["pos"]
+    tbl_ctr = (table_bbox.min + table_bbox.max) / 2.0
+    robot_quat_xyzw = np.roll(robot_quat, -1)
+
+    _get_relative_pos = lambda point: R.from_quat(robot_quat_xyzw).apply(
+        point - robot_pos, inverse=True
+    )
+    CONTAINER_ATTRIBUTES = {
+        "height": lambda x: x["size"][2],
+        "length": lambda x: max(x["size"][0], x["size"][1]),
+        "project area": lambda x: x["size"][0] * x["size"][1],
+        "volume": lambda x: np.prod(x["size"]),
+        "position from the left": lambda x: _get_relative_pos(x["pos"])[1] * rev_factor,
+        "position from the bottom": lambda x: -_get_relative_pos(x["pos"])[0]
+        * rev_factor,
+        "distance from robot": lambda x: -np.linalg.norm(x["pos"] - robot_pos),
+        "distance from table center": lambda x: -np.linalg.norm(x["pos"] - tbl_ctr),
+    }
+    OBJECT_ATTRIBUTES = {
+        "height": lambda x: x["pos"][2] - table_bbox.max[2],
+        "length": lambda x: np.max(x["size"]),
+        "volume": lambda x: np.prod(x["size"]),
+        "position from the left": lambda x: _get_relative_pos(x["pos"])[1] * rev_factor,
+        "position from the bottom": lambda x: -_get_relative_pos(x["pos"])[0]
+        * rev_factor,
+        "distance from robot": lambda x: -np.linalg.norm(x["pos"] - robot_pos),
+        "distance from table center": lambda x: -np.linalg.norm(x["pos"] - tbl_ctr),
+        "velocity": lambda x: (
+            np.linalg.norm(x["lin_vel"]) * rev_factor if "lin_vel" in x else 0
+        ),
+    }
+
+    for attr, func in OBJECT_ATTRIBUTES.items():
+        object_states["objects"] = _get_state_rankings(
+            object_states["objects"], func, attr, "object"
+        )
+    for attr, func in CONTAINER_ATTRIBUTES.items():
+        object_states["containers"] = _get_state_rankings(
+            object_states["containers"], func, attr, "container"
+        )
+
+    object_states["objects"] = _get_direction_tags(
+        object_states["objects"], robot_quat_xyzw, "object", reverse
+    )
+    return object_states
 
 
 def _set_up_scene_cameras(scene_cfg, sim_cfg, robot):
@@ -228,9 +395,7 @@ def _set_up_scene_cameras(scene_cfg, sim_cfg, robot):
 
 def get_camera_pose(cam):
     # scalar_first is not supported in scipy < 1.12.0 (required by Isaac Lab)
-    quat = scipy.spatial.transform.Rotation.from_euler(
-        "XYZ", cam["rotation"], degrees=True
-    ).as_quat()
+    quat = R.from_euler("XYZ", cam["rotation"], degrees=True).as_quat()
 
     return {
         "prim_path": cam["prim_path"],
@@ -504,13 +669,10 @@ def _get_object_bbox(position, size, quat, lin_vel=None):
             [-dx, dy, dz],
         ]
     )
-    rotated_corners = scipy.spatial.transform.Rotation.from_quat(
-        quat[[1, 2, 3, 0]]
-    ).apply(corners)
+    rotated_corners = R.from_quat(quat[[1, 2, 3, 0]]).apply(corners)
 
     bbox = rotated_corners + position
-    z_min = np.min(bbox[:, 2])
-    return Polygon(bbox[np.isclose(bbox[:, 2], z_min, atol=1e-6), :2])
+    return Polygon(bbox[np.argsort(bbox[:, 2])[:4], :2])
 
 
 def _is_bbox_overlap(bbox1, bbox2):
@@ -571,9 +733,9 @@ def _set_up_scene_containers(scene_cfg, container_states):
         logging.info("Using container object: %s" % os.path.basename(o["file_path"]))
         scene_cfg = configs.scene_cfg.add_object(
             scene_cfg,
-            f"container{i:02d}" if i != 0 else "container",
+            "container%02d" % i if i != 0 else "container",
             configs.object_cfg.get_object_cfg(
-                f"/Container{i:02d}" if i != 0 else "/Container",
+                "/Container%02d" % i if i != 0 else "/Container",
                 o,
                 configs.object_cfg.get_spawner_cfg(
                     file_path=o["file_path"],
@@ -1013,7 +1175,7 @@ def get_frames(
                 elif frame.shape[-1] >= 3:
                     frame = frame[:, :, :3]
             else:
-                raise ValueError(f"Unknown camera data shape: {frame.shape}")
+                raise ValueError("Unknown camera data shape: %s" % (frame.shape,))
 
             # Normalize the depth image to 0-255
             if img_name in ["depth", "distance_to_image_plane", "distance_to_camera"]:
@@ -1091,14 +1253,12 @@ def _get_state_text(state):
             # Convert all quaternions to Euler angles
             if k.find("Quat") != -1:
                 k = k.replace("Quat", "Rot")
-                v = scipy.spatial.transform.Rotation.from_quat(v).as_euler(
-                    "xyz", degrees=True
-                )
+                v = R.from_quat(v).as_euler("xyz", degrees=True)
 
             text += "%s: " % k
             text += " ".join(["%.3f" % i for i in v]) + "\n"
         else:
-            raise ValueError(f"Unknown State Value Type: {type(v)}")
+            raise ValueError("Unknown State Value Type: %s" % (type(v),))
 
     return text
 
