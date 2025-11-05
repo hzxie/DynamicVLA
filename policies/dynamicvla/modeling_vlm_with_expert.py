@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-09-16 11:23:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-11-04 21:13:36
+# @Last Modified at: 2025-11-05 21:08:38
 # @Email:  root@haozhexie.com
 
 import collections
@@ -29,7 +29,6 @@ class VLMWithExpertModel(torch.nn.Module):
         num_vlm_layers: int = -1,
         self_attn_every_n_layers: int = -1,
         expert_width_multiplier: float = 0.5,
-        use_3d_rope: bool = False,
     ) -> None:
         super().__init__()
         # Tokenizer
@@ -61,7 +60,6 @@ class VLMWithExpertModel(torch.nn.Module):
             attention_mode,
             num_expert_skip_layers,
             self_attn_every_n_layers,
-            use_3d_rope,
         )
         # Remove token embeddings
         if hasattr(self.lm_expert, "embed_tokens"):
@@ -117,7 +115,6 @@ class VLMWithExpertModel(torch.nn.Module):
         attention_mode: str,
         num_expert_skip_layers: int,
         self_attn_every_n_layers: int,
-        use_3d_rope: bool,
     ) -> PreTrainedModel:
         text_config = self.vlm_config.text_config
         expert_model = AutoModel.from_config(expert_config)
@@ -210,29 +207,27 @@ class VLMWithExpertModel(torch.nn.Module):
         if position_ids.ndim == 2:  # 1D Rope
             v_states["t"] = attn_layer.v_proj(v_in).view(v_shape)
             q_states["t"] = attn_layer.q_proj(q_in).view(q_shape)
+            if hasattr(attn_layer, "q_norm"):
+                q_states["t"] = attn_layer.q_norm(q_states["t"])
             if hasattr(attn_layer, "k_proj"):
                 k_states["t"] = attn_layer.k_proj(k_in).view(k_shape)
+                if hasattr(attn_layer, "k_norm"):
+                    k_states["t"] = attn_layer.k_norm(k_states["t"])
         elif position_ids.ndim == 3 and position_ids.shape[2] == 3:  # 3D Rope
             qtr_head_dim = attn_layer.head_dim // 4
             # Value
             v_states["t"] = attn_layer.v_proj(v_in).view(v_shape)
             # Query
-            _query_states = attn_layer.q_proj(q_in).view(q_shape)
+            _query_states = attn_layer.q_norm(attn_layer.q_proj(q_in).view(q_shape))
             q_states["t"] = _query_states[..., : qtr_head_dim * 2]
             q_states["h"] = _query_states[..., qtr_head_dim * 2 : -qtr_head_dim]
             q_states["w"] = _query_states[..., -qtr_head_dim:]
-            q_states["t"] = attn_layer.q_norm_t(q_states["t"])
-            q_states["h"] = attn_layer.q_norm_h(q_states["h"])
-            q_states["w"] = attn_layer.q_norm_w(q_states["w"])
             # Key (can be skipped in cross-attention)
             if hasattr(attn_layer, "k_proj"):
-                _key_states = attn_layer.k_proj(k_in).view(k_shape)
+                _key_states = attn_layer.k_norm(attn_layer.k_proj(k_in).view(k_shape))
                 k_states["t"] = _key_states[..., : qtr_head_dim * 2]
                 k_states["h"] = _key_states[..., qtr_head_dim * 2 : -qtr_head_dim]
                 k_states["w"] = _key_states[..., -qtr_head_dim:]
-                k_states["t"] = attn_layer.k_norm_t(k_states["t"])
-                k_states["h"] = attn_layer.k_norm_h(k_states["h"])
-                k_states["w"] = attn_layer.k_norm_w(k_states["w"])
         else:
             raise ValueError(f"Unknown position_ids shape: {position_ids.shape}")
 
@@ -242,23 +237,34 @@ class VLMWithExpertModel(torch.nn.Module):
         self,
         hidden_states: torch.Tensor,
         positions: torch.Tensor,
-        t_wavelength: int = 1_000_000,
-        hw_wavelength: int = 10_000,
+        wavelength: int = 10_000,
     ):
         if positions.ndim == 2:  # 1D Rope
-            return self._apply_rope(hidden_states["t"], positions, t_wavelength)
+            return self._apply_rope(
+                hidden_states["t"].unsqueeze(0), positions.unsqueeze(0), wavelength
+            ).squeeze(0)
         elif positions.ndim == 3 and positions.shape[2] == 3:  # 3D Rope
+            roped_states = self._apply_rope(
+                torch.stack(
+                    [
+                        hidden_states["t"],
+                        hidden_states["h"].repeat_interleave(2, dim=-1),
+                        hidden_states["w"].repeat_interleave(2, dim=-1),
+                    ],
+                    dim=0,
+                ),
+                positions.permute(2, 0, 1),
+                wavelength,
+            )
+            half_indexes = torch.arange(
+                0, hidden_states["t"].size(-1), 2, device=roped_states.device
+            )
+            roped_states = roped_states.permute(1, 2, 3, 4, 0)
             return torch.cat(
                 [
-                    self._apply_rope(
-                        hidden_states["t"], positions[:, :, 0], t_wavelength
-                    ),
-                    self._apply_rope(
-                        hidden_states["h"], positions[:, :, 1], hw_wavelength
-                    ),
-                    self._apply_rope(
-                        hidden_states["w"], positions[:, :, 2], hw_wavelength
-                    ),
+                    roped_states[..., 0],
+                    roped_states[..., half_indexes, 1],
+                    roped_states[..., half_indexes, 2],
                 ],
                 dim=-1,
             )
@@ -272,22 +278,21 @@ class VLMWithExpertModel(torch.nn.Module):
         max_wavelength: int = 10_000,
     ):
         """
-        Applies RoPE positions [B, L] to hidden_states [B, L, H, D].
+        Applies RoPE positions [B, L, N] to hidden_states [B, L, H, D].
         """
-        d_half = hidden_states.shape[-1] // 2
-        device = hidden_states.device
+        # Cache the sin/cos values for efficiency
+        d_half = hidden_states.size(-1) // 2
         dtype = hidden_states.dtype
         x = hidden_states.to(torch.float32)
 
-        freq_exponents = (2.0 / hidden_states.shape[-1]) * torch.arange(
-            d_half, dtype=torch.float32, device=device
+        freq_exponents = (4.0 / d_half) * torch.arange(
+            d_half, dtype=torch.float32, device=positions.device
         )
         timescale = max_wavelength**freq_exponents
-        radians = positions[..., None].to(torch.float32) / timescale[None, None, :]
-
+        radians = positions[..., None] / timescale[None, None, None, :]
         radians = radians[..., None, :]
-        sin = torch.sin(radians)  # .to(dtype=dtype)
-        cos = torch.cos(radians)  # .to(dtype=dtype)
+        cos = torch.cos(radians)
+        sin = torch.sin(radians)
 
         x1, x2 = hidden_states.split(d_half, dim=-1)
         res = torch.empty_like(x)

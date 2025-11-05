@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-11-02 00:03:11
+# @Last Modified at: 2025-11-05 19:43:10
 # @Email:  root@haozhexie.com
 
 import logging
@@ -33,8 +33,8 @@ from policies.dynamicvla.modeling_fastvlm import (
 )
 from policies.dynamicvla.modeling_neo import (
     NeoTextConfig,
-    NeoVisionConfig,
     NeoTextModel,
+    NeoVisionConfig,
     NeoVLMConfig,
     NeoVLMForConditionalGeneration,
     NeoVLMPreTrainedModel,
@@ -932,7 +932,6 @@ class VLAFlowMatching(torch.nn.Module):
             attention_mode=config.attention_mode,
             self_attn_every_n_layers=self.config.self_attn_every_n_layers,
             expert_width_multiplier=self.config.expert_width_multiplier,
-            use_3d_rope=self.config.neovlm_use_3d_rope,
         )
 
     def _set_requires_grad(self):

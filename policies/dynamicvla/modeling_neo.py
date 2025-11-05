@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-10-22 09:51:08
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-11-04 20:41:38
+# @Last Modified at: 2025-11-05 12:38:25
 # @Email:  root@haozhexie.com
 
 import copy
@@ -199,13 +199,8 @@ class NeoAttention(torch.nn.Module):
             config.hidden_size,
             bias=config.attention_bias,
         )
-
-        self.q_norm_t = Qwen3RMSNorm(self.head_dim // 2, eps=config.rms_norm_eps)
-        self.q_norm_h = Qwen3RMSNorm(self.head_dim // 4, eps=config.rms_norm_eps)
-        self.q_norm_w = Qwen3RMSNorm(self.head_dim // 4, eps=config.rms_norm_eps)
-        self.k_norm_t = Qwen3RMSNorm(self.head_dim // 2, eps=config.rms_norm_eps)
-        self.k_norm_h = Qwen3RMSNorm(self.head_dim // 4, eps=config.rms_norm_eps)
-        self.k_norm_w = Qwen3RMSNorm(self.head_dim // 4, eps=config.rms_norm_eps)
+        self.q_norm = Qwen3RMSNorm(self.head_dim, eps=config.rms_norm_eps)
+        self.k_norm = Qwen3RMSNorm(self.head_dim, eps=config.rms_norm_eps)
 
         self.sliding_window = (
             config.sliding_window
@@ -231,28 +226,21 @@ class NeoAttention(torch.nn.Module):
         assert self.config._attn_implementation == "eager"
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, self.head_dim)
+        qtr_head_dim = self.head_dim // 4
 
-        query_states = (
-            self.q_proj(hidden_states)
-            .view(hidden_shape)
-            .transpose(1, 2)
-            .chunk(4, dim=-1)
+        query_states = self.q_norm(
+            self.q_proj(hidden_states).view(hidden_shape).transpose(1, 2)
         )
-        query_states_t = self.q_norm_t(
-            torch.cat([query_states[0], query_states[1]], dim=-1)
-        )
-        query_states_h = self.q_norm_h(query_states[2])
-        query_states_w = self.q_norm_w(query_states[3])
+        query_states_t = query_states[..., : qtr_head_dim * 2]
+        query_states_h = query_states[..., qtr_head_dim * 2 : -qtr_head_dim]
+        query_states_w = query_states[..., -qtr_head_dim:]
 
-        key_states = (
-            self.k_proj(hidden_states)
-            .view(hidden_shape)
-            .transpose(1, 2)
-            .chunk(4, dim=-1)
+        key_states = self.k_norm(
+            self.k_proj(hidden_states).view(hidden_shape).transpose(1, 2)
         )
-        key_states_t = self.k_norm_t(torch.cat([key_states[0], key_states[1]], dim=-1))
-        key_states_h = self.k_norm_h(key_states[2])
-        key_states_w = self.k_norm_w(key_states[3])
+        key_states_t = key_states[..., : qtr_head_dim * 2]
+        key_states_h = key_states[..., qtr_head_dim * 2 : -qtr_head_dim]
+        key_states_w = key_states[..., -qtr_head_dim:]
 
         value_states = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
         cos_t, sin_t = self.rotary_emb(hidden_states, indexes[0].unsqueeze(0))
