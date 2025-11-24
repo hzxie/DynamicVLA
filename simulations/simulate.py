@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-11-03 21:08:42
+# @Last Modified at: 2025-11-24 11:06:44
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -12,6 +12,7 @@ import ast
 import importlib
 import json
 import logging
+import math
 import os
 import random
 import sys
@@ -21,7 +22,6 @@ import cv2
 import gymnasium as gym
 import h5py
 import imageio.v3
-import math
 import numpy as np
 import torch
 import yaml
@@ -130,7 +130,7 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
         tables = configs.scene_cfg.get_table_assets(
             usd_file, sim_cfg["scene"]["cameras"]
         )
-        if len(tables) == 0:
+        if len(tables) < 1:
             scenes.remove(scene)
             logging.info("No table found in %s. Trying another scene." % scene)
         else:
@@ -194,177 +194,18 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
         task, terimation_args
     )
     # Return the unique tags of target object and container (if any)
-    # Reverse=True indicates that the position is related to the object camera
-    object_states = _get_state_tags(
-        object_states, robot_pose, table["bbox"], reverse=True
-    )
     object_tags = {
-        k: _get_unique_tags([o["tags"] for o in v])
+        k: helpers.get_object_tags(
+            k,
+            v,
+            robot_pose,
+            ["VELOCITY"] if k == "containers" else None,
+            sim_cfg["scene"]["objects"]["tag_thresholds"],
+        )
         for k, v in object_states.items()
-        if len(v) > 0
     }
     logging.debug("Object tags: %s" % object_tags)
     return env_cfg, object_tags
-
-
-def _get_state_rankings(data, key_func, attr_name, object_type):
-    RANK_TAGS = {
-        "FIRST": {
-            "height": "the tallest %s",
-            "length": "the longest %s",
-            "project area": "the %s with the largest area",
-            "volume": "the %s with the largest volume",
-            "position from the left": "the leftmost %s",
-            "position from the bottom": "the %s closest to the robot mounting edge",
-            "distance from robot": "the %s closest to the robot",
-            "distance from table center": "the %s closest to the table center",
-            "velocity": "the fastest %s",
-        },
-        "LAST": {
-            "height": "the shortest %s",
-            "length": "the shortest %s",
-            "project area": "the %s with the smallest area",
-            "volume": "the %s with the smallest volume",
-            "position from the left": "the rightmost %s",
-            "position from the bottom": "the %s farthest from the robot mounting edge",
-            "distance from robot": "the %s farthest from the robot",
-            "distance from table center": "the %s farthest from the table center",
-            "velocity": "the slowest %s",
-        },
-        "MEDIUM": {
-            "height": "the %s of medium height",
-            "length": "the %s of medium length",
-            "project area": "the %s with medium area",
-            "volume": "the %s with medium volume",
-            "position from the left": "the %s in the middle from left to right",
-            "position from the bottom": "the %s with medium distance to the robot mounting edge",
-            "distance from robot": "the %s with medium distance to the robot",
-            "distance from table center": "the %s with medium distance to the table center",
-            "velocity": "the %s with medium velocity",
-        },
-    }
-    THRESHOLDS = {
-        "height": 0.005,
-        "length": 0.005,
-        "project area": 0.0005,
-        "volume": 0,
-        "position from the left": 0.005,
-        "position from the bottom": 0.005,
-        "distance from robot": 0.01,
-        "distance from table center": 0.01,
-        "velocity": 0.02,
-    }
-
-    assert object_type in ["object", "container"]
-    if not data:
-        return []
-
-    n = len(data)
-    sorted_data = sorted(data, key=key_func, reverse=True)
-    cur_rk = 1
-    if sorted_data:
-        lst_val = key_func(sorted_data[0])
-    else:
-        return data
-
-    for i, item in enumerate(sorted_data):
-        object_name = item["category"] if object_type == "container" else object_type
-        cur = key_func(item)
-        if abs(cur - lst_val) > THRESHOLDS[attr_name]:
-            cur_rk = i + 1
-        if cur_rk == 1:
-            item["tags"].append(RANK_TAGS["FIRST"][attr_name] % object_name)
-        elif cur_rk == n and n != 1:
-            item["tags"].append(RANK_TAGS["LAST"][attr_name] % object_name)
-        elif cur_rk == 2 and n == 3:
-            item["tags"].append(RANK_TAGS["MEDIUM"][attr_name] % object_name)
-
-        lst_val = cur
-
-    return data
-
-
-def _get_direction_tags(data, robot_quat_xyzw, object_type, reverse):
-    DIRECTION_TAGS = [
-        "forward",
-        "forward-left",
-        "left",
-        "backward-left",
-        "backward",
-        "backward-right",
-        "right",
-        "forward-right",
-    ]
-
-    for item in data:
-        if "lin_vel" not in item or np.linalg.norm(item["lin_vel"]) < 1e-3:
-            item["tags"].append("stationary %s" % object_type)
-            continue
-
-        rel_velocity = _get_relative_velocity(item["lin_vel"], robot_quat_xyzw, reverse)
-        angle = math.degrees(math.atan2(rel_velocity[1], rel_velocity[0])) % 360
-        index = int((angle + 22.5) // 45) % 8
-        item["tags"].append("moving-%s %s" % (DIRECTION_TAGS[index], object_type))
-
-    return data
-
-
-def _get_relative_velocity(lin_vel, robot_quat_xyzw, reverse):
-    rev_factor = -1 if reverse else 1
-    R_robot = R.from_quat(robot_quat_xyzw)
-    R_W_to_R_matrix = R_robot.inv().as_matrix()
-    v_local = R_W_to_R_matrix @ lin_vel
-    return v_local * rev_factor
-
-
-def _get_state_tags(object_states, robot_pose, table_bbox, reverse=False):
-    rev_factor = -1 if reverse else 1
-    robot_quat = torch.as_tensor(robot_pose["quat"], dtype=torch.float64)
-    robot_pos = robot_pose["pos"]
-    tbl_ctr = (table_bbox.min + table_bbox.max) / 2.0
-    robot_quat_xyzw = np.roll(robot_quat, -1)
-
-    _get_relative_pos = lambda point: R.from_quat(robot_quat_xyzw).apply(
-        point - robot_pos, inverse=True
-    )
-    CONTAINER_ATTRIBUTES = {
-        "height": lambda x: x["size"][2],
-        "length": lambda x: max(x["size"][0], x["size"][1]),
-        "project area": lambda x: x["size"][0] * x["size"][1],
-        "volume": lambda x: np.prod(x["size"]),
-        "position from the left": lambda x: _get_relative_pos(x["pos"])[1] * rev_factor,
-        "position from the bottom": lambda x: -_get_relative_pos(x["pos"])[0]
-        * rev_factor,
-        "distance from robot": lambda x: -np.linalg.norm(x["pos"] - robot_pos),
-        "distance from table center": lambda x: -np.linalg.norm(x["pos"] - tbl_ctr),
-    }
-    OBJECT_ATTRIBUTES = {
-        "height": lambda x: x["pos"][2] - table_bbox.max[2],
-        "length": lambda x: np.max(x["size"]),
-        "volume": lambda x: np.prod(x["size"]),
-        "position from the left": lambda x: _get_relative_pos(x["pos"])[1] * rev_factor,
-        "position from the bottom": lambda x: -_get_relative_pos(x["pos"])[0]
-        * rev_factor,
-        "distance from robot": lambda x: -np.linalg.norm(x["pos"] - robot_pos),
-        "distance from table center": lambda x: -np.linalg.norm(x["pos"] - tbl_ctr),
-        "velocity": lambda x: (
-            np.linalg.norm(x["lin_vel"]) * rev_factor if "lin_vel" in x else 0
-        ),
-    }
-
-    for attr, func in OBJECT_ATTRIBUTES.items():
-        object_states["objects"] = _get_state_rankings(
-            object_states["objects"], func, attr, "object"
-        )
-    for attr, func in CONTAINER_ATTRIBUTES.items():
-        object_states["containers"] = _get_state_rankings(
-            object_states["containers"], func, attr, "container"
-        )
-
-    object_states["objects"] = _get_direction_tags(
-        object_states["objects"], robot_quat_xyzw, "object", reverse
-    )
-    return object_states
 
 
 def _set_up_scene_cameras(scene_cfg, sim_cfg, robot):
@@ -389,7 +230,6 @@ def _set_up_scene_cameras(scene_cfg, sim_cfg, robot):
                 get_camera_pose(cam),
             ),
         )
-
     return scene_cfg
 
 
@@ -435,24 +275,21 @@ def _get_object_states(
     ]
     object_range_bbox = _get_object_range_bbox(table_bbox)
     for oi in range(object_cfg["n_objects"]):
-        _object = random.choice(object_candidates).copy()  # TODO: Avoid duplicates
+        _object = random.choice(object_candidates).copy()
         random_orientation = random.random() < object_cfg.get("prob_rnd_quat", 0.5)
         random_static = (
             random.random() < object_cfg.get("prob_static", 0.5) if oi != 0 else False
         )  # The first object is always dynamic
         random_friction = np.random.uniform(*object_cfg.get("friction", [0, 0]))
-        random_perturb = (
-            random.random() < object_cfg.get("prob_init_perturb", 0.0)
-        )
+        random_perturbation = np.random.uniform(*object_cfg.get("perturbation", [0, 0]))
         _state = _get_object_state(
             _get_object_z(object_range_bbox.max[2], _object["size"]),
             robot_pose["pos"],
             object_range_bbox,
             None if random_static else object_cfg.get("moving_speed", None),
             random_friction,
+            random_perturbation,
             random_orientation,
-            [0, 0] if not random_perturb else object_cfg.get("perturb_range", [0, 0]),
-            object_states["objects"],
         )
         object_states["objects"].append(
             {
@@ -478,24 +315,28 @@ def _get_object_states(
     ]
     for _ in range(container_cfg["n_containers"]):
         _state = None
-        while _state is None:
-            _container = random.choice(
-                container_candidates
-            ).copy()  # TODO: Avoid duplicates
+        while _state is None and container_candidates:
+            _container = random.choice(container_candidates).copy()
             _state = _get_container_state(
                 _container["size"],
                 cntr_range_bbox,
                 random_orientation,
                 object_states,
             )
+            if _state is None:
+                # The container cannot be placed without occlusion
+                container_candidates.remove(_container)
 
-        object_states["containers"].append(
-            {
-                **_container,
-                **_state,
-                "mass": container_cfg.get("mass", 0.1),
-            }
-        )
+        # Remove from the candidates to avoid duplication
+        if _state is not None:
+            container_candidates.remove(_container)
+            object_states["containers"].append(
+                {
+                    **_container,
+                    **_state,
+                    "mass": container_cfg.get("mass", 0.1),
+                }
+            )
 
     return object_states
 
@@ -546,18 +387,21 @@ def _get_object_state(
     object_range_bbox,
     moving_speed,
     friction,
+    perturbation,
     random_orientation,
-    perturb_range,
-    existing_objects,
 ):
-    # TODO: Consider the state of existing objects
     if moving_speed is None:
         object_state = _get_static_object_state(
             object_range_bbox, object_z, random_orientation
         )
     else:
         object_state = _get_dynamic_object_state(
-            object_range_bbox, object_z, moving_speed, friction, perturb_range, robot_position
+            object_range_bbox,
+            object_z,
+            moving_speed,
+            friction,
+            perturbation,
+            robot_position,
         )
 
     return object_state
@@ -583,7 +427,7 @@ def _get_static_object_state(object_range_bbox, object_z, random_orientation):
 
 
 def _get_dynamic_object_state(
-    object_range_bbox, object_z, moving_speed, friction, perturb_range, robot_position
+    object_range_bbox, object_z, moving_speed, friction, perturbation, robot_position
 ):
     import configs.object_cfg
 
@@ -603,9 +447,14 @@ def _get_dynamic_object_state(
     # Determine the linear velocity of the object
     assert moving_speed is not None and len(moving_speed) == 2
     object_direction = random_position - object_position
-    object_velocity = object_direction / np.linalg.norm(object_direction) * random.uniform(*moving_speed)
-    random_perturb = [random.uniform(perturb_range[0], perturb_range[1]) for _ in range(2)]
-    object_quat = configs.object_cfg.get_object_init_quat(object_velocity, perturb=random_perturb)
+    object_velocity = (
+        object_direction
+        / np.linalg.norm(object_direction)
+        * random.uniform(*moving_speed)
+    )
+    object_quat = configs.object_cfg.get_object_init_quat(
+        object_velocity, perturbation=perturbation
+    )
 
     return {
         "pos": object_position,
@@ -731,6 +580,7 @@ def _set_up_scene_containers(scene_cfg, container_states):
     assert container_states, "No container states provided."
     for i, o in enumerate(container_states):
         logging.info("Using container object: %s" % os.path.basename(o["file_path"]))
+        cntr_class = "CONTAINER_BG" if i != 0 else "CONTAINER_MAIN"
         scene_cfg = configs.scene_cfg.add_object(
             scene_cfg,
             "container%02d" % i if i != 0 else "container",
@@ -740,9 +590,7 @@ def _set_up_scene_containers(scene_cfg, container_states):
                 configs.object_cfg.get_spawner_cfg(
                     file_path=o["file_path"],
                     mass=o["mass"],
-                    semantic_tags=[
-                        ("class", "CONTAINER_BG" if i != 0 else "CONTAINER_MAIN")
-                    ],
+                    semantic_tags=[("class", cntr_class)],
                 ),
             ),
         )
@@ -760,16 +608,6 @@ def get_object_size(object_name, object_metadata, device="cpu"):
         )
 
     return _get_tensor(object_size, device=device, unsqueeze=True)
-
-
-def _get_unique_tags(object_tags):
-    assert isinstance(object_tags, list)
-    if len(object_tags) == 0:
-        return []
-
-    target_tags = set(object_tags[0])
-    other_tags = set(tag for obj in object_tags[1:] for tag in obj)
-    return list(target_tags - other_tags)
 
 
 def get_state_machine(task_cfg, robot_cfg, sm_args={}):
@@ -997,6 +835,15 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
         object_metadata,
         scene_dir,
     )
+    # Check whether the object tags are empty
+    if not object_tags["objects"]:
+        raise ValueError("No object tags found. Skipping simulation.")
+    if (
+        sim_cfg["scene"]["containers"]["n_containers"] > 0
+        and not object_tags["containers"]
+    ):
+        raise ValueError("No container tags found. Skipping simulation.")
+
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=seed)
     # Reset environment at start
     env.reset(seed=seed)
@@ -1183,7 +1030,7 @@ def get_frames(
                 frame = (frame / np.max(frame) * 255).astype(np.uint8)
             if img_name in ["seg", "semantic_segmentation"]:
                 # Assign a color to each semantic class
-                frame = cv2.applyColorMap(frame * 64, cv2.COLORMAP_JET)
+                frame = cv2.applyColorMap(frame * 32, cv2.COLORMAP_JET)
 
             cam_frames[cam_name][img_name].append(frame)
 
@@ -1306,14 +1153,21 @@ def main(args):
         np.random.seed(seed)
         torch.manual_seed(seed)
 
-        env_cfg, object_tags, env_states = simulate(
-            sim_cfg,
-            args.task,
-            args.robot,
-            args.scene_dir,
-            object_metadata,
-            seed,
-        )
+        try:
+            env_cfg, object_tags, env_states = simulate(
+                sim_cfg,
+                args.task,
+                args.robot,
+                args.scene_dir,
+                object_metadata,
+                seed,
+            )
+        except Exception as ex:
+            logging.exception(ex)
+            seed += 1
+            n_simulations += 1
+            continue
+
         # Save the simulation data
         for es in env_states:
             episode_name = get_episode_name(
@@ -1343,6 +1197,8 @@ def main(args):
                     get_frames(es),
                     os.path.join(args.output_dir, "%s.mp4" % episode_name),
                 )
+                logging.debug(object_tags)
+
         # Increment the seed for the next simulation
         seed += 1
         n_simulations += 1

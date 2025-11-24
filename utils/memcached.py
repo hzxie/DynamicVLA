@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-10-21 10:13:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-22 10:35:41
+# @Last Modified at: 2025-11-06 15:24:08
 # @Email:  root@haozhexie.com
 
 import hashlib
@@ -113,7 +113,6 @@ class MCClient:
                 with self._get_mc_client().reserve() as mc:
                     return fn(mc, *args)
             except (pylibmc.ConnectionError, pylibmc.ServerDown) as ex:
-                logging.debug(f"MemCached Stats: {mc.get_stats()}")
                 logging.warning(
                     f"[{i + 1}/{N_TRIES}] MemCached connection error: {ex} while "
                     f"invoking {fn.__name__}."

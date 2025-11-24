@@ -9,14 +9,22 @@ scene:
       rotation: [-90, 0, 180]
       prim_path: "/Robot/SideCamera"
   objects:
-    n_objects: 3
+    n_objects: 1
     mass: 0.05
     prob_rnd_quat: 0.85
     prob_static: 0.5
-    moving_speed: [0.2, 0.6]
+    moving_speed: [0.15, 0.75]
     friction: [0.5, 1.5]
-    prob_init_perturb: 0.5
-    perturb_range: [-30, 30]
+    # perturbation: [-30, 30]
+    perturbation: [0, 0]
+    tag_thresholds:
+      height: 0.1
+      area: 0.1
+      volume: 0.1
+      position_from_left: 0.05
+      position_from_bottom: 0.05
+      distance_from_robot: 0.3
+      velocity: 0.3
     categories:
       - apple
       - avocado
@@ -35,7 +43,7 @@ scene:
       - tangerine
       - tomato
   containers:
-    n_containers: 2
+    n_containers: 1
     mass: 0.1
     categories:
       - bowl

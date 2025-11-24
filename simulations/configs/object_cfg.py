@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-04-16 14:38:58
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-10 21:12:02
+# @Last Modified at: 2025-11-06 09:38:17
 # @Email:  root@haozhexie.com
 
 import isaaclab.sim as sim_utils
@@ -79,14 +79,16 @@ def get_spawner_cfg(
     return spawner_cfg
 
 
-def get_object_init_quat(init_lin_vel: list[float], upright=False, perturb=None) -> list[float]:
+def get_object_init_quat(
+    init_lin_vel: list[float], upright=False, perturbation=None
+) -> list[float]:
 
     lin_vel_angle = np.arctan2(init_lin_vel[1], init_lin_vel[0])
     verticle_angle = np.pi / 2 * np.random.choice([-1, 1])
-    if perturb is not None:
-        lin_vel_angle += np.deg2rad(perturb[0])
-        verticle_angle += np.deg2rad(perturb[1])
-    
+    if perturbation is not None:
+        lin_vel_angle += np.deg2rad(perturbation)
+        verticle_angle += np.deg2rad(perturbation)
+
     quat = scipy.spatial.transform.Rotation.from_euler(
         "xyz",
         [
