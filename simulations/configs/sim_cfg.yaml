@@ -21,8 +21,8 @@ scene:
       height: 0.1
       area: 0.1
       volume: 0.1
-      position_from_left: 0.05
-      position_from_bottom: 0.05
+      position_from_left: 0.1
+      position_from_bottom: 0.1
       distance_from_robot: 0.3
       velocity: 0.3
     categories:
@@ -49,6 +49,7 @@ scene:
       - bowl
       - box
       - plate
+      - placemat
       - tray
 
 camera:
@@ -93,4 +94,3 @@ robots:
     final_pose: [0.373, 0.0, 0.271, -1, 0, 0, 0]
     gripper_length: 0.09
     max_reach_dist: 0.55
-

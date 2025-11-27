@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-11-24 11:06:44
+# @Last Modified at: 2025-11-27 11:22:25
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -942,6 +942,29 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
     )
 
 
+def is_object_stopped(scene_cfg, object_velocity, n_steps=25):
+    init_speed = np.linalg.norm(scene_cfg["object"]["init_state"]["lin_vel"])
+    # The object is stopped within n_steps
+    for i in range(min(n_steps, len(object_velocity))):
+        if init_speed > 1e-2 and np.linalg.norm(object_velocity[i]) < 1e-2:
+            return True
+
+    return False
+
+
+def is_object_direction_changed(scene_cfg, object_velocity, n_steps=25):
+    robot_quat = np.array(scene_cfg["robot"]["init_state"]["rot"])[[1, 2, 3, 0]]
+    init_velocity = scene_cfg["object"]["init_state"]["lin_vel"]
+    init_dir_idx = helpers.get_direction_index(init_velocity, robot_quat)
+    # The object velocity is too different from the initial velocity
+    for i in range(min(n_steps, len(object_velocity))):
+        dir_idx = helpers.get_direction_index(object_velocity[i])
+        if dir_idx != init_dir_idx:
+            return True
+
+    return False
+
+
 def get_episode_name(task, robot, seed, scene_cfg):
     n_objects = len(
         [
@@ -1170,8 +1193,20 @@ def main(args):
 
         # Save the simulation data
         for es in env_states:
+            # Check whether the initial state is changed
+            # 1) The object is stopped within a few steps due to collision
+            # 2) The initial object velocity is changed due to collision
+            env_cfg = env_cfg.to_dict()
+            if is_object_stopped(env_cfg["scene"], es["object_vel"]):
+                continue
+            if is_object_direction_changed(env_cfg["scene"], es["object_vel"]):
+                # Remove direction tags
+                object_tags["objects"] = [
+                    t for t in object_tags["objects"] if not t.endswith("direction")
+                ]
+
             episode_name = get_episode_name(
-                args.task, args.robot, seed, env_cfg.scene.to_dict()
+                args.task, args.robot, seed, env_cfg["scene"]
             )
             logging.info(
                 "Saving episode %s with %d frames."
@@ -1181,7 +1216,6 @@ def main(args):
                 with open(
                     os.path.join(args.output_dir, "%s.json" % episode_name), "w"
                 ) as fp:
-                    env_cfg = env_cfg.to_dict()
                     env_cfg["seed"] = seed
                     env_cfg["instruction"] = {"task": args.task, **object_tags}
                     json.dump(get_object_without_numpy(env_cfg), fp, indent=2)

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-10-03 19:04:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-11-24 10:16:45
+# @Last Modified at: 2025-11-26 16:59:31
 # @Email:  root@haozhexie.com
 
 import math
@@ -161,10 +161,13 @@ def _get_state_tag(object_type, object_states, tag_name, tag_func, tag_threshold
             cur_rank = i + 1
         if cur_rank == 1:
             item["tags"].append(RANK_TAGS["FIRST"][tag_name] % object_name)
-        elif cur_rank == n and n != 1:
+        elif cur_rank == n:
             item["tags"].append(RANK_TAGS["LAST"][tag_name] % object_name)
         elif cur_rank == 2 and n == 3:
             item["tags"].append(RANK_TAGS["MEDIUM"][tag_name] % object_name)
+
+        if n == 2:  # e.g., "tallest" -> "taller"
+            item["tags"][-1] = item["tags"][-1].replace("est", "er")
 
         last_value = cur_value
 
@@ -173,47 +176,55 @@ def _get_state_tag(object_type, object_states, tag_name, tag_func, tag_threshold
 
 def _get_direction_tags(object_type, object_states, robot_quat):
     DIRECTION_TAGS = [
-        "the %s moving in the robot's forward direction",                 # front
-        "the %s moving in the robot's forward-left direction",            # front-left
-        "the %s moving in the robot's left direction",                    # left
-        "the %s moving in the robot's backward-left direction",           # back-left
-        "the %s moving in the robot's backward direction",                # back
-        "the %s moving in the robot's backward-right direction",          # back-right
-        "the %s moving in the robot's right direction",                   # right
-        "the %s moving in the robot's forward-right direction",           # front-right
+        "the %s moving in the robot's forward direction",  # front
+        "the %s moving in the robot's forward-left direction",  # front-left
+        "the %s moving in the robot's left direction",  # left
+        "the %s moving in the robot's backward-left direction",  # back-left
+        "the %s moving in the robot's backward direction",  # back
+        "the %s moving in the robot's backward-right direction",  # back-right
+        "the %s moving in the robot's right direction",  # right
+        "the %s moving in the robot's forward-right direction",  # front-right
     ]
-
     object_name = object_type.rstrip("s")  # singular form
     for state in object_states:
         if "lin_vel" not in state or np.linalg.norm(state["lin_vel"]) < 1e-3:
             state["tags"].append("stationary %s" % object_name)
             continue
 
-        rel_velocity = R.from_quat(robot_quat).inv().as_matrix() @ state["lin_vel"]
-        angle = math.degrees(math.atan2(rel_velocity[1], rel_velocity[0])) % 360
-        # idx = int((angle + 22.5) // 45) % 8  # Old version
-        # front: [345°, 360) U [0°, 15°); back:  [165°, 195°); left:  [75°, 105°); 
-        # right: [255, 285°)
-        if angle >= 345 or angle < 15:
-            idx = 0  # front
-        elif angle >= 15 and angle < 75:
-            idx = 1  # front-left
-        elif angle >= 75 and angle < 105:
-            idx = 2  # left (20°)
-        elif angle >= 105 and angle < 165:
-            idx = 3  # back-left
-        elif angle >= 165 and angle < 195:
-            idx = 4  # back (20°)
-        elif angle >= 195 and angle < 255:
-            idx = 5  # back-right
-        elif angle >= 255 and angle < 285:
-            idx = 6  # right (20°)
-        elif angle >= 285 and angle < 345:
-            idx = 7  # front-right
-
+        idx = get_direction_index(state["lin_vel"], robot_quat)
         state["tags"].append(DIRECTION_TAGS[idx] % object_name)
 
     return object_states
+
+
+def get_direction_index(linear_velocity, robot_quat=None, inverse=True):
+    if robot_quat is not None:
+        linear_velocity = R.from_quat(robot_quat).apply(
+            linear_velocity, inverse=inverse
+        )
+
+    angle = math.degrees(math.atan2(linear_velocity[1], linear_velocity[0])) % 360
+    # idx = int((angle + 22.5) // 45) % 8  # Old version
+    # front: [345°, 360) U [0°, 15°); back:  [165°, 195°); left:  [75°, 105°);
+    # right: [255, 285°)
+    if angle >= 345 or angle < 15:
+        idx = 0  # front (20°)
+    elif angle >= 15 and angle < 75:
+        idx = 1  # front-left
+    elif angle >= 75 and angle < 105:
+        idx = 2  # left (20°)
+    elif angle >= 105 and angle < 165:
+        idx = 3  # back-left
+    elif angle >= 165 and angle < 195:
+        idx = 4  # back (20°)
+    elif angle >= 195 and angle < 255:
+        idx = 5  # back-right
+    elif angle >= 255 and angle < 285:
+        idx = 6  # right (20°)
+    elif angle >= 285 and angle < 345:
+        idx = 7  # front-right
+
+    return idx
 
 
 def _get_unique_tags(object_tags):
