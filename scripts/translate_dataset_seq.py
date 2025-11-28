@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 18:09:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-09 09:44:59
+# @Last Modified at: 2025-11-29 05:16:09
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -26,6 +26,7 @@ sys.path.append(os.path.join(PROJECT_HOME, "simulations"))
 
 import simulations.evaluate as eval
 import simulations.simulate as sim
+import simulations.helpers as helpers
 
 
 def get_camera_config(sim_cfg_file, robot_usd_path):
@@ -144,17 +145,58 @@ def _get_action_tensor(action, num_envs, device):
 
 
 def is_cam_occluded(env_states):
-    TGT_OBJECT_ID = 3
-
+    semantic_tags = helpers.get_semantic_tags()
     for key in env_states.keys():
         if not key.endswith("_seg"):
             continue
 
         es = np.stack(env_states[key])
-        if TGT_OBJECT_ID not in np.unique(es):
+        if semantic_tags["OBJECT_MAIN"] not in np.unique(es):
             return True
 
     return False
+
+
+def is_object_occluded(scene_cfg, env_states, object_type, n_steps=25):
+    assert object_type in ["object", "container"]
+
+    semantic_tags = helpers.get_semantic_tags()
+    semantic_tags_rev = {v: k for k, v in semantic_tags.items()}
+    n_exp_objects = len([k for k in scene_cfg.keys() if k.startswith(object_type)])
+    for key in env_states.keys():
+        if not key.endswith("_seg") or key.startswith("wrist_cam"):
+            continue
+
+        es = np.stack(env_states[key])
+        n_frames = es.shape[0]
+        for i in range(2, min(n_steps, n_frames)):  # Skip  the first n frames (init)
+            semantic_labels = np.unique(es[i])
+            n_act_objects = len(
+                [
+                    sl
+                    for sl in semantic_labels
+                    if semantic_tags_rev.get(sl, "").startswith(object_type.upper())
+                ]
+            )
+            if n_act_objects < n_exp_objects:
+                print(key, i, object_type, n_act_objects, n_exp_objects)
+                return True
+
+    return False
+
+
+def remove_spatial_tags(tags):
+    # _get_state_tag() in simulations/helpers.py
+    KEYWORDS = [
+        "tall",
+        "short",
+        "height",
+        "aera",
+        "volume",
+        "at the start",
+        "initial velocity",
+    ]
+    return [t for t in tags if not any(kw in t for kw in KEYWORDS)]
 
 
 def main(args):
@@ -217,6 +259,15 @@ def main(args):
 
         env_states = simulate(env, env_states, args.debug)
         for env_state, success in env_states:
+            if is_object_occluded(env_cfg["scene"], env_state, "object"):
+                env_cfg["instruction"]["objects"] = remove_spatial_tags(
+                    env_cfg["instruction"]["objects"]
+                )
+            if is_object_occluded(env_cfg["scene"], env_state, "container"):
+                env_cfg["instruction"]["containers"] = remove_spatial_tags(
+                    env_cfg["instruction"]["containers"]
+                )
+
             if args.save and not is_cam_occluded(env_state):
                 assert success or args.debug  # Only save successful episodes
                 with open(

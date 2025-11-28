@@ -4,14 +4,51 @@
 # @Author: Haozhe Xie
 # @Date:   2025-10-03 19:04:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-11-26 16:59:31
+# @Last Modified at: 2025-11-28 18:53:30
 # @Email:  root@haozhexie.com
 
 import math
 import numpy as np
 import torch
 
+from PIL import Image
 from scipy.spatial.transform import Rotation as R
+
+
+def get_semantic_tags():
+    KNOWN_TAGS = {"ROBOT": 1, "OBJECT_MAIN": 2, "CONTAINER_MAIN": 3}
+    for i in range(8):  # Support up to 8 background objects/containers
+        KNOWN_TAGS["OBJECT%02d" % (i + 1)] = 4 + i
+        KNOWN_TAGS["CONTAINER%02d" % (i + 1)] = 12 + i
+
+    return KNOWN_TAGS
+
+
+def get_semantic_map(mask):
+    PALETTE = np.array([[i, i, i] for i in range(256)])
+    PALETTE[:16] = np.array(
+        [
+            [0, 0, 0],
+            [128, 0, 0],
+            [0, 128, 0],
+            [128, 128, 0],
+            [0, 0, 128],
+            [128, 0, 128],
+            [0, 128, 128],
+            [128, 128, 128],
+            [64, 0, 0],
+            [191, 0, 0],
+            [64, 128, 0],
+            [191, 128, 0],
+            [64, 0, 128],
+            [191, 0, 128],
+            [64, 128, 128],
+            [191, 128, 128],
+        ]
+    )
+    mask = Image.fromarray(mask.astype(np.uint8), mode="P")
+    mask.putpalette(PALETTE.reshape(-1).tolist())
+    return np.array(mask.convert("RGB"))
 
 
 def get_object_relative_bbox(object_size, object_quat_w, robot_quat):
@@ -154,20 +191,22 @@ def _get_state_tag(object_type, object_states, tag_name, tag_func, tag_threshold
     sorted_states = sorted(object_states, key=tag_func, reverse=True)
     last_value = tag_func(sorted_states[-1])
     cur_rank = 1
-    for i, item in enumerate(sorted_states):
-        object_name = object_type.rstrip("s")  # singular form
-        cur_value = tag_func(item)
+    for i, state in enumerate(sorted_states):
+        object_name = (
+            object_type.rstrip("s") if object_type == "objects" else state["category"]
+        )
+        cur_value = tag_func(state)
         if abs(cur_value - last_value) > tag_thresholds.get(tag_name.lower()):
             cur_rank = i + 1
         if cur_rank == 1:
-            item["tags"].append(RANK_TAGS["FIRST"][tag_name] % object_name)
+            state["tags"].append(RANK_TAGS["FIRST"][tag_name] % object_name)
         elif cur_rank == n:
-            item["tags"].append(RANK_TAGS["LAST"][tag_name] % object_name)
+            state["tags"].append(RANK_TAGS["LAST"][tag_name] % object_name)
         elif cur_rank == 2 and n == 3:
-            item["tags"].append(RANK_TAGS["MEDIUM"][tag_name] % object_name)
+            state["tags"].append(RANK_TAGS["MEDIUM"][tag_name] % object_name)
 
         if n == 2:  # e.g., "tallest" -> "taller"
-            item["tags"][-1] = item["tags"][-1].replace("est", "er")
+            state["tags"][-1] = state["tags"][-1].replace("est", "er")
 
         last_value = cur_value
 
@@ -176,17 +215,19 @@ def _get_state_tag(object_type, object_states, tag_name, tag_func, tag_threshold
 
 def _get_direction_tags(object_type, object_states, robot_quat):
     DIRECTION_TAGS = [
-        "the %s moving in the robot's forward direction",  # front
-        "the %s moving in the robot's forward-left direction",  # front-left
-        "the %s moving in the robot's left direction",  # left
-        "the %s moving in the robot's backward-left direction",  # back-left
-        "the %s moving in the robot's backward direction",  # back
-        "the %s moving in the robot's backward-right direction",  # back-right
-        "the %s moving in the robot's right direction",  # right
-        "the %s moving in the robot's forward-right direction",  # front-right
+        "the %s moving in the robot's forward direction",
+        "the %s moving in the robot's forward-left direction",
+        "the %s moving in the robot's left direction",
+        "the %s moving in the robot's backward-left direction",
+        "the %s moving in the robot's backward direction",
+        "the %s moving in the robot's backward-right direction",
+        "the %s moving in the robot's right direction",
+        "the %s moving in the robot's forward-right direction",
     ]
-    object_name = object_type.rstrip("s")  # singular form
     for state in object_states:
+        object_name = (
+            object_type.rstrip("s") if object_type == "objects" else state["category"]
+        )
         if "lin_vel" not in state or np.linalg.norm(state["lin_vel"]) < 1e-3:
             state["tags"].append("stationary %s" % object_name)
             continue

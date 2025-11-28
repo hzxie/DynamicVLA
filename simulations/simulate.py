@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-11-27 11:22:25
+# @Last Modified at: 2025-11-28 17:09:28
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -566,7 +566,7 @@ def _set_up_scene_objects(scene_cfg, object_states):
                     file_path=o["file_path"],
                     mass=o["mass"],
                     friction=o.get("friction", 0.0),
-                    semantic_tags=[("class", "OBJECT_BG")],
+                    semantic_tags=[("class", "OBJECT%02d" % i)],
                 ),
             ),
         )
@@ -580,7 +580,7 @@ def _set_up_scene_containers(scene_cfg, container_states):
     assert container_states, "No container states provided."
     for i, o in enumerate(container_states):
         logging.info("Using container object: %s" % os.path.basename(o["file_path"]))
-        cntr_class = "CONTAINER_BG" if i != 0 else "CONTAINER_MAIN"
+        cntr_class = "CONTAINER%02d" % i if i != 0 else "CONTAINER_MAIN"
         scene_cfg = configs.scene_cfg.add_object(
             scene_cfg,
             "container%02d" % i if i != 0 else "container",
@@ -749,26 +749,22 @@ def get_camera_views(sensors, views=["rgb"]):
 
 
 def _get_semantic_segmentation(rgba_seg_maps, semantic_tags):
-    KNOWN_TAGS = {
-        "ROBOT": 1,
-        "OBJECT_BG": 2,
-        "OBJECT_MAIN": 3,
-        "CONTAINER_BG": 4,
-        "CONTAINER_MAIN": 5,
-    }
+    known_tags = helpers.get_semantic_tags()
     seg_maps = np.zeros_like(rgba_seg_maps[..., :1], dtype=np.uint8)
 
     # Iterate over each image (since the tags may not be the same for each image)
     for si, st in enumerate(semantic_tags):
         for color, tag in st.items():
             tag_name = tag["class"].upper()
-            if tag_name not in KNOWN_TAGS.keys():
-                # logging.warning("Unknown semantic tag %s.", tag)
+            if tag_name in ["BACKGROUND", "UNLABELLED"]:
+                continue
+            elif tag_name not in known_tags.keys():
+                logging.warning("Unknown semantic tag %s.", tag)
                 continue
 
             # Convert the color string to a tuple (Unbelievable string here!)
             mask = np.all(rgba_seg_maps[si] == ast.literal_eval(color), axis=-1)
-            seg_maps[si][mask] = KNOWN_TAGS[tag_name]
+            seg_maps[si][mask] = known_tags[tag_name]
 
     return seg_maps
 
@@ -1053,7 +1049,7 @@ def get_frames(
                 frame = (frame / np.max(frame) * 255).astype(np.uint8)
             if img_name in ["seg", "semantic_segmentation"]:
                 # Assign a color to each semantic class
-                frame = cv2.applyColorMap(frame * 32, cv2.COLORMAP_JET)
+                frame = helpers.get_semantic_map(frame[..., 0])
 
             cam_frames[cam_name][img_name].append(frame)
 
