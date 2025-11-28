@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 18:09:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-11-29 05:16:09
+# @Last Modified at: 2025-11-29 05:56:06
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -169,7 +169,7 @@ def is_object_occluded(scene_cfg, env_states, object_type, n_steps=25):
 
         es = np.stack(env_states[key])
         n_frames = es.shape[0]
-        for i in range(2, min(n_steps, n_frames)):  # Skip  the first n frames (init)
+        for i in range(3, min(n_steps, n_frames)):  # Skip  the first n frames (init)
             semantic_labels = np.unique(es[i])
             n_act_objects = len(
                 [
@@ -259,16 +259,12 @@ def main(args):
 
         env_states = simulate(env, env_states, args.debug)
         for env_state, success in env_states:
-            if is_object_occluded(env_cfg["scene"], env_state, "object"):
-                env_cfg["instruction"]["objects"] = remove_spatial_tags(
-                    env_cfg["instruction"]["objects"]
-                )
-            if is_object_occluded(env_cfg["scene"], env_state, "container"):
-                env_cfg["instruction"]["containers"] = remove_spatial_tags(
-                    env_cfg["instruction"]["containers"]
-                )
-
-            if args.save and not is_cam_occluded(env_state):
+            if (
+                args.save
+                and not is_cam_occluded(env_state)
+                and not is_object_occluded(env_cfg["scene"], env_state, "object")
+                and not is_object_occluded(env_cfg["scene"], env_state, "container")
+            ):
                 assert success or args.debug  # Only save successful episodes
                 with open(
                     os.path.join(args.output_dir, "%s-tr.json" % seq[:-3]), "w"
@@ -282,6 +278,14 @@ def main(args):
                         fp.create_dataset(k, data=v, compression="gzip")
 
             if args.debug and args.enable_cameras:
+                logging.debug(
+                    "Cam Occluded: %s; Object Occluded: %s; Container Occluded: %s"
+                    % (
+                        is_cam_occluded(env_state),
+                        is_object_occluded(env_cfg["scene"], env_state, "object"),
+                        is_object_occluded(env_cfg["scene"], env_state, "container"),
+                    )
+                )
                 sim.dump_video(
                     sim.get_frames(env_state, ["ee_pos", "object_pos", "object_vel"]),
                     os.path.join(

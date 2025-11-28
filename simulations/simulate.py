@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-11-28 17:09:28
+# @Last Modified at: 2025-11-29 05:56:11
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -566,7 +566,7 @@ def _set_up_scene_objects(scene_cfg, object_states):
                     file_path=o["file_path"],
                     mass=o["mass"],
                     friction=o.get("friction", 0.0),
-                    semantic_tags=[("class", "OBJECT%02d" % i)],
+                    semantic_tags=[("class", "OBJECT%02d" % (i + 1))],
                 ),
             ),
         )
@@ -580,7 +580,7 @@ def _set_up_scene_containers(scene_cfg, container_states):
     assert container_states, "No container states provided."
     for i, o in enumerate(container_states):
         logging.info("Using container object: %s" % os.path.basename(o["file_path"]))
-        cntr_class = "CONTAINER%02d" % i if i != 0 else "CONTAINER_MAIN"
+        cntr_class = "CONTAINER%02d" % (i + 1) if i != 0 else "CONTAINER_MAIN"
         scene_cfg = configs.scene_cfg.add_object(
             scene_cfg,
             "container%02d" % i if i != 0 else "container",
@@ -759,7 +759,7 @@ def _get_semantic_segmentation(rgba_seg_maps, semantic_tags):
             if tag_name in ["BACKGROUND", "UNLABELLED"]:
                 continue
             elif tag_name not in known_tags.keys():
-                logging.warning("Unknown semantic tag %s.", tag)
+                logging.warning("Unknown semantic tag %s.", tag_name)
                 continue
 
             # Convert the color string to a tuple (Unbelievable string here!)
