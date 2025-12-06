@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-07-28 18:09:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-11-29 05:56:06
+# @Last Modified at: 2025-12-06 08:35:01
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -179,7 +179,6 @@ def is_object_occluded(scene_cfg, env_states, object_type, n_steps=25):
                 ]
             )
             if n_act_objects < n_exp_objects:
-                print(key, i, object_type, n_act_objects, n_exp_objects)
                 return True
 
     return False
@@ -264,6 +263,7 @@ def main(args):
                 and not is_cam_occluded(env_state)
                 and not is_object_occluded(env_cfg["scene"], env_state, "object")
                 and not is_object_occluded(env_cfg["scene"], env_state, "container")
+                and len(env_cfg["instruction"]["objects"]) != 0
             ):
                 assert success or args.debug  # Only save successful episodes
                 with open(
