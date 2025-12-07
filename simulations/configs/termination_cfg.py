@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-09-26 10:24:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-04 16:53:05
+# @Last Modified at: 2025-12-06 10:45:26
 # @Email:  root@haozhexie.com
 
 import torch
@@ -14,17 +14,19 @@ from isaaclab.utils import configclass
 from isaaclab_tasks.manager_based.manipulation.lift import mdp
 
 from simulations import helpers
+from typing import Dict
 
 
 def is_object_picked(
     env: ManagerBasedRLEnv,
     goal_position: torch.Tensor,
     tolerance: float,
-    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    objects: list[str] = ["object"],
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    object = env.scene[object_cfg.name]
+    assert len(objects) == 1, "Only single object picking is supported."
+    object = env.scene[objects[0]]
     ee_frame = env.scene[ee_frame_cfg.name]
     robot = env.scene[robot_cfg.name]
 
@@ -41,53 +43,72 @@ def is_object_picked(
     return object_eef_dist < tolerance and eef_goal_dist < tolerance
 
 
-def is_object_placed(
+def are_objects_placed(
     env: ManagerBasedRLEnv,
     goal_position: torch.Tensor,
-    object_size: torch.Tensor,
+    objects: list[str],
+    object_sizes: Dict[str, torch.Tensor],
     container_size: torch.Tensor,
     tolerance: float,
-    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
     container_cfg: SceneEntityCfg = SceneEntityCfg("container"),
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    object = env.scene[object_cfg.name]
+    objects_placed = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
     container = env.scene[container_cfg.name]
     ee_frame = env.scene[ee_frame_cfg.name]
     robot = env.scene[robot_cfg.name]
-
     env_origins = robot.data.root_pos_w
     robot_quat = robot.data.root_quat_w
-    object_position = helpers.get_robot_relative_position(
-        object.data.root_pos_w - env_origins, robot_quat
-    )
-    object_size = helpers.get_object_relative_bbox(
-        object_size, object.data.root_quat_w, robot_quat
-    )
     container_position = helpers.get_robot_relative_position(
         container.data.root_pos_w - env_origins, robot_quat
     )
     containier_size = helpers.get_object_relative_bbox(
         container_size, container.data.root_quat_w, robot_quat
     )
-    object_placed = helpers.is_object_placed(
-        object_position,
-        object_size,
-        container_position,
-        containier_size,
-    )
+    for obj in objects:
+        object = env.scene[obj]
+        object_position = helpers.get_robot_relative_position(
+            object.data.root_pos_w - env_origins, robot_quat
+        )
+        object_size = helpers.get_object_relative_bbox(
+            object_sizes[obj], object.data.root_quat_w, robot_quat
+        )
+        objects_placed = torch.logical_and(
+            objects_placed,
+            helpers.is_object_placed(
+                object_position,
+                object_size,
+                container_position,
+                containier_size,
+            ),
+        )
 
     goal_position_r = goal_position.to(device=env_origins.device)
     eef_position_r = helpers.get_robot_relative_position(
         ee_frame.data.target_pos_w[..., 0, :] - env_origins, robot_quat
     )
     eef_goal_dist = torch.norm(goal_position_r - eef_position_r, dim=1)
-    return torch.logical_and(object_placed, eef_goal_dist < tolerance)
+    return torch.logical_and(objects_placed, eef_goal_dist < tolerance)
+
+
+def are_objects_dropped(
+    env: ManagerBasedRLEnv,
+    minimum_height: float,
+    objects: list[str],
+) -> torch.Tensor:
+    object_dropped = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    for obj in objects:
+        _dropped = mdp.root_height_below_minimum(
+            env, minimum_height, SceneEntityCfg(obj)
+        )
+        object_dropped = torch.logical_or(object_dropped, _dropped)
+
+    return object_dropped
 
 
 def get_done_term(terms: list[str]) -> str | None:
-    DONE_TERMS = ["object_picked", "object_placed"]
+    DONE_TERMS = ["object_picked", "objects_placed"]
 
     for term in DONE_TERMS:
         if term in terms:
@@ -102,10 +123,10 @@ class TerminationsCfg:
 
     time_out = TerminationTermCfg(func=mdp.time_out, time_out=True)
     object_dropping = TerminationTermCfg(
-        func=mdp.root_height_below_minimum,
+        func=are_objects_dropped,
         params={
             "minimum_height": 0.1,
-            "asset_cfg": SceneEntityCfg("object"),
+            "objects": ["object"],
         },
         time_out=True,
     )
@@ -126,11 +147,12 @@ class PickTerminationsCfg(TerminationsCfg):
 class PlaceTerminationsCfg(TerminationsCfg):
     """Termination terms for the Pick task."""
 
-    object_placed = TerminationTermCfg(
-        func=is_object_placed,
+    objects_placed = TerminationTermCfg(
+        func=are_objects_placed,
         params={
             "goal_position": None,
-            "object_size": None,
+            "objects": None,
+            "object_sizes": None,
             "container_size": None,
             "tolerance": 0.015,
         },
@@ -151,11 +173,15 @@ def get_termination_cfg(task: str, args: dict = {}) -> TerminationsCfg:
     if task == "pick":
         cfg = PickTerminationsCfg()
         done_term = cfg.object_picked
-    elif task == "place":
+    elif task in ["place", "long_horizon"]:
         cfg = PlaceTerminationsCfg()
-        done_term = cfg.object_placed
+        done_term = cfg.objects_placed
     else:
         cfg = TerminationsCfg()
+
+    for k, v in args.items():
+        if k in cfg.object_dropping.params:
+            cfg.object_dropping.params[k] = v
 
     # Update the parameters of the done term
     if done_term is not None:
