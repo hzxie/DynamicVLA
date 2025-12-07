@@ -194,6 +194,7 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
         ),
         "objects": objects,
         "object_sizes": object_sizes,
+        "max_reach_dist": sim_cfg["robots"][robot]["max_reach_dist"],
     }
     if hasattr(env_cfg.scene, "container"):
         terimation_args["container_size"] = get_object_size(
