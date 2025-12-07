@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-10-03 19:04:52
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-11-28 18:53:30
+# @Last Modified at: 2025-12-07 14:26:51
 # @Email:  root@haozhexie.com
 
 import math
@@ -56,6 +56,7 @@ def get_object_relative_bbox(object_size, object_quat_w, robot_quat):
 
     batch_size = object_quat_w.size(0)
     object_size_rot = torch.eye(3, device=object_size.device) * object_size
+    # object_size_rot = torch.eye(3, device=object_size.device).unsqueeze(0) * object_size.unsqueeze(-1)
     object_size_x_rot = quat_apply(
         object_quat_w,
         object_size_rot[0:1, :].repeat(batch_size, 1),

@@ -4,11 +4,12 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-12-06 08:34:38
+# @Last Modified at: 2025-12-07 14:30:05
 # @Email:  root@haozhexie.com
 
 import argparse
 import ast
+import copy
 import importlib
 import json
 import logging
@@ -168,6 +169,21 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
             env_cfg.scene, object_states["containers"]
         )
 
+    # Determine the objects to be used in the task
+    objects = []
+    if task == "long_horizon":
+        objects = [key for key in vars(env_cfg.scene) if key.startswith("object")]
+    else:
+        objects = ["object"]
+
+    object_sizes = {
+        o: get_object_size(
+            os.path.basename(getattr(env_cfg.scene, o).spawn.usd_path),
+            object_metadata,
+            device=sim_cfg["device"],
+        )
+        for o in objects
+    }
     # Modify task-specific parameters
     env_cfg.episode_length_s = sim_cfg["tasks"][task]["episode_length"]
     terimation_args = {
@@ -176,11 +192,8 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
             dtype=torch.float32,
             device=sim_cfg["device"],
         ),
-        "object_size": get_object_size(
-            os.path.basename(env_cfg.scene.object.spawn.usd_path),
-            object_metadata,
-            device=sim_cfg["device"],
-        ),
+        "objects": objects,
+        "object_sizes": object_sizes,
     }
     if hasattr(env_cfg.scene, "container"):
         terimation_args["container_size"] = get_object_size(
@@ -203,8 +216,11 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
         )
         for k, v in object_states.items()
     }
+    if task == "long_horizon":
+        object_tags["objects"] = ["entire set of objects"]
+
     logging.debug("Object tags: %s" % object_tags)
-    return env_cfg, object_tags
+    return env_cfg, object_tags, objects, object_sizes
 
 
 def _set_up_scene_cameras(scene_cfg, sim_cfg, robot):
@@ -655,6 +671,9 @@ def get_curr_state(
     robot_quat=None,
     device="cpu",
 ):
+    # _get_merged_object_state = lambda object_state, key: torch.cat(
+    #     [getattr(os, key)[i:i+1] for i, os in enumerate(object_state)], dim=0
+    # )
     curr_state = {}
     if ee_state is not None:
         curr_state["end_effector"] = {
@@ -668,24 +687,22 @@ def get_curr_state(
     if robot_joint_pos is not None:
         curr_state["joints"] = robot_joint_pos
     if object_state is not None:
+        # object_root_pos_w = _get_merged_object_state(object_state, "root_pos_w")
+        # object_root_quat_w = _get_merged_object_state(object_state, "root_quat_w")
+        # object_root_lin_vel_w = _get_merged_object_state(object_state, "root_lin_vel_w")
         curr_state["object"] = {
             "pos": helpers.get_robot_relative_position(
                 object_state.root_pos_w - env_origins, robot_quat
             ),
-            "quat": _get_robot_relative_quaternion(
-                object_state.root_quat_w, robot_quat
-            ),
+            "quat": _get_robot_relative_quaternion(object_state.root_quat_w, robot_quat),
             "velocity": helpers.get_robot_relative_position(
                 object_state.root_lin_vel_w, robot_quat
             ),
         }
-    if object_size is not None:
-        if "object" not in curr_state:
-            curr_state["object"] = {}
-
-        curr_state["object"]["size"] = helpers.get_object_relative_bbox(
-            object_size, object_state.root_quat_w, robot_quat
-        )
+        if object_size is not None:
+            curr_state["object"]["size"] = helpers.get_object_relative_bbox(
+                object_size, object_state.root_quat_w, robot_quat
+            )
     if container_state is not None:
         curr_state["container"] = {
             "pos": helpers.get_robot_relative_position(
@@ -768,6 +785,25 @@ def _get_semantic_segmentation(rgba_seg_maps, semantic_tags):
     return seg_maps
 
 
+def get_next_object(scene_objects, scene, env_idx=None):
+    next_object = []  # next object index for each environment
+    n_envs = len(scene_objects)
+    for i in range(n_envs):
+        if len(scene_objects[i]) == 0 or (env_idx is not None and i != env_idx):
+            next_object.append(None)
+            continue
+
+        objects = scene_objects[i]
+        objects_velocity = torch.cat(
+            [scene[o].data.root_lin_vel_w[i : i + 1] for o in objects], dim=0
+        )
+        speed = torch.norm(objects_velocity, dim=-1)
+        fastest_index = torch.argmax(speed, dim=0).item()
+        next_object.append(fastest_index)
+
+    return next_object if env_idx is None else next_object[env_idx]
+
+
 def get_env_states(states, n_envs=1):
     KEYS = {
         "sm_state": ("next_state", "sm_state"),
@@ -823,7 +859,7 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
     import configs.termination_cfg
 
     # Create a new environment
-    env_cfg, object_tags = get_env_cfg(
+    env_cfg, object_tags, objects, object_sizes = get_env_cfg(
         sim_cfg,
         task,
         robot,
@@ -844,11 +880,6 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
     env.reset(seed=seed)
 
     # Determine the object size (without transformation)
-    object_size = get_object_size(
-        os.path.basename(env_cfg.scene.object.spawn.usd_path),
-        object_metadata,
-        env.unwrapped.device,
-    )
     if "container" in env.unwrapped.scene.keys():
         container_data = env.unwrapped.scene["container"].data
         container_size = get_object_size(
@@ -883,27 +914,58 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
         env.unwrapped.scene["object"],
         n_envs=env.unwrapped.num_envs,
     )
+
     # Simulation loop
     env_states = []
     term_mgr = env.env.termination_manager
     done_term = configs.termination_cfg.get_done_term(term_mgr.active_terms)
+
+    scene_objects = [copy.deepcopy(objects) for _ in range(env.unwrapped.num_envs)]
+    curr_object_idx = get_next_object(scene_objects, env.unwrapped.scene)
     while not term_mgr.dones.all():
         # Add an option to disable the state machine to accelerate the simulation
         if sim_cfg["disable_sm"]:
             env.step(torch.from_numpy(env.action_space.sample()))
             continue
 
+        curr_object = [objects[coi] for coi in curr_object_idx]
+        # Determine the current object to manipulate
         curr_state = get_curr_state(
             env.unwrapped.scene["ee_frame"].data,
             env.unwrapped.scene.state["articulation"]["robot"]["joint_position"],
-            env.unwrapped.scene["object"].data,
-            object_size,
+            [env.unwrapped.scene[co].data for co in curr_object][0],  # TODO: remove [0]
+            [object_sizes[co] for co in curr_object][0],  # TODO: remove [0]
             container_data,
             container_size,
             env.unwrapped.scene["robot"].data.root_pos_w,
             env.unwrapped.scene["robot"].data.root_quat_w,
             env.unwrapped.device,
         )
+        if task == "long_horizon":
+            object_placed = helpers.is_object_placed(
+                curr_state["object"]["pos"],
+                curr_state["object"]["size"],
+                curr_state["container"]["pos"],
+                curr_state["container"]["size"],
+            )
+            if object_placed.any():
+                for env_idx, op in enumerate(object_placed):
+                    if not op or len(scene_objects[env_idx]) < 2:
+                        continue
+
+                    scene_objects[env_idx].remove(curr_object[env_idx])
+                    curr_object_idx[env_idx] = get_next_object(
+                        scene_objects, env.unwrapped.scene, env_idx
+                    )
+                    logging.debug(
+                        "[Env%02d] Object %s placed. Next object: %s."
+                        % (
+                            env_idx,
+                            curr_object[env_idx],
+                            scene_objects[env_idx][curr_object_idx[env_idx]],
+                        )
+                    )
+
         # NOTE: state format in xyz, quat (wxyz), gripper (-1/1)
         next_state = state_machine.compute(curr_state)
 
@@ -911,12 +973,12 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
             env.unwrapped.scene.sensors, ["rgb", "depth", "seg"]
         )
         env.step(next_state["action"])
-        # Save current env. states (camera views, robot states, and object states)
         env_states.append(
             {
                 "cam_views": cam_views,
                 "curr_state": curr_state,
                 "next_state": next_state,
+                "curr_obj_idx": curr_object_idx,
                 "is_done": term_mgr.dones,
             }
         )

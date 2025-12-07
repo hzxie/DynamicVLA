@@ -14,6 +14,7 @@ scene:
     prob_rnd_quat: 0.85
     prob_static: 0.5
     moving_speed: [0.15, 0.75]
+    # moving_speed: [0.05, 0.15]
     friction: [0.5, 1.5]
     # perturbation: [-30, 30]
     perturbation: [0, 0]
@@ -46,11 +47,11 @@ scene:
     n_containers: 1
     mass: 0.1
     categories:
-      - bowl
+      # - bowl
       - box
-      - plate
-      - placemat
-      - tray
+      # - plate
+      # - placemat
+      # - tray
 
 camera:
   width: 480
@@ -82,6 +83,9 @@ tasks:
   place:
     sm: "state_machines.place_sm.PlaceStateMachine"
     episode_length: 12
+  long_horizon:
+    sm: "state_machines.place_sm.PlaceStateMachine"
+    episode_length: 20
 
 robots:
   franka:
