@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-12-07 14:30:05
+# @Last Modified at: 2025-12-08 19:19:42
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -695,7 +695,9 @@ def get_curr_state(
             "pos": helpers.get_robot_relative_position(
                 object_state.root_pos_w - env_origins, robot_quat
             ),
-            "quat": _get_robot_relative_quaternion(object_state.root_quat_w, robot_quat),
+            "quat": _get_robot_relative_quaternion(
+                object_state.root_quat_w, robot_quat
+            ),
             "velocity": helpers.get_robot_relative_position(
                 object_state.root_lin_vel_w, robot_quat
             ),
@@ -923,13 +925,13 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
 
     scene_objects = [copy.deepcopy(objects) for _ in range(env.unwrapped.num_envs)]
     curr_object_idx = get_next_object(scene_objects, env.unwrapped.scene)
+    curr_object = [so[coi] for so, coi in zip(scene_objects, curr_object_idx)]
     while not term_mgr.dones.all():
         # Add an option to disable the state machine to accelerate the simulation
         if sim_cfg["disable_sm"]:
             env.step(torch.from_numpy(env.action_space.sample()))
             continue
 
-        curr_object = [objects[coi] for coi in curr_object_idx]
         # Determine the current object to manipulate
         curr_state = get_curr_state(
             env.unwrapped.scene["ee_frame"].data,
@@ -958,13 +960,12 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
                     curr_object_idx[env_idx] = get_next_object(
                         scene_objects, env.unwrapped.scene, env_idx
                     )
+                    _curr_object = curr_object[env_idx]
+                    _next_object = scene_objects[env_idx][curr_object_idx[env_idx]]
+                    curr_object[env_idx] = _next_object
                     logging.debug(
                         "[Env%02d] Object %s placed. Next object: %s."
-                        % (
-                            env_idx,
-                            curr_object[env_idx],
-                            scene_objects[env_idx][curr_object_idx[env_idx]],
-                        )
+                        % (env_idx, _curr_object, _next_object)
                     )
 
         # NOTE: state format in xyz, quat (wxyz), gripper (-1/1)

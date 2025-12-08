@@ -124,11 +124,9 @@ def are_objects_unreachable(
         )
         obj_dist = torch.norm(object_position)
         object_unreachable = torch.logical_or(
-            object_unreachable,
-            obj_dist > max_reach_dist
+            object_unreachable, obj_dist > max_reach_dist
         )
     return object_unreachable
-
 
 
 def get_done_term(terms: list[str]) -> str | None:
