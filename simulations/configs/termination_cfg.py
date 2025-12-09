@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-09-26 10:24:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-12-06 10:45:26
+# @Last Modified at: 2025-12-09 18:54:07
 # @Email:  root@haozhexie.com
 
 import torch
@@ -126,6 +126,7 @@ def are_objects_unreachable(
         object_unreachable = torch.logical_or(
             object_unreachable, obj_dist > max_reach_dist
         )
+
     return object_unreachable
 
 
@@ -152,14 +153,14 @@ class TerminationsCfg:
         },
         time_out=True,
     )
-    object_unreachable = TerminationTermCfg(
-        func=are_objects_unreachable,
-        params={
-            "max_reach_dist": 0,
-            "objects": ["object"],
-        },
-        time_out=True,
-    )
+    # object_unreachable = TerminationTermCfg(
+    #     func=are_objects_unreachable,
+    #     params={
+    #         "max_reach_dist": 0,
+    #         "objects": ["object"],
+    #     },
+    #     time_out=True,
+    # )
 
 
 @configclass
@@ -212,8 +213,8 @@ def get_termination_cfg(task: str, args: dict = {}) -> TerminationsCfg:
     for k, v in args.items():
         if k in cfg.object_dropping.params:
             cfg.object_dropping.params[k] = v
-        if k in cfg.object_unreachable.params:
-            cfg.object_unreachable.params[k] = v
+        # if k in cfg.object_unreachable.params:
+        #     cfg.object_unreachable.params[k] = v
 
     # Update the parameters of the done term
     if done_term is not None:
