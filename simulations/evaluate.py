@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-22 18:48:22
+# @Last Modified at: 2025-12-09 18:49:13
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -143,16 +143,35 @@ def _get_terimation_cfg(cfg, tolerance, device):
     if "object_picked" in cfg:
         task = "pick"
         args = cfg["object_picked"]["params"]
+    elif "objects_placed" in cfg:
+        task = "place"
+        args = cfg["objects_placed"]["params"]
     elif "object_placed" in cfg:
         task = "place"
+        # Competible with single-object placement (legacy implementation)
         args = cfg["object_placed"]["params"]
+        args["objects"] = ["object"]
+        args["object_sizes"] = {"object": args["object_size"]}
+        del args["object_size"]
     else:
         raise NotImplementedError("Unsupported termination config.")
 
     args["tolerance"] = tolerance
     for k, v in args.items():
-        if isinstance(v, list):
+        # Tensorize the arguments
+        if isinstance(v, (int, float)) or (
+            isinstance(v, list) and all(isinstance(x, str) for x in v)
+        ):
+            args[k] = v
+        elif isinstance(v, list):
             args[k] = torch.tensor(v, dtype=torch.float32, device=device)
+        elif isinstance(v, dict):
+            args[k] = {
+                _k: torch.tensor(_v, dtype=torch.float32, device=device)
+                for _k, _v in v.items()
+            }
+        else:
+            raise ValueError("Unsupported termination argument type: %s" % type(v))
 
     return configs.termination_cfg.get_termination_cfg(task, args)
 
