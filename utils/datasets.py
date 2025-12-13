@@ -288,14 +288,14 @@ class LeRobotDataset(torch.utils.data.Dataset):
 
         if self.delta_action:
             act_dim = item["action"].shape[-1] - 1
-            if "observation.state" in self.delta_indices:
+            if self.delta_indices is not None and "observation.state" in self.delta_indices:
                 curr_indice = [i == 0 for i in self.delta_indices["observation.state"]]
                 curr_state = item["observation.state"][curr_indice, :act_dim]
             else:
                 curr_state = item["observation.state"][..., :act_dim]
 
             # Only delta the XYZ and rotation components of the action
-            item["action"][:, :act_dim] -= curr_state
+            item["action"][..., :act_dim] -= curr_state
 
         # Add task as a string
         task_idx = episode["task_index"][frame_idx].item()
