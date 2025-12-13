@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-12-09 18:49:13
+# @Last Modified at: 2025-12-10 19:01:53
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -477,7 +477,7 @@ def main(simulation_app, args):
     # Set up Zero MQ context and sockets
     obs_socket, act_socket = get_zmq_sockets(args.host, args.img_port, args.act_port)
     logging.info(
-        "ZeroMQs are listensing on %s:%d for images and %s:%d for actions"
+        "ZeroMQs are listening on %s:%d for images and %s:%d for actions"
         % (args.host, args.img_port, args.host, args.act_port)
     )
 

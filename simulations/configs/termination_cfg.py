@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-09-26 10:24:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-12-09 18:54:07
+# @Last Modified at: 2025-12-11 06:53:23
 # @Email:  root@haozhexie.com
 
 import torch
@@ -204,7 +204,7 @@ def get_termination_cfg(task: str, args: dict = {}) -> TerminationsCfg:
     if task == "pick":
         cfg = PickTerminationsCfg()
         done_term = cfg.object_picked
-    elif task in ["place", "long_horizon"]:
+    elif task in ["place", "long-horizon"]:
         cfg = PlaceTerminationsCfg()
         done_term = cfg.objects_placed
     else:

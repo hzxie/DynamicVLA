@@ -32,7 +32,7 @@ class InstructionGenerator:
         )
         if task == "pick":
             return f"{pick_action} the {{object}}."
-        elif task == "place":
+        elif task in ["place", "long_horizon"]:
             return f"{pick_action} the {{object}} and {place_action} the {{container}}."
         else:
             raise ValueError(f"Unknown task: {task}")

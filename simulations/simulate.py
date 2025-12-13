@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-12-08 19:19:42
+# @Last Modified at: 2025-12-11 06:53:34
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -171,7 +171,7 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
 
     # Determine the objects to be used in the task
     objects = []
-    if task == "long_horizon":
+    if task == "long-horizon":
         objects = [key for key in vars(env_cfg.scene) if key.startswith("object")]
     else:
         objects = ["object"]
@@ -217,7 +217,7 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
         )
         for k, v in object_states.items()
     }
-    if task == "long_horizon":
+    if task == "long-horizon":
         object_tags["objects"] = ["entire set of objects"]
 
     logging.debug("Object tags: %s" % object_tags)
@@ -944,7 +944,7 @@ def simulate(sim_cfg, task, robot, scene_dir, object_metadata, seed):
             env.unwrapped.scene["robot"].data.root_quat_w,
             env.unwrapped.device,
         )
-        if task == "long_horizon":
+        if task == "long-horizon":
             object_placed = helpers.is_object_placed(
                 curr_state["object"]["pos"],
                 curr_state["object"]["size"],
