@@ -331,6 +331,19 @@ class DiffusionModel(nn.Module):
         batch_size, n_obs_steps = batch[OBS_STATE].shape[:2]
         assert n_obs_steps == self.config.n_obs_steps
 
+        # Align image keys as in forward()
+        if self.config.n_obs_steps == 1:
+            for key in self.config.image_features:
+                batch[key] = batch[key].unsqueeze(1)
+
+        if self.config.image_features:
+            batch = dict(
+                batch
+            )  # shallow copy so that adding a key doesn't modify the original
+            batch[OBS_IMAGES] = torch.stack(
+                [batch[key] for key in self.config.image_features], dim=-4
+            )
+        
         # Encode image features and concatenate them all together along with the state vector.
         global_cond = self._prepare_global_conditioning(batch)  # (B, global_cond_dim)
 
