@@ -288,7 +288,10 @@ class LeRobotDataset(torch.utils.data.Dataset):
 
         if self.delta_action:
             act_dim = item["action"].shape[-1] - 1
-            if self.delta_indices is not None and "observation.state" in self.delta_indices:
+            if (
+                self.delta_indices is not None
+                and "observation.state" in self.delta_indices
+            ):
                 curr_indice = [i == 0 for i in self.delta_indices["observation.state"]]
                 curr_state = item["observation.state"][curr_indice, :act_dim]
             else:

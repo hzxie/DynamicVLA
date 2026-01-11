@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-12-11 06:53:34
+# @Last Modified at: 2026-01-11 11:38:29
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -98,6 +98,7 @@ def _get_object_size(usd_path):
 
 
 def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
+    import configs.event_cfg
     import configs.scene_cfg
     import configs.termination_cfg
     import isaaclab_tasks
@@ -203,6 +204,10 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
             device=sim_cfg["device"],
         )
 
+    # Set up event and termination configurations
+    env_cfg.events = configs.event_cfg.get_event_cfg(
+        sim_cfg["scene"]["objects"]["perturbation"]
+    )
     env_cfg.terminations = configs.termination_cfg.get_termination_cfg(
         task, terimation_args
     )
@@ -297,14 +302,12 @@ def _get_object_states(
             random.random() < object_cfg.get("prob_static", 0.5) if oi != 0 else False
         )  # The first object is always dynamic
         random_friction = np.random.uniform(*object_cfg.get("friction", [0, 0]))
-        random_perturbation = np.random.uniform(*object_cfg.get("perturbation", [0, 0]))
         _state = _get_object_state(
             _get_object_z(object_range_bbox.max[2], _object["size"]),
             robot_pose["pos"],
             object_range_bbox,
             None if random_static else object_cfg.get("moving_speed", None),
             random_friction,
-            random_perturbation,
             random_orientation,
         )
         object_states["objects"].append(
@@ -403,7 +406,6 @@ def _get_object_state(
     object_range_bbox,
     moving_speed,
     friction,
-    perturbation,
     random_orientation,
 ):
     if moving_speed is None:
@@ -416,7 +418,6 @@ def _get_object_state(
             object_z,
             moving_speed,
             friction,
-            perturbation,
             robot_position,
         )
 
@@ -443,7 +444,7 @@ def _get_static_object_state(object_range_bbox, object_z, random_orientation):
 
 
 def _get_dynamic_object_state(
-    object_range_bbox, object_z, moving_speed, friction, perturbation, robot_position
+    object_range_bbox, object_z, moving_speed, friction, robot_position
 ):
     import configs.object_cfg
 
@@ -468,9 +469,7 @@ def _get_dynamic_object_state(
         / np.linalg.norm(object_direction)
         * random.uniform(*moving_speed)
     )
-    object_quat = configs.object_cfg.get_object_init_quat(
-        object_velocity, perturbation=perturbation
-    )
+    object_quat = configs.object_cfg.get_object_init_quat(object_velocity)
 
     return {
         "pos": object_position,

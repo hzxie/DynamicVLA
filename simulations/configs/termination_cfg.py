@@ -7,6 +7,8 @@
 # @Last Modified at: 2025-12-11 06:53:23
 # @Email:  root@haozhexie.com
 
+from typing import Dict
+
 import torch
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import SceneEntityCfg, TerminationTermCfg
@@ -14,7 +16,6 @@ from isaaclab.utils import configclass
 from isaaclab_tasks.manager_based.manipulation.lift import mdp
 
 from simulations import helpers
-from typing import Dict
 
 
 def is_object_picked(

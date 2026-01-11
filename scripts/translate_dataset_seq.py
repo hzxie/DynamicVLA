@@ -25,8 +25,8 @@ sys.path.append(PROJECT_HOME)
 sys.path.append(os.path.join(PROJECT_HOME, "simulations"))
 
 import simulations.evaluate as eval
-import simulations.simulate as sim
 import simulations.helpers as helpers
+import simulations.simulate as sim
 
 
 def get_camera_config(sim_cfg_file, robot_usd_path):

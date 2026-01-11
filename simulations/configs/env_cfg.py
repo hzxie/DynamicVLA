@@ -4,18 +4,19 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 21:04:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-26 10:29:56
+# @Last Modified at: 2026-01-11 10:31:55
 # @Email:  root@haozhexie.com
 
 from dataclasses import MISSING
 
 import configs.robot_cfg
+import isaaclab.envs.mdp as mdp
+from configs.event_cfg import EventCfg
 from configs.scene_cfg import SceneCfg
 from configs.termination_cfg import TerminationsCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import (
     CurriculumTermCfg,
-    EventTermCfg,
     ObservationGroupCfg,
     ObservationTermCfg,
     RewardTermCfg,
@@ -69,22 +70,6 @@ class ObservationsCfg:
 
     # observation groups
     policy: PolicyCfg = PolicyCfg()
-
-
-@configclass
-class EventCfg:
-    """Configuration for events."""
-
-    reset_all = EventTermCfg(func=mdp.reset_scene_to_default, mode="reset")
-    reset_object_position = EventTermCfg(
-        func=mdp.reset_root_state_uniform,
-        mode="reset",
-        params={
-            "pose_range": {"x": (0, 0), "y": (0, 0), "z": (0.0, 0.0)},
-            "velocity_range": {},
-            "asset_cfg": SceneEntityCfg("object", body_names="Object"),
-        },
-    )
 
 
 @configclass
@@ -142,10 +127,10 @@ class EnvCfg(ManagerBasedRLEnvCfg):
     observations: ObservationsCfg = ObservationsCfg()
     commands: CommandsCfg = CommandsCfg()
     # MDP settings
-    terminations: TerminationsCfg = MISSING
-    rewards: RewardsCfg = RewardsCfg()
-    events: EventCfg = EventCfg()
     curriculum: CurriculumCfg = CurriculumCfg()
+    events: EventCfg = MISSING
+    rewards: RewardsCfg = RewardsCfg()
+    terminations: TerminationsCfg = MISSING
 
     def __post_init__(self):
         """Post initialization."""

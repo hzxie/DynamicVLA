@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-12-10 19:01:53
+# @Last Modified at: 2026-01-11 11:03:28
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -80,6 +80,7 @@ def get_test_env(
 def _get_env_cfg(
     cfg, num_envs, scene_dir, object_dir, tolerance, device, disable_fabric
 ):
+    import configs.event_cfg
     import configs.robot_cfg
     import configs.scene_cfg
     import isaaclab_tasks
@@ -98,6 +99,10 @@ def _get_env_cfg(
         device=device,
         num_envs=num_envs,
         use_fabric=not disable_fabric,
+    )
+    assert False, "TODO: Update event cfg for perturbation_range"
+    env_cfg.events = configs.event_cfg.get_event_cfg(
+        cfg.get("perturbation_range", None)
     )
     env_cfg.terminations = _get_terimation_cfg(cfg["terminations"], tolerance, device)
 
