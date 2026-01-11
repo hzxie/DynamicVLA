@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2026-01-11 08:01:18
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2026-01-11 11:36:59
+# @Last Modified at: 2026-01-11 12:52:19
 # @Email:  root@haozhexie.com
 
 import isaaclab.envs.mdp as mdp
@@ -12,6 +12,7 @@ import torch
 from isaaclab.envs import ManagerBasedEnv
 from isaaclab.managers import EventTermCfg, SceneEntityCfg
 from isaaclab.utils import configclass
+import isaaclab.utils.math as math_utils
 
 
 def pertube_linear_velocity(
@@ -38,6 +39,30 @@ def pertube_linear_velocity(
             object_position[env_ids, dim_idx] += random_offset
 
 
+def apply_external_force_torque_xy(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    force_range: tuple[float, float],
+    torque_range: tuple[float, float],
+    asset_cfg: SceneEntityCfg,
+):
+    # get target object
+    asset = env.scene[asset_cfg.name]
+    if env_ids is None:
+        env_ids = torch.arange(env.scene.num_envs, device=asset.device)
+    num_bodies = len(asset_cfg.body_ids) if isinstance(asset_cfg.body_ids, list) else asset.num_bodies
+
+    # sample random forces and torques for x and y
+    size = (len(env_ids), num_bodies, 3)
+    forces = math_utils.sample_uniform(*force_range, size, asset.device)
+    torques = math_utils.sample_uniform(*torque_range, size, asset.device)
+    forces[:, :, 2] = 0.0
+    torques[:, :, 0] = 0.0
+
+    # set the forces and torques into the buffers
+    asset.set_external_force_and_torque(forces, torques, env_ids=env_ids, body_ids=asset_cfg.body_ids)
+
+
 @configclass
 class EventCfg:
     """Configuration for events."""
@@ -57,12 +82,13 @@ class EventCfg:
 @configclass
 class PertubationEventCfg(EventCfg):
     linear_velocity_perturbation = EventTermCfg(
-        func=pertube_linear_velocity,
+        func=apply_external_force_torque_xy,
         mode="interval",
-        interval_range_s=(0.25, 1.0),  # interval is sampled uniformly from this range
+        interval_range_s=(0.1, 0.2),  # interval is sampled uniformly from this range
         params={
-            "range": {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0)},
             "asset_cfg": SceneEntityCfg("object", body_names="Object"),
+            "force_range": (-0.5, 0.5),
+            "torque_range": (-0.1, 0.1),
         },
     )
 
@@ -70,8 +96,8 @@ class PertubationEventCfg(EventCfg):
 def get_event_cfg(perturbation_range) -> EventCfg:
     if perturbation_range is not None:
         cfg = PertubationEventCfg()
-        cfg.linear_velocity_perturbation.params["range"]["x"] = perturbation_range
-        cfg.linear_velocity_perturbation.params["range"]["y"] = perturbation_range
+        # cfg.linear_velocity_perturbation.params["range"]["x"] = perturbation_range
+        # cfg.linear_velocity_perturbation.params["range"]["y"] = perturbation_range
     else:
         cfg = EventCfg()
 
