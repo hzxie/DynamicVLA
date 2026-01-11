@@ -4,39 +4,15 @@
 # @Author: Haozhe Xie
 # @Date:   2026-01-11 08:01:18
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2026-01-11 12:52:19
+# @Last Modified at: 2026-01-11 14:43:41
 # @Email:  root@haozhexie.com
 
 import isaaclab.envs.mdp as mdp
+import isaaclab.utils.math as math_utils
 import torch
 from isaaclab.envs import ManagerBasedEnv
 from isaaclab.managers import EventTermCfg, SceneEntityCfg
 from isaaclab.utils import configclass
-import isaaclab.utils.math as math_utils
-
-
-def pertube_linear_velocity(
-    env: ManagerBasedEnv,
-    env_ids: torch.Tensor | None,
-    range: dict[str, tuple[float, float]],
-    asset_cfg: SceneEntityCfg,
-    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-):
-    robot_position = env.scene[robot_cfg.name].data.root_pos_w
-    object_position = env.scene[asset_cfg.name].data.root_pos_w
-
-    # Only apply perturbation before lifting
-    for dim, (low, high) in range.items():
-        dim_idx = {"x": 0, "y": 1, "z": 2}[dim]
-        is_lifted = abs(robot_position[:, 2] - object_position[:, 2]) > 0.05
-        random_dir = torch.empty(env.num_envs, device=env.device).uniform_(-1.0, 1.0).sign()
-        random_offset = torch.empty(env.num_envs, device=env.device).uniform_(low, high) * random_dir
-        random_offset = random_offset * (~is_lifted).to(torch.float32)
-
-        if env_ids is None:
-            object_position[:, dim_idx] += random_offset
-        else:
-            object_position[env_ids, dim_idx] += random_offset
 
 
 def apply_external_force_torque_xy(
@@ -45,22 +21,33 @@ def apply_external_force_torque_xy(
     force_range: tuple[float, float],
     torque_range: tuple[float, float],
     asset_cfg: SceneEntityCfg,
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ):
-    # get target object
     asset = env.scene[asset_cfg.name]
+    asset_position = asset.data.root_pos_w
+    robot_position = env.scene[robot_cfg.name].data.root_pos_w
+    is_lifted = abs(robot_position[:, 2] - asset_position[:, 2]) > 0.05
+
     if env_ids is None:
         env_ids = torch.arange(env.scene.num_envs, device=asset.device)
-    num_bodies = len(asset_cfg.body_ids) if isinstance(asset_cfg.body_ids, list) else asset.num_bodies
 
-    # sample random forces and torques for x and y
+    num_bodies = (
+        len(asset_cfg.body_ids)
+        if isinstance(asset_cfg.body_ids, list)
+        else asset.num_bodies
+    )
     size = (len(env_ids), num_bodies, 3)
-    forces = math_utils.sample_uniform(*force_range, size, asset.device)
-    torques = math_utils.sample_uniform(*torque_range, size, asset.device)
+    random_fdir = math_utils.sample_uniform(-1.0, 1.0, size, asset.device).sign()
+    forces = math_utils.sample_uniform(*force_range, size, asset.device) * random_fdir
+    random_tdir = math_utils.sample_uniform(-1.0, 1.0, size, asset.device).sign()
+    torques = math_utils.sample_uniform(*torque_range, size, asset.device) * random_tdir
     forces[:, :, 2] = 0.0
     torques[:, :, 0] = 0.0
 
     # set the forces and torques into the buffers
-    asset.set_external_force_and_torque(forces, torques, env_ids=env_ids, body_ids=asset_cfg.body_ids)
+    asset.set_external_force_and_torque(
+        forces, torques, env_ids=env_ids[~is_lifted], body_ids=asset_cfg.body_ids
+    )
 
 
 @configclass
@@ -81,23 +68,27 @@ class EventCfg:
 
 @configclass
 class PertubationEventCfg(EventCfg):
-    linear_velocity_perturbation = EventTermCfg(
+    perturbation = EventTermCfg(
         func=apply_external_force_torque_xy,
         mode="interval",
-        interval_range_s=(0.1, 0.2),  # interval is sampled uniformly from this range
+        interval_range_s=(0.5, 1),  # interval is sampled uniformly from this range
         params={
             "asset_cfg": SceneEntityCfg("object", body_names="Object"),
-            "force_range": (-0.5, 0.5),
-            "torque_range": (-0.1, 0.1),
+            "force_range": (-0.0, 0.0),
+            "torque_range": (-0.0, 0.0),
         },
     )
 
 
-def get_event_cfg(perturbation_range) -> EventCfg:
-    if perturbation_range is not None:
+def get_event_cfg(perturbation_cfg) -> EventCfg:
+    if (
+        perturbation_cfg is not None
+        and "force" in perturbation_cfg
+        and "torque" in perturbation_cfg
+    ):
         cfg = PertubationEventCfg()
-        # cfg.linear_velocity_perturbation.params["range"]["x"] = perturbation_range
-        # cfg.linear_velocity_perturbation.params["range"]["y"] = perturbation_range
+        cfg.perturbation.params["force_range"] = perturbation_cfg["force"]
+        cfg.perturbation.params["torque_range"] = perturbation_cfg["torque"]
     else:
         cfg = EventCfg()
 

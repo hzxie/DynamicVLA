@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2026-01-11 11:03:28
+# @Last Modified at: 2026-01-11 14:55:51
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -100,9 +100,13 @@ def _get_env_cfg(
         num_envs=num_envs,
         use_fabric=not disable_fabric,
     )
-    assert False, "TODO: Update event cfg for perturbation_range"
     env_cfg.events = configs.event_cfg.get_event_cfg(
-        cfg.get("perturbation_range", None)
+        None
+        if "perturbation" not in cfg["events"]
+        else {
+            "force": cfg["events"]["perturbation"]["force_range"],
+            "torque": cfg["events"]["perturbation"]["torque_range"],
+        }
     )
     env_cfg.terminations = _get_terimation_cfg(cfg["terminations"], tolerance, device)
 

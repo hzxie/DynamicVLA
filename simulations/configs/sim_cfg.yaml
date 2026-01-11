@@ -16,7 +16,9 @@ scene:
     moving_speed: [0.15, 0.75]
     # moving_speed: [0.05, 0.25]
     friction: [0.5, 1.5]
-    perturbation: [0, 0.1]
+    perturbation:
+      force: [0.001, 0.005]
+      torque: [0.0005, 0.0025]
     tag_thresholds:
       height: 0.1
       area: 0.1
@@ -49,7 +51,7 @@ scene:
       - bowl
       - box
       - plate
-      - placemat
+      # - placemat
       - tray
 
 camera:

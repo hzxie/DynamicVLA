@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-31 19:42:51
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-16 20:10:51
+# @Last Modified at: 2026-01-11 20:40:43
 # @Email:  root@haozhexie.com
 
 import json
@@ -32,7 +32,7 @@ class InstructionGenerator:
         )
         if task == "pick":
             return f"{pick_action} the {{object}}."
-        elif task in ["place", "long_horizon"]:
+        elif task in ["place", "long-horizon"]:
             return f"{pick_action} the {{object}} and {place_action} the {{container}}."
         else:
             raise ValueError(f"Unknown task: {task}")
