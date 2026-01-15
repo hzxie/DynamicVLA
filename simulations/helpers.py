@@ -135,7 +135,6 @@ def get_object_tags(object_type, object_states, robot_pose, skip_tags, tag_thres
         "POSITION_FROM_LEFT": lambda x: _get_relative_pos(x["pos"])[1],
         "POSITION_FROM_BOTTOM": lambda x: -_get_relative_pos(x["pos"])[0],
         "DISTANCE_FROM_ROBOT": lambda x: -np.linalg.norm(x["pos"] - robot_pose["pos"]),
-        "VELOCITY": lambda x: (np.linalg.norm(x["lin_vel"]) if "lin_vel" in x else 0),
     }
     assert object_type in [
         "objects",
@@ -153,6 +152,9 @@ def get_object_tags(object_type, object_states, robot_pose, skip_tags, tag_thres
             object_states = _get_direction_tags(
                 object_type, object_states, robot_quat_xyzw
             )
+            object_states = _get_velocity_tags(
+                object_type, object_states, tag_thresholds
+            )
     # Remove duplicate tags (causing confusion in instruction generation)
     return _get_unique_tags([os["tags"] for os in object_states])
 
@@ -166,7 +168,6 @@ def _get_state_tag(object_type, object_states, tag_name, tag_func, tag_threshold
             "POSITION_FROM_LEFT": "the %s that is closest to the robot's left at the start",
             "POSITION_FROM_BOTTOM": "the %s closest to the robot mounting edge at the start",
             "DISTANCE_FROM_ROBOT": "the %s closest to the robot at the start",
-            "VELOCITY": "the %s with the highest initial velocity",
         },
         "LAST": {
             "HEIGHT": "the shortest %s",
@@ -175,7 +176,6 @@ def _get_state_tag(object_type, object_states, tag_name, tag_func, tag_threshold
             "POSITION_FROM_LEFT": "the %s that is closest to the robot's right at the start",
             "POSITION_FROM_BOTTOM": "the %s farthest from the robot mounting edge at the start",
             "DISTANCE_FROM_ROBOT": "the %s farthest from the robot at the start",
-            "VELOCITY": "the %s with the lowest initial velocity",
         },
         "MEDIUM": {
             "HEIGHT": "the %s of medium height",
@@ -184,7 +184,6 @@ def _get_state_tag(object_type, object_states, tag_name, tag_func, tag_threshold
             "POSITION_FROM_LEFT": "the %s in the middle from left to right at the start",
             "POSITION_FROM_BOTTOM": "the %s with medium distance to the robot mounting edge at the start",
             "DISTANCE_FROM_ROBOT": "the %s with medium distance to the robot at the start",
-            "VELOCITY": "the %s with medium initial velocity",
         },
     }
 
@@ -213,6 +212,43 @@ def _get_state_tag(object_type, object_states, tag_name, tag_func, tag_threshold
 
     return object_states
 
+def _get_velocity_tags(object_type, object_states, tag_thresholds):
+    RANK_TAGS = {
+        "FIRST": "the moving %s with the highest initial velocity",
+        "LAST": "the moving %s with the lowest initial velocity",
+        "MEDIUM": "the moving %s with medium initial velocity",
+    }
+    tag_func = lambda x: (np.linalg.norm(x["lin_vel"]) if "lin_vel" in x else 0)
+    
+    sorted_states = sorted(
+        [obj for obj in object_states if tag_func(obj) >= 0.01], 
+        key=tag_func, 
+        reverse=True
+    )
+    n = len(sorted_states)
+    if n > 0:
+        last_value = 0.01 - tag_thresholds.get("velocity")
+        cur_rank = 1
+        for i, state in enumerate(sorted_states):
+            object_name = (
+                object_type.rstrip("s") if object_type == "objects" else state["category"]
+            )
+            cur_value = tag_func(state)
+            if abs(cur_value - last_value) > tag_thresholds.get("velocity"):
+                cur_rank = i + 1
+            if cur_rank == 1:
+                state["tags"].append(RANK_TAGS["FIRST"] % object_name)
+            elif cur_rank == n:
+                state["tags"].append(RANK_TAGS["LAST"] % object_name)
+            elif cur_rank == 2 and n == 3:
+                state["tags"].append(RANK_TAGS["MEDIUM"] % object_name)
+
+            if n == 2:  # e.g., "tallest" -> "taller"
+                state["tags"][-1] = state["tags"][-1].replace("est", "er")
+
+            last_value = cur_value
+
+    return object_states
 
 def _get_direction_tags(object_type, object_states, robot_quat):
     DIRECTION_TAGS = [
@@ -229,7 +265,7 @@ def _get_direction_tags(object_type, object_states, robot_quat):
         object_name = (
             object_type.rstrip("s") if object_type == "objects" else state["category"]
         )
-        if "lin_vel" not in state or np.linalg.norm(state["lin_vel"]) < 1e-3:
+        if "lin_vel" not in state or np.linalg.norm(state["lin_vel"]) < 0.01:
             state["tags"].append("stationary %s" % object_name)
             continue
 
