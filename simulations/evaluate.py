@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-06 15:21:20
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2026-01-11 14:55:51
+# @Last Modified at: 2026-01-13 09:11:13
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -49,7 +49,6 @@ def get_test_env(
     scene_dir,
     object_dir,
     physics_time_step,
-    timeout,
     tolerance,
     device,
     disable_fabric,
@@ -62,7 +61,7 @@ def get_test_env(
         cfg, num_envs, scene_dir, object_dir, tolerance, device, disable_fabric
     )
     env_cfg.dt = physics_time_step
-    env_cfg.episode_length_s = timeout
+    env_cfg.episode_length_s = cfg["episode_length_s"]
     env = gym.make("Robot-Env-Cfg-v0", cfg=env_cfg, seed=cfg["seed"])
     # Increase the fictional frictions of the object
     sim.set_object_material(
@@ -104,8 +103,8 @@ def _get_env_cfg(
         None
         if "perturbation" not in cfg["events"]
         else {
-            "force": cfg["events"]["perturbation"]["force_range"],
-            "torque": cfg["events"]["perturbation"]["torque_range"],
+            "force": cfg["events"]["perturbation"]["params"]["force_range"],
+            "torque": cfg["events"]["perturbation"]["params"]["torque_range"],
         }
     )
     env_cfg.terminations = _get_terimation_cfg(cfg["terminations"], tolerance, device)
@@ -442,7 +441,6 @@ def get_sim_results(sim_cfg, env_cfg_file_path, obs_socket, act_socket):
             sim_cfg["scene_dir"],
             sim_cfg["object_dir"],
             sim_cfg["physics_time_step"],
-            sim_cfg["timeout"],
             sim_cfg["tolerance"],
             sim_cfg["device"],
             sim_cfg["disable_fabric"],
@@ -513,7 +511,6 @@ def main(simulation_app, args):
         "scene_dir": args.scene_dir,
         "object_dir": args.object_dir,
         "physics_time_step": args.physics_time_step,
-        "timeout": args.timeout,
         "tolerance": args.tolerance,
         "device": args.device,
         "disable_fabric": args.disable_fabric,
@@ -629,7 +626,6 @@ if __name__ == "__main__":
     # Arguments for the script
     parser.add_argument("--path_tracing", action="store_true")
     parser.add_argument("--physics_time_step", type=float, default=0.04)
-    parser.add_argument("--timeout", type=float, default=10)
     parser.add_argument("--tolerance", type=float, default=0.07)
     parser.add_argument(
         "--scene_dir", default=os.path.join(PROJECT_HOME, os.pardir, "scenes")
