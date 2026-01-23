@@ -292,7 +292,7 @@ def _get_object_states(
         object_categories = list(set([v["category"] for v in object_metadata.values()]))
 
     object_candidates = [
-        v for v in object_metadata.values() if v["category"] in object_categories
+        copy.deepcopy(v) for v in object_metadata.values() if v["category"] in object_categories
     ]
     object_range_bbox = _get_object_range_bbox(table_bbox)
     for oi in range(object_cfg["n_objects"]):
@@ -330,7 +330,7 @@ def _get_object_states(
         )
 
     container_candidates = [
-        v for v in object_metadata.values() if v["category"] in container_categories
+        copy.deepcopy(v) for v in object_metadata.values() if v["category"] in container_categories
     ]
     for _ in range(container_cfg["n_containers"]):
         _state = None

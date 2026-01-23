@@ -26,7 +26,7 @@ scene:
       position_from_left: 0.1
       position_from_bottom: 0.1
       distance_from_robot: 0.3
-      velocity: 0.3
+      velocity: 0.2
     categories:
       - apple
       - avocado
