@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:22:31
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-12-06 08:33:56
+# @Last Modified at: 2026-02-03 22:00:59
 # @Email:  root@haozhexie.com
 
 from dataclasses import dataclass, field
@@ -89,9 +89,6 @@ class DynamicVLAConfig(PreTrainedConfig):
     smolvlm_intermediate_size: int = 3072
     # FastVLM Settings
     fastvlm_inference_mode: bool = True
-    # NeoVLM Settings
-    neovlm_num_layers: int = 40
-    neovlm_use_3d_rope: bool = False
     # Interleave SA layers each self_attn_every_n_layers
     self_attn_every_n_layers: int = 2
     # The action expert hidden size (wrt to the VLM)

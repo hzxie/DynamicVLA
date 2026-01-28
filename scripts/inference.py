@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-05-14 14:25:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-10-27 16:10:45
+# @Last Modified at: 2026-01-28 15:30:32
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -277,7 +277,12 @@ def _get_action(vla_model, observations, rotation, use_delta_action, debug=False
 
     # NOTE: All tensors are on CPU if streaming is enabled.
     #       Because IPC with CUDA tensors is not supported.
-    device = "cuda" if not vla_model.config.enable_streaming else "cpu"
+    device = (
+        "cuda"
+        if not hasattr(vla_model.config, "enable_streaming")
+        or not vla_model.config.enable_streaming
+        else "cpu"
+    )
     observations = _get_transformed_observations(
         observations, rotation, vla_model.config.input_features, device
     )

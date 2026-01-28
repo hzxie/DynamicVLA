@@ -212,6 +212,7 @@ def _get_state_tag(object_type, object_states, tag_name, tag_func, tag_threshold
 
     return object_states
 
+
 def _get_velocity_tags(object_type, object_states, tag_thresholds):
     RANK_TAGS = {
         "FIRST": "the moving %s with the highest initial velocity",
@@ -219,11 +220,11 @@ def _get_velocity_tags(object_type, object_states, tag_thresholds):
         "MEDIUM": "the moving %s with medium initial velocity",
     }
     tag_func = lambda x: (np.linalg.norm(x["lin_vel"]) if "lin_vel" in x else 0)
-    
+
     sorted_states = sorted(
-        [obj for obj in object_states if tag_func(obj) >= 0.01], 
-        key=tag_func, 
-        reverse=True
+        [obj for obj in object_states if tag_func(obj) >= 0.01],
+        key=tag_func,
+        reverse=True,
     )
     n = len(sorted_states)
     if n > 0:
@@ -231,7 +232,9 @@ def _get_velocity_tags(object_type, object_states, tag_thresholds):
         cur_rank = 1
         for i, state in enumerate(sorted_states):
             object_name = (
-                object_type.rstrip("s") if object_type == "objects" else state["category"]
+                object_type.rstrip("s")
+                if object_type == "objects"
+                else state["category"]
             )
             cur_value = tag_func(state)
             if abs(cur_value - last_value) > tag_thresholds.get("velocity"):
@@ -249,6 +252,7 @@ def _get_velocity_tags(object_type, object_states, tag_thresholds):
             last_value = cur_value
 
     return object_states
+
 
 def _get_direction_tags(object_type, object_states, robot_quat):
     DIRECTION_TAGS = [

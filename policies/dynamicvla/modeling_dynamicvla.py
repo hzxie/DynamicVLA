@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-11-05 19:43:10
+# @Last Modified at: 2026-02-03 22:56:12
 # @Email:  root@haozhexie.com
 
 import logging
@@ -23,7 +23,7 @@ from lerobot.policies.normalize import Normalize, Unnormalize
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import populate_queues
 from lerobot.utils.utils import get_safe_dtype
-from transformers import AutoConfig, AutoModel, SmolVLMForConditionalGeneration
+from transformers import AutoConfig, SmolVLMForConditionalGeneration
 
 from policies.dynamicvla.configuration_dynamicvla import DynamicVLAConfig
 from policies.dynamicvla.modeling_fastvlm import (
@@ -31,21 +31,7 @@ from policies.dynamicvla.modeling_fastvlm import (
     FastVLMConfig,
     FastVLMForConditionalGeneration,
 )
-from policies.dynamicvla.modeling_neo import (
-    NeoTextConfig,
-    NeoTextModel,
-    NeoVisionConfig,
-    NeoVLMConfig,
-    NeoVLMForConditionalGeneration,
-    NeoVLMPreTrainedModel,
-)
 from policies.dynamicvla.modeling_vlm_with_expert import VLMWithExpertModel
-
-# Register New Models
-AutoConfig.register("neo_text", NeoTextConfig)
-AutoConfig.register("neo_vlm", NeoVLMConfig)
-AutoModel.register(NeoTextConfig, NeoTextModel)
-AutoModel.register(NeoVLMConfig, NeoVLMPreTrainedModel)
 
 # Matches ".soNNN", optionally followed by "-something", up to the "_buffer_" marker
 _VARIANT_RE = re.compile(r"\.so\d+(?:-[\w]+)?_buffer_")
@@ -830,18 +816,6 @@ class VLAFlowMatching(torch.nn.Module):
         self.vlm_with_expert: VLMWithExpertModel = self._get_vlm_with_expert(
             config, config.vlm_model_name, vlm_input_channels
         )
-        # Cached Image downscaling factor (for 3D RoPE)
-        self.img_downscale = None
-        if (
-            config.neovlm_use_3d_rope
-            and "patch_size" in self.vlm_with_expert.vlm_config.vision_config
-            and "downsample_ratio" in self.vlm_with_expert.vlm_config
-        ):
-            self.img_downscale = int(
-                self.vlm_with_expert.vlm_config.vision_config.patch_size
-                / self.vlm_with_expert.vlm_config.downsample_ratio
-            )
-
         self.state_proj = torch.nn.Linear(
             config.max_state_dim,
             self.vlm_with_expert.vlm_config.text_config.hidden_size,
@@ -871,7 +845,6 @@ class VLAFlowMatching(torch.nn.Module):
         vlm_config = AutoConfig.from_pretrained(vlm_model_name)
 
         if vlm_model_name.startswith("HuggingFaceTB/SmolVLM2"):
-            assert not self.config.neovlm_use_3d_rope, "Not supported"
             vlm_config = AutoConfig.from_pretrained(vlm_model_name)
             vlm_config.vision_config.num_channels = vlm_input_channels
             vlm_config.vision_config.patch_size = config.smolvlm_patch_size
@@ -884,7 +857,6 @@ class VLAFlowMatching(torch.nn.Module):
             )
             vlm = SmolVLMForConditionalGeneration(config=vlm_config)
         elif vlm_model_name.startswith("HuggingFaceTB/SmolLM2"):
-            assert not self.config.neovlm_use_3d_rope, "Not supported"
             text_config = AutoConfig.from_pretrained(vlm_model_name)
             vision_config = FastViTConfig(
                 in_channels=vlm_input_channels,
@@ -899,20 +871,6 @@ class VLAFlowMatching(torch.nn.Module):
             )
             vlm = FastVLMForConditionalGeneration(
                 config=FastVLMConfig(
-                    text_config=text_config,
-                    vision_config=vision_config,
-                )
-            )
-        elif vlm_model_name.startswith("Qwen/Qwen"):
-            qwen_config = AutoConfig.from_pretrained(vlm_model_name).to_dict()
-            qwen_config["max_window_layers"] = config.neovlm_num_layers
-            qwen_config["num_hidden_layers"] = config.neovlm_num_layers
-            text_config = NeoTextConfig(**qwen_config)
-            vision_config = NeoVisionConfig(
-                in_channels=vlm_input_channels,
-            )
-            vlm = NeoVLMForConditionalGeneration(
-                config=NeoVLMConfig(
                     text_config=text_config,
                     vision_config=vision_config,
                 )
@@ -985,16 +943,6 @@ class VLAFlowMatching(torch.nn.Module):
             pad_masks.append(img_mask)
             att_masks += [0] * (num_img_embs)
 
-        # Statistics for 3D RoPE
-        img_emb_size = None
-        if self.img_downscale is not None:
-            img_emb_size = {
-                "t": len(embs),
-                "l": img_emb.size(1),
-                "h": img.size(-2) // self.img_downscale,
-                "w": img.size(-1) // self.img_downscale,
-            }
-
         lang_emb = self.vlm_with_expert.embed_language_tokens(lang_tokens)
         # Normalize language embeddings
         lang_emb_dim = lang_emb.shape[-1]
@@ -1031,7 +979,7 @@ class VLAFlowMatching(torch.nn.Module):
             att_masks = pad_tensor(att_masks, self.config.prefix_length, pad_value=0)
 
         att_masks = att_masks.expand(bsize, -1)
-        return embs, pad_masks, att_masks, img_emb_size
+        return embs, pad_masks, att_masks
 
     def _embed_suffix(self, noisy_actions, timestep):
         embs = []
@@ -1080,20 +1028,11 @@ class VLAFlowMatching(torch.nn.Module):
     def _get_position_ids(
         self,
         prefix_offsets: torch.Tensor | None,
-        image_embedding_size: dict[str, int] | None,
         pad_masks: torch.Tensor,
-        use_3d_rope: bool,
     ) -> torch.Tensor:
-        if use_3d_rope:
-            position_ids = self.vlm_with_expert.vlm.model.get_thw_indexes(
-                pad_masks, image_embedding_size
-            )
-            if prefix_offsets is not None:
-                position_ids[..., 0] += prefix_offsets[..., None, 0]
-        else:
-            position_ids = torch.cumsum(pad_masks, dim=1) - 1
-            if prefix_offsets is not None:
-                position_ids += prefix_offsets
+        position_ids = torch.cumsum(pad_masks, dim=1) - 1
+        if prefix_offsets is not None:
+            position_ids += prefix_offsets
 
         return position_ids
 
@@ -1118,20 +1057,15 @@ class VLAFlowMatching(torch.nn.Module):
         time_expanded = time[:, None, None]
         x_t = time_expanded * noise + (1 - time_expanded) * actions
         u_t = noise - actions
-        prefix_embs, prefix_pad_masks, prefix_att_masks, img_emb_size = (
-            self._embed_prefix(images, img_masks, lang_tokens, lang_masks, state=state)
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self._embed_prefix(
+            images, img_masks, lang_tokens, lang_masks, state=state
         )
         suffix_embs, suffix_pad_masks, suffix_att_masks = self._embed_suffix(x_t, time)
 
         pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
         att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
         att_2d_masks = make_att_2d_masks(pad_masks, att_masks)
-        position_ids = self._get_position_ids(
-            None,
-            img_emb_size,
-            pad_masks,
-            self.config.neovlm_use_3d_rope,
-        )
+        position_ids = self._get_position_ids(None, pad_masks)
 
         (_, suffix_out), _ = self.vlm_with_expert(
             attention_mask=att_2d_masks,
@@ -1153,13 +1087,11 @@ class VLAFlowMatching(torch.nn.Module):
     ) -> torch.Tensor:
         """Do a half inference forward and compute the VLM embedding"""
 
-        prefix_embs, prefix_pad_masks, prefix_att_masks, img_emb_size = (
-            self._embed_prefix(images, img_masks, lang_tokens, lang_masks, state)
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self._embed_prefix(
+            images, img_masks, lang_tokens, lang_masks, state
         )
         prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
-        prefix_position_ids = self._get_position_ids(
-            None, img_emb_size, prefix_pad_masks, self.config.neovlm_use_3d_rope
-        )
+        prefix_position_ids = self._get_position_ids(None, prefix_pad_masks)
         # Compute image and language key value cache
         _, past_key_values = self.vlm_with_expert.forward(
             attention_mask=prefix_att_2d_masks,

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-03-22 20:59:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2026-01-11 11:38:29
+# @Last Modified at: 2026-01-28 15:35:12
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -292,7 +292,9 @@ def _get_object_states(
         object_categories = list(set([v["category"] for v in object_metadata.values()]))
 
     object_candidates = [
-        copy.deepcopy(v) for v in object_metadata.values() if v["category"] in object_categories
+        copy.deepcopy(v)
+        for v in object_metadata.values()
+        if v["category"] in object_categories
     ]
     object_range_bbox = _get_object_range_bbox(table_bbox)
     for oi in range(object_cfg["n_objects"]):
@@ -330,7 +332,9 @@ def _get_object_states(
         )
 
     container_candidates = [
-        copy.deepcopy(v) for v in object_metadata.values() if v["category"] in container_categories
+        copy.deepcopy(v)
+        for v in object_metadata.values()
+        if v["category"] in container_categories
     ]
     for _ in range(container_cfg["n_containers"]):
         _state = None

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-09-17 14:30:19
+# @Last Modified at: 2026-01-28 15:32:17
 # @Email:  root@haozhexie.com
 
 import json
@@ -23,6 +23,8 @@ from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.types import FeatureType, PolicyFeature
 from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
 from lerobot.datasets.utils import dataset_to_policy_features
+from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
+from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
 from lerobot.policies.pi0.configuration_pi0 import PI0Config
 from lerobot.policies.pi0.modeling_pi0 import PI0Policy
 from lerobot.policies.pi0fast.configuration_pi0fast import PI0FASTConfig
@@ -31,8 +33,6 @@ from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
 from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 
-from policies.diffusion.configuration_diffusion import DiffusionPolicyConfig
-from policies.diffusion.modeling_diffusion import DiffusionPolicy
 from policies.dynamicvla.configuration_dynamicvla import DynamicVLAConfig
 from policies.dynamicvla.modeling_dynamicvla import DynamicVLAPolicy
 
@@ -213,7 +213,7 @@ def fix_0std_dataset_stats(
 
 def get_policy_class(policy_name: str) -> type[PreTrainedPolicy]:
     policy_classes = {
-        "dp": DiffusionPolicy,
+        "diffusion": DiffusionPolicy,
         "pi0": PI0Policy,
         "pi0fast": PI0FASTPolicy,
         "smolvla": SmolVLAPolicy,
@@ -270,8 +270,8 @@ def get_policy_cfg(
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     cfg_class = None
-    if policy_cfg.TYPE == "dp":
-        cfg_class = DiffusionPolicyConfig
+    if policy_cfg.TYPE == "diffusion":
+        cfg_class = DiffusionConfig
     elif policy_cfg.TYPE == "pi0":
         cfg_class = PI0Config
     elif policy_cfg.TYPE == "pi0fast":
