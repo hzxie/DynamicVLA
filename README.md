@@ -7,7 +7,7 @@
 S-Lab, Nanyang Technological University
 
 ![Counter](https://api.infinitescript.com/badgen/count?name=hzxie/DynamicVLA)
-[![arXiv](https://img.shields.io/badge/arXiv-2601.00000-b31b1b.svg)](https://arxiv.org/abs/2601.00000)
+[![arXiv](https://img.shields.io/badge/arXiv-2601.22153-b31b1b.svg)](https://arxiv.org/abs/2601.22153)
 [![YouTube](https://img.shields.io/badge/Spotlight%20Video-%23FF0000.svg?logo=YouTube&logoColor=white)](https://youtu.be/NmJnHcI04_Q)
 
 ![Teaser](https://github.com/user-attachments/assets/ffc2071a-c4b8-4ebf-9a41-870de65bb3da)
@@ -30,7 +30,7 @@ S-Lab, Nanyang Technological University
                Diao, Haiwen and 
                Liu, Ziwei},
   journal   = {arXiv},
-  volume    = {2601.00000},
+  volume    = {2601.22153},
   year      = {2026}
 }
 ```
