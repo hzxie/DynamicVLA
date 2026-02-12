@@ -1157,9 +1157,7 @@ class VLAFlowMatching(torch.nn.Module):
         suffix_att_2d_masks = make_att_2d_masks(suffix_pad_masks, suffix_att_masks)
         full_att_2d_masks = torch.cat([prefix_pad_2d_masks, suffix_att_2d_masks], dim=2)
         prefix_offsets = torch.sum(prefix_pad_masks, dim=-1)[:, None]
-        position_ids = self._get_position_ids(
-            prefix_offsets, None, suffix_pad_masks, self.config.neovlm_use_3d_rope
-        )
+        position_ids = self._get_position_ids(prefix_offsets, suffix_pad_masks)
 
         outputs_embeds, _ = self.vlm_with_expert.forward(
             attention_mask=full_att_2d_masks,

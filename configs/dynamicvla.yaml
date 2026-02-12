@@ -1,4 +1,4 @@
-# transformers: 4.53.3
+# transformers: 4.57.1
 CONST:
   EXP_NAME: null
   N_WORKERS: 8
@@ -27,7 +27,6 @@ POLICY:
   VLM_MODEL_NAME: HuggingFaceTB/SmolLM2-360M
   NUM_VLM_LAYERS: 16
   NUM_EXPERT_SKIP_LAYERS: 0
-  NEOVLM_USE_3D_ROPE: false
   TEMPORAL_FUSION: attn
   FREEZE_VISION_MODEL: true
   FREEZE_CONNECTOR: true
