@@ -16,5 +16,5 @@ timm
 torch
 torchvision
 tqdm
-transformers==4.57.1
+transformers==5.2.0
 wandb

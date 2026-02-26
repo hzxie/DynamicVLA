@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:22:31
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2026-02-03 22:00:59
+# @Last Modified at: 2026-02-26 10:04:17
 # @Email:  root@haozhexie.com
 
 from dataclasses import dataclass, field
@@ -80,7 +80,7 @@ class DynamicVLAConfig(PreTrainedConfig):
     num_expert_layers: int = -1
     num_expert_skip_layers: int = 0
     # VLM settings
-    vlm_model_name: str = "HuggingFaceTB/SmolLM2-360M"
+    vlm_model_name: str = "HuggingFaceTB/SmolLM2-360M-Instruct"
     num_vlm_layers: int = 16
     # SmolVLM Settings
     smolvlm_patch_size: int = 16

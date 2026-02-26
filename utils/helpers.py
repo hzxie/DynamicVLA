@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-06-14 15:17:59
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2026-01-28 15:32:17
+# @Last Modified at: 2026-02-25 23:34:31
 # @Email:  root@haozhexie.com
 
 import json
@@ -27,8 +27,6 @@ from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
 from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
 from lerobot.policies.pi0.configuration_pi0 import PI0Config
 from lerobot.policies.pi0.modeling_pi0 import PI0Policy
-from lerobot.policies.pi0fast.configuration_pi0fast import PI0FASTConfig
-from lerobot.policies.pi0fast.modeling_pi0fast import PI0FASTPolicy
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
 from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
@@ -65,6 +63,7 @@ def save_checkpoint(cfg: dict, policy: PreTrainedPolicy, save_dir: str, epoch: i
 
     with open(os.path.join(save_dir, CONFIG_NAME), "w") as f:
         policy_cfg = draccus.encode(policy.module.config)
+        policy_cfg["device"] = "cuda" if torch.cuda.is_available() else "cpu"
         policy_cfg["delta_timestamps"] = cfg.DATASET.DELTA_TIMESTAMPS
         policy_cfg["epoch"] = epoch
         json.dump(policy_cfg, f, indent=4)
@@ -215,7 +214,6 @@ def get_policy_class(policy_name: str) -> type[PreTrainedPolicy]:
     policy_classes = {
         "diffusion": DiffusionPolicy,
         "pi0": PI0Policy,
-        "pi0fast": PI0FASTPolicy,
         "smolvla": SmolVLAPolicy,
         "dynamicvla": DynamicVLAPolicy,
     }
@@ -274,8 +272,6 @@ def get_policy_cfg(
         cfg_class = DiffusionConfig
     elif policy_cfg.TYPE == "pi0":
         cfg_class = PI0Config
-    elif policy_cfg.TYPE == "pi0fast":
-        cfg_class = PI0FASTConfig
     elif policy_cfg.TYPE == "smolvla":
         cfg_class = SmolVLAConfig
     elif policy_cfg.TYPE == "dynamicvla":

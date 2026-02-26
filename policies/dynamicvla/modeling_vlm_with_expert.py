@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-09-16 11:23:15
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2025-11-05 21:08:38
+# @Last Modified at: 2026-02-26 11:29:07
 # @Email:  root@haozhexie.com
 
 import collections
@@ -44,13 +44,13 @@ class VLMWithExpertModel(torch.nn.Module):
             logging.info(
                 "Reducing the number of VLM layers from %d to %d ..."
                 % (
-                    len(self.get_vlm_model().text_model.layers),
+                    len(self._get_text_model(self.get_vlm_model()).layers),
                     num_vlm_layers,
                 )
             )
-            del self.get_vlm_model().text_model.layers[num_vlm_layers:]
+            del self._get_text_model(self.get_vlm_model()).layers[num_vlm_layers:]
 
-        self.num_vlm_layers = len(self.get_vlm_model().text_model.layers)
+        self.num_vlm_layers = len(self._get_text_model(self.get_vlm_model()).layers)
         # Action Expert
         lm_expert_config = self._get_expert_config(
             self.vlm_config.text_config, num_expert_layers, expert_width_multiplier
@@ -67,7 +67,7 @@ class VLMWithExpertModel(torch.nn.Module):
 
         self.num_attention_heads = self.vlm_config.text_config.num_attention_heads
         self.num_key_value_heads = self.vlm_config.text_config.num_key_value_heads
-        self.num_vlm_layers = len(self.get_vlm_model().text_model.layers)
+        self.num_vlm_layers = len(self._get_text_model(self.get_vlm_model()).layers)
         self.num_expert_layers = len(self.lm_expert.layers) - num_expert_skip_layers
         self.num_expert_skip_layers = num_expert_skip_layers
         self.self_attn_every_n_layers = self_attn_every_n_layers
@@ -79,6 +79,18 @@ class VLMWithExpertModel(torch.nn.Module):
         self.expert_hidden_size = lm_expert_config.hidden_size
         self._set_requires_grad()
 
+    def _get_vision_model(self, vlm):
+        if hasattr(vlm, "vision_model"):
+            return vlm.vision_model
+        else:
+            raise ValueError("Cannot find vision model in the VLM")
+
+    def _get_text_model(self, vlm):
+        if hasattr(vlm, "text_model"):
+            return vlm.text_model
+        else:
+            raise ValueError("Cannot find text model in the VLM")
+
     def _get_expert_config(
         self, text_config: PretrainedConfig, num_layers: int, width_multiplier: float
     ) -> PretrainedConfig:
@@ -88,7 +100,7 @@ class VLMWithExpertModel(torch.nn.Module):
         expert_config.intermediate_size = self._get_intermediate_size(
             expert_config.hidden_size
         )
-        num_vlm_layers = len(self.get_vlm_model().text_model.layers)
+        num_vlm_layers = len(self._get_text_model(self.get_vlm_model()).layers)
         expert_config.num_hidden_layers = num_vlm_layers
         if num_layers > 0:
             assert (
@@ -117,6 +129,14 @@ class VLMWithExpertModel(torch.nn.Module):
         self_attn_every_n_layers: int,
     ) -> PreTrainedModel:
         text_config = self.vlm_config.text_config
+        if not hasattr(text_config, "head_dim"):
+            text_config.head_dim = (
+                text_config.hidden_size // text_config.num_attention_heads
+            )
+            expert_config.head_dim = text_config.head_dim
+        if not hasattr(expert_config, "attention_bias"):
+            expert_config.attention_bias = False
+
         expert_model = AutoModel.from_config(expert_config)
         if "cross" in attention_mode:
             # Reshape qkv projections to have the same input dimension as the vlm
@@ -142,12 +162,12 @@ class VLMWithExpertModel(torch.nn.Module):
 
     def _set_requires_grad(self) -> None:
         if self.freeze_vision_model:
-            self.get_vlm_model().vision_model.eval()
-            for params in self.get_vlm_model().vision_model.parameters():
+            self._get_vision_model(self.get_vlm_model()).eval()
+            for params in self._get_vision_model(self.get_vlm_model()).parameters():
                 params.requires_grad = False
         if self.freeze_text_model:
-            self.get_vlm_model().text_model.eval()
-            for params in self.get_vlm_model().text_model.parameters():
+            self._get_text_model(self.get_vlm_model()).eval()
+            for params in self._get_text_model(self.get_vlm_model()).parameters():
                 params.requires_grad = False
         if self.freeze_connector and hasattr(self.get_vlm_model(), "connector"):
             self.get_vlm_model().connector.eval()
@@ -157,11 +177,11 @@ class VLMWithExpertModel(torch.nn.Module):
     def train(self, mode: bool = True) -> None:
         super().train(mode)
         if self.freeze_vision_model:
-            self.get_vlm_model().vision_model.eval()
+            self._get_vision_model(self.get_vlm_model()).eval()
         if self.freeze_connector and hasattr(self.get_vlm_model(), "connector"):
             self.get_vlm_model().connector.eval()
         if self.freeze_text_model:
-            self.get_vlm_model().text_model.eval()
+            self._get_text_model(self.get_vlm_model()).eval()
 
     def embed_image(self, image: torch.Tensor) -> torch.Tensor:
         assert len(image.shape) in [
@@ -174,7 +194,7 @@ class VLMWithExpertModel(torch.nn.Module):
         return self.get_vlm_model().get_image_features(image)
 
     def embed_language_tokens(self, tokens: torch.Tensor) -> torch.Tensor:
-        return self.get_vlm_model().text_model.get_input_embeddings()(tokens)
+        return self._get_text_model(self.get_vlm_model()).get_input_embeddings()(tokens)
 
     def _qkv_proj_layer(
         self,
@@ -501,7 +521,7 @@ class VLMWithExpertModel(torch.nn.Module):
         use_cache: bool | None = None,
         fill_kv_cache: bool | None = None,
     ) -> tuple[list[torch.FloatTensor], list[torch.FloatTensor] | None]:
-        models = [self.get_vlm_model().text_model, self.lm_expert]
+        models = [self._get_text_model(self.get_vlm_model()), self.lm_expert]
         model_layers = self._get_model_layers(models)
 
         # Decoder Layers

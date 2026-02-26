@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2025-08-21 15:23:45
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2026-02-03 22:56:12
+# @Last Modified at: 2026-02-26 10:10:57
 # @Email:  root@haozhexie.com
 
 import logging
@@ -854,6 +854,25 @@ class VLAFlowMatching(torch.nn.Module):
             )
             vlm = SmolVLMForConditionalGeneration(config=vlm_config)
         elif vlm_model_name.startswith("HuggingFaceTB/SmolLM2"):
+            text_config = AutoConfig.from_pretrained(vlm_model_name)
+            vision_config = FastViTConfig(
+                in_channels=vlm_input_channels,
+                position_embeddings=[
+                    None,
+                    None,
+                    None,
+                    {"name": "RepCPE", "spatial_shape": (7, 7)},
+                    {"name": "RepCPE", "spatial_shape": (7, 7)},
+                ],
+                inference_mode=config.fastvlm_inference_mode,
+            )
+            vlm = FastVLMForConditionalGeneration(
+                config=FastVLMConfig(
+                    text_config=text_config,
+                    vision_config=vision_config,
+                )
+            )
+        elif vlm_model_name.startswith("Qwen/Qwen2"):
             text_config = AutoConfig.from_pretrained(vlm_model_name)
             vision_config = FastViTConfig(
                 in_channels=vlm_input_channels,
