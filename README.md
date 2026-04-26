@@ -1,7 +1,3 @@
-
-
-  
-
 <img src="https://www.infinitescript.com/projects/DynamicVLA/DynamicVLA-Logo.webp" height="100px" align="right">
 
 # DynamicVLA: A Vision-Language-Action Model for Dynamic Object Manipulation
