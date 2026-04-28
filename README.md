@@ -6,9 +6,11 @@
 
 S-Lab, Nanyang Technological University
 
+[![codefactor badge](https://www.codefactor.io/repository/github/hzxie/DynamicVLA/badge)](https://www.codefactor.io/repository/github/hzxie/DynamicVLA)
 ![Counter](https://api.infinitescript.com/badgen/count?name=hzxie/DynamicVLA)
 [![arXiv](https://img.shields.io/badge/arXiv-2601.22153-b31b1b.svg)](https://arxiv.org/abs/2601.22153)
 [![YouTube](https://img.shields.io/badge/Spotlight%20Video-%23FF0000.svg?logo=YouTube&logoColor=white)](https://youtu.be/NmJnHcI04_Q)
+[![HuggingFace](https://img.shields.io/badge/%F0%9F%A4%97-DOM%20Dataset-orange)](https://huggingface.co/datasets/hzxie/DOM)
 
 ![Teaser](https://github.com/user-attachments/assets/ffc2071a-c4b8-4ebf-9a41-870de65bb3da)
 
@@ -80,7 +82,7 @@ pip install shapely pyzmq h5py
 
 ### Prepare scenes and objects
 
-Download [DOM 3D Scenes](#dom-dataset) and [DOM 3D Objects](#dom-dataset).
+Download [DOM Testing Set](#dom-dataset) (including a subset of DOM 3D scenes) and [DOM 3D Objects](#dom-dataset).
 
 ```
 PROJECT_ROOT/
