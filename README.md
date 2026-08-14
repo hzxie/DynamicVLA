@@ -69,9 +69,9 @@ pip install -r requirements.txt
 
 ### Isaac Lab Environment
 
-- Install **Python 3.10** *(Other versions should work, but are not fully tested)*
-- Install **Isaac Sim 4.5.0** and **Isaac Lab 2.2.1**
-  Follow the official guide: https://isaac-sim.github.io/IsaacLab/v2.2.0/source/setup/installation/index.html
+- Install **Python 3.11** *(Other versions should work, but are not fully tested)*
+- Install **Isaac Sim 5.1.0** and **Isaac Lab 2.3.2**
+  Follow the official guide: https://isaac-sim.github.io/IsaacLab/v2.3.2/source/setup/installation/index.html
 - Install additional dependencies:
 
 ```bash
