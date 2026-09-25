@@ -22,17 +22,16 @@ S-Lab, Nanyang Technological University
 ## Cite this work📝
 
 ```
-@article{xie2026dynamicvla,
-  title     = {DynamicVLA: A Vision-Language-Action Model for 
-               Dynamic Object Manipulation},
-  author    = {Xie, Haozhe and 
-               Wen, Beichen and 
-               Zheng, Jiarui and 
-               Chen, Zhaoxi and 
-               Hong, Fangzhou and 
-               Diao, Haiwen and 
+@inproceedings{xie2026dynamicvla,
+  title     = {{DynamicVLA:} A Vision-Language-Action Model for Dynamic Object Manipulation},
+  author    = {Xie, Haozhe and
+               Wen, Beichen and
+               Zheng, Jiarui and
+               Chen, Zhaoxi and
+               Hong, Fangzhou and
+               Diao, Haiwen and
                Liu, Ziwei},
-  journal   = {arXiv preprint arXiv:2601.22153},
+  booktitle = {NeurIPS},
   year      = {2026}
 }
 ```
