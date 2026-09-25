@@ -80,20 +80,18 @@ def _get_object_sizes(object_dir, target_categories=None):
 
     return object_sizes
 
-
 def _get_object_size(usd_path):
-    import omni.usd
     import pxr
 
-    usd_context = omni.usd.get_context()
-    usd_context.open_stage(usd_path)
-    stage = usd_context.get_stage()
-    default_prim = stage.GetDefaultPrim()
+    from pxr import Usd
+
+    stage = Usd.Stage.Open(usd_path)
     bbox_cache = pxr.UsdGeom.BBoxCache(
-        pxr.Usd.TimeCode.Default(), [pxr.UsdGeom.Tokens.default_]
+        pxr.Usd.TimeCode.Default(),
+        [pxr.UsdGeom.Tokens.default_],
     )
-    bbox = bbox_cache.ComputeWorldBound(default_prim).ComputeAlignedBox()
-    usd_context.new_stage()
+    prim = stage.GetPrimAtPath("/Object/geometry/mesh")
+    bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
     return np.array(bbox.GetSize(), dtype=np.float32)
 
 
