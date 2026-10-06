@@ -13,6 +13,8 @@ The following configurations are available:
 Reference: https://github.com/frankaemika/franka_ros
 """
 
+from isaacsim.core.version import get_version
+
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets.articulation import ArticulationCfg
@@ -73,10 +75,15 @@ FRANKA_PANDA_CFG = ArticulationCfg(
         "panda_hand": ImplicitActuatorCfg(
             joint_names_expr=["panda_finger_joint.*"],
             effort_limit_sim=5.0,
-            velocity_limit_sim=0.05,
+            velocity_limit_sim=0.2,
             stiffness=2e3,
             damping=1e2,
-            friction=0.2,
+            # 4.5 uses a unitless joint-friction coefficient; 5.x uses effort (N).
+            # Zero effort on 5.1 matched the 4.5 reference in free/contact tests.
+            # This is an empirical fit, not a general conversion of coefficients.
+            friction=50.0 if int(get_version()[2]) < 5 else 0.0,
+            **({"dynamic_friction": 0.0, "viscous_friction": 0.0}
+               if int(get_version()[2]) >= 5 else {}),
         ),
     },
     soft_joint_pos_limit_factor=1.0,
