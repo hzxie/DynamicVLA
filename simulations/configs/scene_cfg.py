@@ -8,6 +8,7 @@
 # @Email:  root@haozhexie.com
 
 import logging
+import os
 from dataclasses import MISSING
 
 import isaaclab.sim as sim_utils
@@ -65,7 +66,42 @@ class SceneCfg(InteractiveSceneCfg):
     )
 
 
+def patch_camera_pose_view() -> None:
+    """Work around the wrong wrist-camera offset on Isaac Lab >= 2.3.2 (issue #34).
+
+    Isaac Lab 2.3.2 switched ``isaaclab.sensors.Camera`` from ``XFormPrim`` to
+    ``XformPrimView``. With Fabric enabled, that view seeds the camera's Fabric
+    world matrix from its (stale) USD pose on the first pose read, so a camera
+    parented to a physics-driven link (e.g. ``panda_hand``) is rendered at a wrong
+    offset for the whole episode. Reading and writing the camera pose through USD,
+    as before 2.3.2, restores the expected image. This is a no-op on older versions.
+    """
+    import importlib
+
+    if os.environ.get("DYNAMICVLA_DISABLE_CAMERA_PATCH"):
+        return  # escape hatch for A/B comparisons
+
+    # NOTE: `import isaaclab.sensors.camera.camera` fails because the star-imports in
+    #       isaaclab.sensors shadow the `camera` sub-package with the module of the same name.
+    camera_mod = importlib.import_module("isaaclab.sensors.camera.camera")
+
+    view_cls = getattr(camera_mod, "XformPrimView", None)
+    if view_cls is None or getattr(view_cls, "_USD_POSE_PATCHED", False):
+        return  # Isaac Lab < 2.3.2, or already patched
+
+    class _UsdPoseXformPrimView(view_cls):
+        _USD_POSE_PATCHED = True
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._use_fabric = False  # Camera poses through USD, as before 2.3.2
+
+    camera_mod.XformPrimView = _UsdPoseXformPrimView
+    logging.info("Patched isaaclab.sensors.Camera to use USD for camera poses.")
+
+
 def get_camera_cfg(cam_cfg: dict, cam_extra_cfg: dict = {}) -> SceneCfg:
+    patch_camera_pose_view()
     for k, v in cam_extra_cfg.items():
         cam_cfg[k] = v
 
