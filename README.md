@@ -77,6 +77,8 @@ pip install -r requirements.txt
 pip install shapely pyzmq h5py
 ```
 
+> ⚠️ **numpy compatibility:** Isaac Sim 5.1 pins `numpy==1.26`, and observations/actions are exchanged between the two environments as pickled numpy arrays over ZeroMQ. Keep `numpy==1.26.x` in the PyTorch environment as well (this is what `requirements.txt` pins). With numpy 2.x on the PyTorch side, the evaluation server crashes with `ModuleNotFoundError: No module named 'numpy._core'`.
+
 ## Benchmarking Your Policy 🏅
 
 ### Prepare scenes and objects
@@ -118,6 +120,15 @@ python3 simulations/evaluate.py \
 - `--save`: save evaluation videos to `output_dir`
 - `--headless`: run without GUI
 - `--enable_cameras`: enable visual observations
+
+> ⚠️ **Multi-GPU machines:** run the simulation and the policy on two different GPUs (inference latency affects the results). Isaac Lab 2.3.2 only supports `cuda:0` for its Fabric views, so do **not** pass `--device cuda:N` with `N > 0`; select the GPU with `CUDA_VISIBLE_DEVICES` instead and keep the default `--device cuda:0`, e.g.
+>
+> ```bash
+> CUDA_VISIBLE_DEVICES=1 python3 simulations/evaluate.py ... \
+>     --kit_args "--/renderer/multiGpu/enabled=false --/renderer/activeGpu=1"
+> ```
+>
+> The `--kit_args` part keeps the renderer on the same physical GPU as well. Then start the policy with `CUDA_VISIBLE_DEVICES=0` (or any other free GPU).
 
 ### Run Policy Inference
 
