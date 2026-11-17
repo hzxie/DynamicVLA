@@ -201,9 +201,87 @@ def set_house_asset(
         init_state=AssetBaseCfg.InitialStateCfg(
             pos=scene_offset, rot=[0.7071068, 0.7071068, 0, 0]
         ),
-        spawn=UsdFileCfg(usd_path=scene_asset_usd_file),
+        spawn=UsdFileCfg(
+            usd_path=scene_asset_usd_file, func=spawn_house_with_table_colliders
+        ),
     )
     return scene_cfg
+
+
+def spawn_house_with_table_colliders(
+    prim_path: str, cfg: UsdFileCfg, translation=None, orientation=None
+):
+    """Spawn the house USD and replace the ``TablePlane`` colliders.
+
+    The DOM scenes model each table top as a ``UsdGeom.Cube`` collider that is squashed
+    to 2 cm by a non-uniform xform scale. On Isaac Sim 5.x (PhysX 5.6) objects rolling on
+    such a box stop dead after a few centimetres (the custom-geometry cylinder vs. box
+    contact is broken), which breaks every "moving object" test. Replacing the collider by
+    an equivalent Isaac Lab cuboid (unit scale, same world AABB) restores the Isaac Sim
+    4.5 behaviour and is a no-op in terms of dynamics on 4.5.
+    """
+    prim = sim_utils.spawn_from_usd(prim_path, cfg, translation, orientation)
+    for house_prim in sim_utils.find_matching_prims(prim_path):
+        _replace_table_plane_colliders(house_prim)
+
+    return prim
+
+
+def _replace_table_plane_colliders(house_prim) -> None:
+    TABLE_PLANE_NAME = "TablePlane"
+    bbox_cache = pxr.UsdGeom.BBoxCache(
+        pxr.Usd.TimeCode.Default(),
+        [pxr.UsdGeom.Tokens.default_, pxr.UsdGeom.Tokens.render],
+        useExtentsHint=False,
+    )
+    holder_path = house_prim.GetParent().GetPath().AppendChild("TableColliders")
+    n_replaced = 0
+    for prim in list(pxr.Usd.PrimRange(house_prim)):
+        if (
+            prim.GetTypeName() != "Cube"
+            or prim.GetName() != TABLE_PLANE_NAME
+            or not prim.HasAPI(pxr.UsdPhysics.CollisionAPI)
+        ):
+            continue
+
+        collision_api = pxr.UsdPhysics.CollisionAPI(prim)
+        if not collision_api.GetCollisionEnabledAttr().Get():
+            continue
+
+        # Only axis-aligned tables can be represented by their world AABB
+        xform = pxr.UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(
+            pxr.Usd.TimeCode.Default()
+        )
+        rotation = pxr.Gf.Transform(xform).GetRotation()
+        if not all(
+            max(abs(c) for c in rotation.TransformDir(pxr.Gf.Vec3d(*axis))) > 0.999
+            for axis in [(1, 0, 0), (0, 1, 0), (0, 0, 1)]
+        ):
+            logging.warning("Skip rotated table collider: %s" % prim.GetPath())
+            continue
+
+        bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedRange()
+        if bbox.IsEmpty():
+            continue
+
+        bbox_min, bbox_max = bbox.GetMin(), bbox.GetMax()
+        cuboid_cfg = sim_utils.CuboidCfg(
+            size=tuple(float(bbox_max[i] - bbox_min[i]) for i in range(3)),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visible=False,
+        )
+        cuboid_cfg.func(
+            str(holder_path.AppendChild(prim.GetParent().GetName())),
+            cuboid_cfg,
+            translation=tuple(float((bbox_max[i] + bbox_min[i]) / 2) for i in range(3)),
+            orientation=(1.0, 0.0, 0.0, 0.0),
+        )
+        collision_api.GetCollisionEnabledAttr().Set(False)
+        n_replaced += 1
+
+    logging.info(
+        "Replaced %d table-plane colliders under %s" % (n_replaced, house_prim.GetPath())
+    )
 
 
 def get_table_assets(scene_asset_usd_file: str, cameras: list[dict]) -> list:
