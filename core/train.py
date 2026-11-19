@@ -9,6 +9,7 @@
 
 import json
 import logging
+import math
 import os
 import shutil
 import time
@@ -154,7 +155,8 @@ def train(cfg):
         name=cfg.TRAIN.LR_SCHEDULER.NAME,
         optimizer=optimizer,
         num_warmup_steps=cfg.TRAIN.LR_SCHEDULER.N_WARMUP_STEPS,
-        num_training_steps=cfg.TRAIN.N_EPOCHS * n_batches,
+        num_training_steps=cfg.TRAIN.N_EPOCHS
+        * math.ceil(n_batches / cfg.TRAIN.GRAD_ACCUM_STEPS),
     )
 
     # Set up folders for logs, snapshot and checkpoints
@@ -202,7 +204,10 @@ def train(cfg):
             loss, _ = policy.forward(batch)
             loss = loss / cfg.TRAIN.GRAD_ACCUM_STEPS
             loss.backward()
-            if batch_idx % cfg.TRAIN.GRAD_ACCUM_STEPS == 0:
+            # Step after every GRAD_ACCUM_STEPS micro-batches and at the end of the epoch
+            if (batch_idx + 1) % cfg.TRAIN.GRAD_ACCUM_STEPS == 0 or (
+                batch_idx + 1 == n_batches
+            ):
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
@@ -266,10 +271,14 @@ def train(cfg):
             utils.helpers.save_checkpoint(
                 cfg, policy, cfg.DIR.CHECKPOINTS, epoch_idx + 1
             )
-            if epoch_idx % cfg.TRAIN.CKPT_SAVE_FREQ.EPOCH == 0:
+            if (
+                cfg.TRAIN.CKPT_SAVE_FREQ.EPOCH != 0
+                and (epoch_idx + 1) % cfg.TRAIN.CKPT_SAVE_FREQ.EPOCH == 0
+            ):
                 shutil.copy(
                     os.path.join(cfg.DIR.CHECKPOINTS, "model.safetensors"),
                     os.path.join(
-                        cfg.DIR.CHECKPOINTS, "model.epoch%04d.safetensors" % epoch_idx
+                        cfg.DIR.CHECKPOINTS,
+                        "model.epoch%04d.safetensors" % (epoch_idx + 1),
                     ),
                 )

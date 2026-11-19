@@ -30,11 +30,11 @@ import simulations.simulate as sim
 def _get_action_tensor(action, num_envs, device):
     if isinstance(action, np.ndarray):
         action = torch.from_numpy(action).to(device)
-    elif isinstance(action, torch.tensor):
+    elif isinstance(action, torch.Tensor):
         action = action.to(device)
     else:
         logging.warning("Unsupported action type: %s" % type(action))
-        action = None
+        return None
 
     if action.size(0) != num_envs or action.size(1) != 8:
         logging.warning(

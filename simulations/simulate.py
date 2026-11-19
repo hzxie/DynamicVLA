@@ -38,7 +38,7 @@ from simulations import helpers
 def get_object_metadata(object_dir, target_categories=[]):
     object_metadata = {}
     # Get the sizes of all objects (for grasping)
-    object_sizes = _get_object_sizes(args.object_dir, target_categories)
+    object_sizes = _get_object_sizes(object_dir, target_categories)
     for k, v in object_sizes.items():
         object_name = os.path.basename(k)
         object_category = os.path.basename(os.path.dirname(k))
@@ -123,9 +123,7 @@ def get_env_cfg(sim_cfg, task, robot, object_metadata, scene_dir):
         scene = random.choice(scenes)
         usd_file = os.path.join(scene_dir, scene)
         logging.info("Loading scene from %s", usd_file)
-        env_cfg.scene = configs.scene_cfg.set_house_asset(
-            env_cfg.scene, os.path.join(scene_dir, usd_file)
-        )
+        env_cfg.scene = configs.scene_cfg.set_house_asset(env_cfg.scene, usd_file)
         tables = configs.scene_cfg.get_table_assets(
             usd_file, sim_cfg["scene"]["cameras"]
         )
@@ -338,6 +336,9 @@ def _get_object_states(
         _state = None
         while _state is None and container_candidates:
             _container = copy.deepcopy(random.choice(container_candidates))
+            random_orientation = random.random() < container_cfg.get(
+                "prob_rnd_quat", object_cfg.get("prob_rnd_quat", 0.5)
+            )
             _state = _get_container_state(
                 _container["size"],
                 cntr_range_bbox,
@@ -1252,11 +1253,11 @@ def main(args):
             continue
 
         # Save the simulation data
+        env_cfg = env_cfg.to_dict()
         for es in env_states:
             # Check whether the initial state is changed
             # 1) The object is stopped within a few steps due to collision
             # 2) The initial object velocity is changed due to collision
-            env_cfg = env_cfg.to_dict()
             if is_object_stopped(env_cfg["scene"], es["object_vel"]):
                 continue
             if is_object_direction_changed(env_cfg["scene"], es["object_vel"]):

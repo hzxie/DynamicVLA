@@ -764,7 +764,7 @@ def pad_tensor(tensor, max_len, pad_value=0):
     Returns:
         torch.Tensor: Shape (B, max_len, ...) or (B, max_len).
     """
-    b, d = torch.Tensor.shape[:2]
+    b, d = tensor.shape[:2]
 
     # Create a padded torch.Tensor of max_len and copy the existing values
     padded_tensor = torch.full(

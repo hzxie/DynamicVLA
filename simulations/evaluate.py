@@ -113,9 +113,7 @@ def _get_env_cfg(
         scene_dir, os.path.basename(cfg["scene"]["house"]["spawn"]["usd_path"])
     )
     logging.info("Loading scene from %s" % scene_usd_path)
-    env_cfg.scene = configs.scene_cfg.set_house_asset(
-        env_cfg.scene, os.path.join(scene_dir, scene_usd_path)
-    )
+    env_cfg.scene = configs.scene_cfg.set_house_asset(env_cfg.scene, scene_usd_path)
     usd_context = omni.usd.get_context()
     usd_context.new_stage()
 
@@ -300,11 +298,11 @@ def get_latest_action(act_socket):
 def _get_action_tensor(action, num_envs, device):
     if isinstance(action, np.ndarray):
         action = torch.from_numpy(action).to(device)
-    elif isinstance(action, torch.tensor):
+    elif isinstance(action, torch.Tensor):
         action = action.to(device)
     else:
         logging.warning("Unsupported action type: %s" % type(action))
-        action = None
+        return None
 
     if action.size(0) != num_envs or action.size(1) != 8:
         logging.warning(

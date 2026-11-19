@@ -41,7 +41,7 @@ def is_object_picked(
         robot.data.root_quat_w,
     )
     eef_goal_dist = torch.norm(goal_position_r - eef_position_r, dim=1)
-    return object_eef_dist < tolerance and eef_goal_dist < tolerance
+    return torch.logical_and(object_eef_dist < tolerance, eef_goal_dist < tolerance)
 
 
 def are_objects_placed(

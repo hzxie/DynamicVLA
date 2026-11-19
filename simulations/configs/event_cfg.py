@@ -31,6 +31,11 @@ def apply_external_force_torque_xy(
     if env_ids is None:
         env_ids = torch.arange(env.scene.num_envs, device=asset.device)
 
+    # Only perturb the objects that are not lifted (restricted to env_ids)
+    env_ids = env_ids[~is_lifted[env_ids]]
+    if len(env_ids) == 0:
+        return
+
     num_bodies = (
         len(asset_cfg.body_ids)
         if isinstance(asset_cfg.body_ids, list)
@@ -46,7 +51,7 @@ def apply_external_force_torque_xy(
 
     # set the forces and torques into the buffers
     asset.set_external_force_and_torque(
-        forces, torques, env_ids=env_ids[~is_lifted], body_ids=asset_cfg.body_ids
+        forces, torques, env_ids=env_ids, body_ids=asset_cfg.body_ids
     )
 
 
