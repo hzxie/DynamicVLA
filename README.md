@@ -14,10 +14,8 @@ S-Lab, Nanyang Technological University
 
 ![Teaser](https://github.com/user-attachments/assets/ffc2071a-c4b8-4ebf-9a41-870de65bb3da)
 
-## Changelog🔥
-
-- [2026/04/26] Released training and testing code.
-- [2026/01/26] Repository created.
+> ⚠️ **To reproduce the paper, use Isaac Sim 4.5.0 + Isaac Lab 2.2.1.**
+> The paper numbers (47.06%) were obtained on Isaac Sim 4.5.0 / Isaac Lab 2.2.1. On Isaac Sim 5.1.0 / Isaac Lab 2.3.2 the released checkpoint scores 40.67%, and the gap cannot be closed by configuration: PhysX 5.6 changed the contact behavior of cylinder colliders, so lying cans/cups/bottles roll and slip differently in 30 of the 90 test environments. Report 5.1 results as a separate setting; see [#22](https://github.com/hzxie/DynamicVLA/issues/22).
 
 ## Cite this work📝
 
@@ -69,8 +67,8 @@ pip install -r requirements.txt
 ### Isaac Lab Environment
 
 - Install **Python 3.11** *(Other versions should work, but are not fully tested)*
-- Install **Isaac Sim 5.1.0** and **Isaac Lab 2.3.2**
-  Follow the official guide: https://isaac-sim.github.io/IsaacLab/v2.3.2/source/setup/installation/index.html
+- Install **Isaac Sim 4.5.0** and **Isaac Lab 2.2.1** (recommended, matches the paper) or **Isaac Sim 5.1.0** and **Isaac Lab 2.3.2** (see the note above)
+  Follow the official guide: https://isaac-sim.github.io/IsaacLab/v2.2.1/source/setup/installation/index.html (or https://isaac-sim.github.io/IsaacLab/v2.3.2/source/setup/installation/index.html for 5.1.0)
 - Install additional dependencies:
 
 ```bash
