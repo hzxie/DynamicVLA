@@ -296,7 +296,7 @@ def _get_object_states(
     ]
     object_range_bbox = _get_object_range_bbox(table_bbox)
     for oi in range(object_cfg["n_objects"]):
-        _object = random.choice(object_candidates).copy()
+        _object = copy.deepcopy(random.choice(object_candidates))
         random_orientation = random.random() < object_cfg.get("prob_rnd_quat", 0.5)
         random_static = (
             random.random() < object_cfg.get("prob_static", 0.5) if oi != 0 else False
@@ -337,7 +337,7 @@ def _get_object_states(
     for _ in range(container_cfg["n_containers"]):
         _state = None
         while _state is None and container_candidates:
-            _container = random.choice(container_candidates).copy()
+            _container = copy.deepcopy(random.choice(container_candidates))
             _state = _get_container_state(
                 _container["size"],
                 cntr_range_bbox,
@@ -381,12 +381,12 @@ def _get_object_range_bbox(table_bbox, robot_position=None, robot_reach_dist=Non
         robot_reach_bbox = Gf.Range3d(
             Gf.Vec3d(
                 robot_position[0] - robot_reach_dist,
-                table_bbox.min[1] - robot_reach_dist,
+                robot_position[1] - robot_reach_dist,
                 table_z,
             ),
             Gf.Vec3d(
                 robot_position[0] + robot_reach_dist,
-                table_bbox.min[1] + robot_reach_dist,
+                robot_position[1] + robot_reach_dist,
                 table_z,
             ),
         )
