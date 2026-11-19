@@ -94,14 +94,14 @@ class MCClient:
         chunks = {}
         for mci, mck in enumerate(mc_chunk_keys):
             chunks[mck] = mc_value[mci * self.chunk_size : (mci + 1) * self.chunk_size]
-            # mc.set_multi(chunks, self.ttl)
-            self._mc_with_retry(lambda mc, items: mc.set_multi(items, self.ttl), chunks)
-            # mc.set(manifest_key, json.dumps(manifest_value).encode(), self.ttl)
-            self._mc_with_retry(
-                lambda mc, key, value: mc.set(key, value, self.ttl),
-                manifest_key,
-                json.dumps(manifest_value).encode(),
-            )
+
+        # Upload all chunks first; the manifest marks the entry as complete
+        self._mc_with_retry(lambda mc, items: mc.set_multi(items, self.ttl), chunks)
+        self._mc_with_retry(
+            lambda mc, key, value: mc.set(key, value, self.ttl),
+            manifest_key,
+            json.dumps(manifest_value).encode(),
+        )
 
         return mc_value
 
