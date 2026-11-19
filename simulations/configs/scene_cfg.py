@@ -8,7 +8,6 @@
 # @Email:  root@haozhexie.com
 
 import logging
-import os
 from dataclasses import MISSING
 
 import isaaclab.sim as sim_utils
@@ -77,9 +76,6 @@ def patch_camera_pose_view() -> None:
     as before 2.3.2, restores the expected image. This is a no-op on older versions.
     """
     import importlib
-
-    if os.environ.get("DYNAMICVLA_DISABLE_CAMERA_PATCH"):
-        return  # escape hatch for A/B comparisons
 
     # NOTE: `import isaaclab.sensors.camera.camera` fails because the star-imports in
     #       isaaclab.sensors shadow the `camera` sub-package with the module of the same name.
@@ -234,7 +230,14 @@ def _replace_table_plane_colliders(house_prim) -> None:
         [pxr.UsdGeom.Tokens.default_, pxr.UsdGeom.Tokens.render],
         useExtentsHint=False,
     )
-    holder_path = house_prim.GetParent().GetPath().AppendChild("TableColliders")
+    # The replacement colliders are parented to the env prim, which already carries
+    # the env origin when environments are cloned before spawning
+    # (replicate_physics=False), so express the world-space AABB in its frame.
+    env_prim = house_prim.GetParent()
+    holder_path = env_prim.GetPath().AppendChild("TableColliders")
+    world_to_env = pxr.UsdGeom.Xformable(env_prim).ComputeLocalToWorldTransform(
+        pxr.Usd.TimeCode.Default()
+    ).GetInverse()
     n_replaced = 0
     for prim in list(pxr.Usd.PrimRange(house_prim)):
         if (
@@ -265,6 +268,7 @@ def _replace_table_plane_colliders(house_prim) -> None:
             continue
 
         bbox_min, bbox_max = bbox.GetMin(), bbox.GetMax()
+        center = world_to_env.Transform((bbox_min + bbox_max) / 2)
         cuboid_cfg = sim_utils.CuboidCfg(
             size=tuple(float(bbox_max[i] - bbox_min[i]) for i in range(3)),
             collision_props=sim_utils.CollisionPropertiesCfg(),
@@ -273,7 +277,7 @@ def _replace_table_plane_colliders(house_prim) -> None:
         cuboid_cfg.func(
             str(holder_path.AppendChild(prim.GetParent().GetName())),
             cuboid_cfg,
-            translation=tuple(float((bbox_max[i] + bbox_min[i]) / 2) for i in range(3)),
+            translation=tuple(float(center[i]) for i in range(3)),
             orientation=(1.0, 0.0, 0.0, 0.0),
         )
         collision_api.GetCollisionEnabledAttr().Set(False)
