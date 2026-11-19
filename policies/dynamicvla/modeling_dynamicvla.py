@@ -536,7 +536,10 @@ class DynamicVLAPolicy(PreTrainedPolicy):
                 {"index": actions["index"] + i, "action": a}
                 for i, a in enumerate(actions["actions"])
             ]
-            if not prev_action_chunk:
+            if not curr_action_chunk:
+                # Inference took longer than the chunk horizon; nothing to merge
+                pass
+            elif not prev_action_chunk:
                 # The action queue is empty
                 self._queues[ACTION].extend(
                     [a for a in curr_action_chunk if a["index"] > self._action_index]
@@ -549,7 +552,8 @@ class DynamicVLAPolicy(PreTrainedPolicy):
                 if curr_index_start > prev_index_end:
                     self._queues[ACTION].extend(curr_action_chunk)
                 elif curr_index_start > prev_index_start:
-                    keeplen = curr_index_start - prev_index_end
+                    # Keep the pending actions that precede the new chunk
+                    keeplen = curr_index_start - prev_index_start
                     self._queues[ACTION].extend(
                         prev_action_chunk[:keeplen] + curr_action_chunk
                     )
@@ -606,7 +610,7 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         lang_tokens, lang_masks = self.prepare_language(batch)
 
         actions = self.prepare_action(batch)
-        actions_is_pad = batch.get("actions_id_pad")
+        actions_is_pad = batch.get("action_is_pad")
         loss_dict = {}
         losses = self.model.forward(
             images, img_masks, lang_tokens, lang_masks, state, actions, noise, time
