@@ -64,15 +64,21 @@ class ImageTransforms:
             saturation=self.saturation if self.saturation else None,
             hue=self.hue if self.hue else None,
         )
+        # ColorJitter does not cover sharpness; draw one factor shared by all cameras
+        sharpness_factor = (
+            torch.empty(1).uniform_(self.sharpness[0], self.sharpness[1]).item()
+            if self.sharpness
+            else None
+        )
         for k, v in item.items():
             if k not in camera_keys:
                 continue
 
-            item[k] = self._apply_transforms(v, transform_args)
+            item[k] = self._apply_transforms(v, transform_args, sharpness_factor)
 
         return item
 
-    def _apply_transforms(self, image, transform_args):
+    def _apply_transforms(self, image, transform_args, sharpness_factor=None):
         if self.img_size is not None:
             image = F.resize(image, self.img_size)
 
@@ -85,6 +91,9 @@ class ImageTransforms:
                 image = F.adjust_saturation(image, transform_args[3])
             elif tr_idx == 3 and transform_args[4] is not None:
                 image = F.adjust_hue(image, transform_args[4])
+
+        if sharpness_factor is not None:
+            image = F.adjust_sharpness(image, sharpness_factor)
 
         return image
 

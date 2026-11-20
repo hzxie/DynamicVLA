@@ -22,7 +22,9 @@ from PIL import Image
 from tqdm import tqdm
 
 
-def fix_lerobot_video(episode_index, video_path, video_length, h5_dir, lerobot_dir):
+def fix_lerobot_video(
+    episode_index, video_key, video_path, video_length, h5_dir, lerobot_dir
+):
     episode_info = lerobot.datasets.utils.load_json(
         pathlib.Path(os.path.join(lerobot_dir, "meta", "info.json"))
     )
@@ -35,7 +37,8 @@ def fix_lerobot_video(episode_index, video_path, video_length, h5_dir, lerobot_d
     with h5py.File(os.path.join(h5_dir, "%s.h5" % episode_meta["filename"]), "r") as f:
         env_states = {k: f[k][()] for k in f.keys()}
 
-    CAM_KEY = "side_cam_rgb"
+    # Video keys are "observation.images.<camera>"; the H5 files store "<camera>_rgb"
+    CAM_KEY = "%s_rgb" % video_key.rsplit(".", 1)[-1]
     assert env_states[CAM_KEY].shape[0] == video_length
     # Ref: lerobot.datasets.video_utils.encode_video_frames
     with av.open(str(video_path), "w") as output:
@@ -92,7 +95,12 @@ def main(repo_id, h5_dir):
                         str(e),
                     )
                     fix_lerobot_video(
-                        episode_index, video_path, video_length, h5_dir, output_dir
+                        episode_index,
+                        vf,
+                        video_path,
+                        video_length,
+                        h5_dir,
+                        output_dir,
                     )
 
 

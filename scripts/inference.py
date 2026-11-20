@@ -419,7 +419,7 @@ def main(
             obs_socket, act_socket = get_zmq_sockets(host, img_port, act_port)
             logging.info(
                 "Connected to %s:%d for images and %s:%d for actions"
-                % (args.host, args.img_port, args.host, args.act_port)
+                % (host, img_port, host, act_port)
             )
         except RuntimeError as e:
             logging.error("Failed to connect to sockets: %s" % e)

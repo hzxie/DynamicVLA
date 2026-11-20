@@ -24,6 +24,11 @@ sys.path.append(os.path.dirname(__file__))
 def update_texture_location(usd_file_path, old_texture_dir, new_texture_dir):
     from pxr import Usd, UsdShade
 
+    usd_name = os.path.splitext(os.path.basename(usd_file_path))[0]
+    usd_dir = os.path.dirname(usd_file_path)
+    # Textures are renamed after the USD file; distinct source textures of the same
+    # USD get a numeric suffix so that they do not overwrite each other.
+    new_texture_paths = {}
     stage = Usd.Stage.Open(usd_file_path)
     for prim in stage.Traverse():
         if not prim.IsA(UsdShade.Shader):
@@ -40,23 +45,20 @@ def update_texture_location(usd_file_path, old_texture_dir, new_texture_dir):
                 old_texture_path,
                 old_texture_dir,
             )
-            new_texture_path = old_texture_path.replace(
-                old_texture_dir, new_texture_dir
-            )
-            # For 3D-FUTURE
-            # new_texture_path = new_texture_path.replace("/texture.png", ".png")
-            # For Objaverse
-            new_texture_path = (
-                "./texture/%s.jpg" % os.path.basename(usd_file_path).split(".")[0]
-            )
+            if old_texture_path not in new_texture_paths:
+                suffix = "" if not new_texture_paths else "_%d" % len(new_texture_paths)
+                new_texture_paths[old_texture_path] = os.path.join(
+                    new_texture_dir,
+                    usd_name + suffix + os.path.splitext(old_texture_path)[1],
+                )
+            new_texture_path = new_texture_paths[old_texture_path]
             logging.debug(
                 "Updated texture path from %s to %s"
                 % (old_texture_path, new_texture_path)
             )
-            shutil.copyfile(
-                old_texture_path,
-                os.path.join(os.path.dirname(usd_file_path), new_texture_path),
-            )
+            dst_path = os.path.join(usd_dir, new_texture_path)
+            os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+            shutil.copyfile(old_texture_path, dst_path)
             file_input.Set(new_texture_path)
 
     stage.GetRootLayer().Save()

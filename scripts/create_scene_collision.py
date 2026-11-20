@@ -47,7 +47,6 @@ def apply_collision(stage, exclude_prim_keywords=[]):
 def regularize_tables(stage):
     from pxr import UsdGeom
 
-    ACCEPTED_ANGLES = [0, 90, 180]
     ANGLE_THRESHOLD = 20
     for prim in tqdm(stage.Traverse(), leave=False):
         if prim.GetName().find("Table") == -1 or prim.GetTypeName() != "Xform":
@@ -60,21 +59,21 @@ def regularize_tables(stage):
         ]
         rot_op = None if len(rot_op) == 0 else rot_op[0]
         if rot_op is not None:
-            y_rotation = abs(rot_op.Get()[1]) % 180
-            # Check whether the y-axis-rotation is near 0, 90, 180 degrees
-            for angle in ACCEPTED_ANGLES:
-                diff = abs(y_rotation - angle)
-                if diff > 1e-3 and diff < ANGLE_THRESHOLD:
-                    rotation = rot_op.Get()
-                    rotation[1] = angle
-                    logging.debug(
-                        "Regularizing table: %s; Old rotation: %s; New rotation: %s",
-                        prim.GetPath(),
-                        rot_op.Get(),
-                        rotation,
-                    )
-                    rot_op.Set(rotation)
-                    break
+            # Snap the y-axis rotation to the nearest multiple of 90 degrees. The signed
+            # angle is kept so that, e.g., -90 and 270 are not folded onto 90.
+            y_rotation = rot_op.Get()[1]
+            angle = round(y_rotation / 90.0) * 90.0
+            diff = abs(y_rotation - angle)
+            if diff > 1e-3 and diff < ANGLE_THRESHOLD:
+                rotation = rot_op.Get()
+                rotation[1] = angle
+                logging.debug(
+                    "Regularizing table: %s; Old rotation: %s; New rotation: %s",
+                    prim.GetPath(),
+                    rot_op.Get(),
+                    rotation,
+                )
+                rot_op.Set(rotation)
 
 
 def remove_table_objects(stage):

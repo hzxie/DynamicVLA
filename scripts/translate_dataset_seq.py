@@ -248,7 +248,6 @@ def main(args):
             args.scene_dir,
             args.object_dir,
             args.physics_time_step,
-            args.timeout,
             args.tolerance,
             args.device,
             args.disable_fabric,
@@ -302,7 +301,7 @@ if __name__ == "__main__":
         format="[%(levelname)s] %(asctime)s %(message)s",
         level=logging.INFO,
     )
-    SHARED_PARAMETERS = ["num_envs", "save"]
+    SHARED_PARAMETERS = ["num_envs", "save", "device", "disable_fabric"]
 
     parser = argparse.ArgumentParser(description="Dataset Sequence Replay Script")
     # Arguments for the IsaacLab
@@ -325,7 +324,6 @@ if __name__ == "__main__":
     # Arguments for the script
     parser.add_argument("--path_tracing", action="store_true")
     parser.add_argument("--physics_time_step", type=float, default=0.04)
-    parser.add_argument("--timeout", type=float, default=10)
     parser.add_argument("--tolerance", type=float, default=0.03)
     parser.add_argument(
         "--sim_cfg_file",

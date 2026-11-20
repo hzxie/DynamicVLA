@@ -601,7 +601,7 @@ if __name__ == "__main__":
         format="[%(levelname)s] %(asctime)s %(message)s",
         level=logging.INFO,
     )
-    SHARED_PARAMETERS = ["num_envs", "save"]
+    SHARED_PARAMETERS = ["num_envs", "save", "device", "disable_fabric"]
 
     parser = argparse.ArgumentParser(description="Evaluation Server Runner")
     # Arguments for the IsaacLab

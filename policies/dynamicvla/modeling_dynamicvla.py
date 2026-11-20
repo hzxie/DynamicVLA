@@ -431,6 +431,8 @@ class DynamicVLAPolicy(PreTrainedPolicy):
         map_location: str,
         strict: bool,
     ):
+        # NOTE: load_dynamicvla() skips the normalization buffers on purpose, so this
+        #       pass is what loads them when the policy is used for inference.
         safetensors.torch.load_model(
             model, model_file, strict=strict, device=map_location
         )
@@ -469,7 +471,7 @@ class DynamicVLAPolicy(PreTrainedPolicy):
             actions = self._pi_aloha_encode_actions(actions)
 
         inference_time = time.perf_counter() - tick
-        if "dt_scale" in batch and batch["dt_scale"] > 1.0:
+        if batch.get("dt_scale") is not None and batch["dt_scale"] > 1.0:
             # IMPORTANT: To align the inference time with the simulation time
             sleep_time = inference_time * (batch["dt_scale"] - 1)
             logging.info(

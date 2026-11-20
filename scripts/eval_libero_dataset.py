@@ -18,7 +18,6 @@ import os
 import pickle
 import sys
 
-import cv2
 import imageio.v3
 import numpy as np
 from libero.libero import benchmark as libero_benchmark
@@ -57,26 +56,18 @@ def get_libero_env(env_name, task_id, seed):
     return env, task.language
 
 
-def get_observation(cfg, obs, instruction):
+def get_observation(obs, instruction, step_idx):
     IMAGE_MAPPER = {
-        "agentview_image": {
-            "name": "observation.images.base",
-            "size": cfg["observation.images.base"].shape[-2:],
-        },
-        "robot0_eye_in_hand_image": {
-            "name": "observation.images.wrist",
-            "size": cfg["observation.images.wrist"].shape[-2:],
-        },
+        "agentview_image": "observation.images.base",
+        "robot0_eye_in_hand_image": "observation.images.wrist",
     }
-
+    # Images are resized to the model's input size by inference._get_transformed_observation
     images = {
-        v["name"]: np.ascontiguousarray(
-            cv2.resize(obs[k][::-1, ::-1], v["size"])[None, ...]
-        )
+        v: np.ascontiguousarray(obs[k][::-1, ::-1])[None, ...]
         for k, v in IMAGE_MAPPER.items()
     }
     # NOTE: Convert xyzw -> wxyz for quat
-    # Because it will be feed to inference..get_transformed_observation,
+    # Because it will be feed to inference._get_transformed_observation,
     # which expects the quaternion in wxyz format.
     ee_pose = {
         "end_effector": {
@@ -89,31 +80,43 @@ def get_observation(cfg, obs, instruction):
         **images,
         "observation.state": ee_pose,
         "task": instruction,
+        "index": step_idx,
+        "dt_scale": 1.0,
     }
 
 
-def get_action(vla_model, observation, use_delta_action):
+def get_action(vla_model, vla_cfg, observations, use_delta_action):
+    # Select the observation history required by the model (delta_timestamps)
+    observations = inference._get_observations(
+        observations, vla_cfg["delta_timestamps"]
+    )
+    for ifk in vla_model.config.input_features.keys():
+        for observation in observations:
+            if ifk not in observation:
+                logging.warning("Ignoring observation without key: %s" % ifk)
+                return None
+
     _count = getattr(get_action, "count", 0)
     _state = getattr(get_action, "state", None)
-    for ifk in vla_model.config.input_features.keys():
-        if ifk not in observation:
-            logging.warning("Ignoring observation without key: %s" % ifk)
-            return None
-
-    observation = inference.get_transformed_observation(
-        observation, "rotvec", vla_model.config.input_features
+    observations = inference._get_transformed_observations(
+        observations, "rotvec", vla_model.config.input_features
     )
-    # Update the state every chunk_size steps
-    if _count % vla_model.config.chunk_size == 0:
-        _state = observation["observation.state"].cpu().numpy()
+    # Update the state every n_action_steps steps
+    if _count % vla_model.config.n_action_steps == 0:
+        _state = observations["observation.state"][:, -1, :].cpu().numpy()
         setattr(get_action, "state", _state)
 
-    action = vla_model.select_action(observation).cpu().numpy()
-    if use_delta_action:
+    setattr(get_action, "count", _count + 1)
+    action = vla_model.select_action(observations)
+    if action is None:
+        return None
+
+    action = action.cpu().numpy()
+    # If the model does not support delta action, we manually convert it here
+    if not hasattr(vla_model.config, "use_delta_action") and use_delta_action:
         action_dim = action.shape[-1] - 1
         action[:, :action_dim] += _state[:, :action_dim]
 
-    setattr(get_action, "count", _count + 1)
     return action
 
 
@@ -126,11 +129,11 @@ def get_episode_name(env_name, task_id, done):
     )
 
 
-def main(vla_model, vla_weights, env_name, task_id, output_dir, seed, debug):
+def main(vla_weights, env_name, task_id, output_dir, seed, debug):
     # Initialize the VLA model
-    logging.info("Loading VLA model: %s with weights: %s" % (vla_model, vla_weights))
-    vla_model = inference.get_vla_model(
-        model_name=vla_model, pretrained_model=vla_weights
+    logging.info("Loading VLA model with weights: %s" % vla_weights)
+    vla_model, vla_cfg = inference.get_vla_model(
+        vla_weights, use_delta_action=True, streaming=False
     )
     vla_model.reset()
     logging.info(
@@ -139,7 +142,9 @@ def main(vla_model, vla_weights, env_name, task_id, output_dir, seed, debug):
     )
 
     # Initialize the LIBERO environment
-    logging.info("Initializing LIBERO environment [Name=%s, Task ID=%d] ...")
+    logging.info(
+        "Initializing LIBERO environment [Name=%s, Task ID=%d] ..." % (env_name, task_id)
+    )
     env, task_instruction = get_libero_env(env_name, task_id, seed)
 
     # Run the evaluation loop
@@ -151,16 +156,19 @@ def main(vla_model, vla_weights, env_name, task_id, output_dir, seed, debug):
     done = False
     frames = []
     actions = []
+    observations = []
     for step_idx in range(N_MAX_STEPS):
         if step_idx < N_WAIT_STEPS:
             obs, _, done, _ = env.step(DUMMY_ACTION)
             continue
 
-        action = get_action(
-            vla_model,
-            get_observation(vla_model.config.input_features, obs, task_instruction),
-            use_delta_action=True,
-        )
+        observations.append(get_observation(obs, task_instruction, step_idx))
+        action = get_action(vla_model, vla_cfg, observations, use_delta_action=True)
+        if action is None:
+            # The model is warming up or has no action for this step yet
+            obs, _, done, _ = env.step(DUMMY_ACTION)
+            continue
+
         actions.append(action)
         obs, _, done, _ = env.step(action.squeeze(0))
         frames.append(obs["agentview_image"][::-1, ::-1])
@@ -203,9 +211,6 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="LIBERO Evaluation Runner")
     parser.add_argument(
-        "--model", type=str, required=True, help="The name of VLA model to use"
-    )
-    parser.add_argument(
         "--weights",
         type=str,
         required=True,
@@ -237,7 +242,6 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     main(
-        args.model,
         args.weights,
         args.env,
         args.task,
